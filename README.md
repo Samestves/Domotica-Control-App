@@ -1,17 +1,40 @@
-# control_domotica
+# Control Domótica · MVP
 
-A new Flutter project.
+App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por Bluetooth LE o Wi‑Fi. Cada placa abre su propio panel: **Casa Domótica** o **Auto Robot**.
 
-## Getting Started
+## Qué hay en esta carpeta
 
-This project is a starting point for a Flutter application.
+| Carpeta | Qué es |
+|---|---|
+| `lib/` | La app |
+| `firmware/casa_esp32/` | El programa para el ESP32 de la maqueta |
+| `tool/placa_falsa.dart` | Una placa simulada en la PC para probar el Wi‑Fi sin hardware |
+| `test/` | Pruebas automáticas |
 
-A few resources to get you started if this is your first Flutter project:
+## Probar sin hardware
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+1. **Modo demo:** la app trae dos placas demo (Casa y Auto Robot). Abre cualquiera y prueba los controles.
+2. **Placa falsa por Wi‑Fi:** en la PC ejecuta `dart run tool/placa_falsa.dart`. En la app ve a *Agregar dispositivo → Wi‑Fi*, escribe la IP que muestra la PC y el puerto 3333. El teléfono y la PC deben estar en la misma red.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Instalar en el teléfono
+
+- Conecta el teléfono con depuración USB y ejecuta `flutter run`.
+- También puedes copiar `build/app/outputs/flutter-apk/app-release.apk` al teléfono e instalarlo.
+
+## Cargar el programa en el ESP32
+
+1. Instala el Arduino IDE, el soporte para placas ESP32 y la librería **ESP32Servo**.
+2. Abre `firmware/casa_esp32/casa_esp32.ino` y revisa la sección **CONFIGURACIÓN**: Bluetooth o Wi‑Fi, nombre de la red, LCD y sensor DHT.
+3. Revisa la tabla `ch[]`: cada fila es una salida de la maqueta con su GPIO. **Tiene que coincidir con los cables reales.**
+4. Placa: *ESP32 Dev Module*. Si activas Bluetooth y Wi‑Fi a la vez, usa *Partition Scheme → Huge APP*.
+5. Abre el Monitor Serie a 115200. Puedes escribir `V1:1` ahí mismo para probar sin teléfono.
+
+## Si algo no responde bien
+
+- **Se activa otra cosa:** el GPIO no coincide con el cable. Mantén presionado el control en la app y cambia el GPIO.
+- **Funciona al revés:** activa **Invertir** en ese mismo ajuste. Pasa con la mayoría de los módulos de relé.
+- **No sé qué hay en cada pin:** menú ⋮ → *Probar salidas una por una*. El Monitor Serie dice qué pin se está probando.
+
+## Protocolo
+
+Una línea por mensaje. Por ejemplo, `V1:1` enciende la luz de la sala, `V3:90` mueve la puerta a 90°, `V10:24.1` es la temperatura que envía la placa, y `CFG:V1:23:1` cambia el pin de un control. Los detalles están en `lib/core/protocol.dart`.
