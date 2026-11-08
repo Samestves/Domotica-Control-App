@@ -2,6 +2,7 @@ import 'package:control_domotica/core/demo_link.dart';
 import 'package:control_domotica/core/link.dart';
 import 'package:control_domotica/core/protocol.dart';
 import 'package:control_domotica/main.dart';
+import 'package:control_domotica/models/controls.dart';
 import 'package:control_domotica/models/device.dart';
 import 'package:control_domotica/state/app_state.dart';
 import 'package:flutter/material.dart';
@@ -45,6 +46,25 @@ void main() {
     expect(back.transport, Transport.wifi);
     expect(back.pins[1]!.gpio, 22);
     expect(back.pins[1]!.inverted, isTrue);
+  });
+
+  test('valida los GPIO igual que la placa', () {
+    expect(gpioProblem(23, output: true), isNull);
+    expect(gpioProblem(34, output: false), isNull);
+    expect(gpioProblem(34, output: true), isNotNull); // solo entrada
+    expect(gpioProblem(7, output: true), isNotNull); // memoria interna
+    expect(gpioProblem(24, output: true), isNotNull); // no existe
+    expect(gpioProblem(40, output: true), isNotNull);
+  });
+
+  test('al conectar envía los pines guardados a la placa', () async {
+    final d = SavedDevice(id: 'd', name: 'Casa', profile: Profile.casa, transport: Transport.demo);
+    d.pins[1] = const PinConfig(22, false);
+    final s = Session(d);
+    await s.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(s.log.map((l) => l.text), containsAll(['CFG:V1:22:0', 'OK:V1:22:0']));
+    await s.disconnect();
   });
 
   test('la placa demo responde y dispara la alarma', () async {

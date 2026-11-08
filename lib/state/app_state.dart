@@ -46,7 +46,14 @@ class Session extends ChangeNotifier {
     _subs.add(link.lines.listen(_onLine));
     notifyListeners();
     await link.connect();
+    if (connected) _pushPinConfig();
     notifyListeners();
+  }
+
+  /// La app es la fuente de verdad de los pines: al conectar, envía a la placa
+  /// todos los ajustes guardados, aunque se hayan hecho sin conexión.
+  void _pushPinConfig() {
+    device.pins.forEach((vpin, p) => sendRaw(cfgMsg(vpin, p.gpio, p.inverted)));
   }
 
   Future<void> disconnect() async {
@@ -154,7 +161,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> update(SavedDevice d) async {
+  /// Guarda los cambios hechos a un dispositivo ya registrado.
+  Future<void> saveChanges() async {
     await save();
     notifyListeners();
   }

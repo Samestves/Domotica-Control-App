@@ -65,71 +65,121 @@ class MessageConsole extends StatelessWidget {
   }
 }
 
-/// Hoja para cambiar a qué GPIO va un control y si está invertido.
-Future<void> showPinSheet(BuildContext context, Session session, ControlSpec spec) async {
-  final d = session.device;
-  final current = d.pins[spec.vpin] ?? PinConfig(spec.gpio ?? 0, false);
-  final gpio = TextEditingController(text: '${current.gpio}');
-  var inverted = current.inverted;
-
-  await showModalBottomSheet(
+/// Abre la hoja para cambiar a qué GPIO va un control y si está invertido.
+Future<void> showPinSheet(BuildContext context, Session session, ControlSpec spec) {
+  final app = AppScope.read(context);
+  return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     backgroundColor: C.bg,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setS) => Padding(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(ctx).viewInsets.bottom + 24),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(spec.label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-          Text('Pin virtual V${spec.vpin}', style: const TextStyle(color: C.ink2)),
-          const SizedBox(height: 16),
-          TextField(
-            controller: gpio,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'GPIO del ESP32', helperText: 'El número del pin donde está conectado el cable'),
-          ),
-          const SizedBox(height: 12),
-          Panel(
-            padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Invertir'),
-              subtitle: const Text('Actívalo si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'),
-              value: inverted,
-              onChanged: (v) => setS(() => inverted = v),
-            ),
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: () async {
-              final g = int.tryParse(gpio.text.trim());
-              if (g == null || g < 0 || g > 39) {
-                ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Escribe un GPIO entre 0 y 39.')));
-                return;
-              }
-              d.pins[spec.vpin] = PinConfig(g, inverted);
-              await AppScope.read(context).update(d);
-              session.sendRaw(cfgMsg(spec.vpin, g, inverted));
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: Text(session.connected ? 'Guardar y enviar a la placa' : 'Guardar'),
-          ),
-          if (!session.connected)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('La placa no está conectada: el ajuste se guarda en la app. Vuelve a guardarlo cuando esté conectada.', style: TextStyle(color: C.ink2, fontSize: 12.5)),
-            ),
-        ]),
-      ),
-    ),
+    builder: (_) => _PinSheet(session: session, spec: spec, onSaved: app.saveChanges),
   );
-  gpio.dispose();
+}
+
+class _PinSheet extends StatefulWidget {
+  final Session session;
+  final ControlSpec spec;
+  final Future<void> Function() onSaved;
+  const _PinSheet({required this.session, required this.spec, required this.onSaved});
+
+  @override
+  State<_PinSheet> createState() => _PinSheetState();
+}
+
+class _PinSheetState extends State<_PinSheet> {
+  late final TextEditingController _gpio;
+  late bool _inverted;
+  String? _error;
+
+  ControlSpec get _spec => widget.spec;
+  Session get _session => widget.session;
+
+  @override
+  void initState() {
+    super.initState();
+    final current = _session.device.pins[_spec.vpin] ?? PinConfig(_spec.gpio ?? 0, _spec.inverted);
+    _gpio = TextEditingController(text: '${current.gpio}');
+    _inverted = current.inverted;
+  }
+
+  @override
+  void dispose() {
+    _gpio.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final g = int.tryParse(_gpio.text.trim());
+    final problem = g == null ? 'Escribe un número.' : gpioProblem(g, output: _spec.output);
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    _session.device.pins[_spec.vpin] = PinConfig(g!, _inverted);
+    await widget.onSaved();
+    _session.sendRaw(cfgMsg(_spec.vpin, g, _inverted));
+    if (mounted) Navigator.pop(context);
+  }
+
+  Future<void> _reset() async {
+    final g = _spec.gpio!;
+    _session.device.pins.remove(_spec.vpin);
+    await widget.onSaved();
+    _session.sendRaw(cfgMsg(_spec.vpin, g, _spec.inverted));
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = _session.connected;
+    final custom = _session.device.pins.containsKey(_spec.vpin);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(_spec.label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+        Text('Pin virtual V${_spec.vpin} · por defecto GPIO ${_spec.gpio}', style: const TextStyle(color: C.ink2)),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _gpio,
+          keyboardType: TextInputType.number,
+          onChanged: (_) => setState(() => _error = null),
+          decoration: InputDecoration(
+            labelText: 'GPIO del ESP32',
+            helperText: 'El número del pin donde está conectado el cable',
+            errorText: _error,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Panel(
+          padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Invertir'),
+            subtitle: Text(_spec.output
+                ? 'Actívalo si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'
+                : 'Actívalo si el sensor marca movimiento cuando no lo hay.'),
+            value: _inverted,
+            onChanged: (v) => setState(() => _inverted = v),
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton(onPressed: _save, child: Text(connected ? 'Guardar y enviar a la placa' : 'Guardar')),
+        if (custom) TextButton(onPressed: _reset, child: Text('Volver al GPIO ${_spec.gpio}')),
+        if (!connected)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('La placa no está conectada. El ajuste se guarda y se envía solo al conectar.',
+                style: TextStyle(color: C.ink2, fontSize: 12.5)),
+          ),
+      ]),
+    );
+  }
 }
 
 String pinLabel(SavedDevice d, ControlSpec s) {
   final p = d.pins[s.vpin];
   final g = p?.gpio ?? s.gpio;
   if (g == null) return 'V${s.vpin}';
-  return 'V${s.vpin} · GPIO $g${(p?.inverted ?? false) ? ' · inv' : ''}';
+  return 'V${s.vpin} · GPIO $g${(p?.inverted ?? s.inverted) ? ' · inv' : ''}';
 }

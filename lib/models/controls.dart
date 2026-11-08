@@ -10,6 +10,7 @@ class ControlSpec {
   final ControlKind kind;
   final IconData icon;
   final int? gpio;
+  final bool inverted; // por defecto; los módulos de relé se activan con señal baja
   final bool output; // false: no se controla, solo se muestra o se lee
   final String unit;
   final int min, max;
@@ -21,6 +22,7 @@ class ControlSpec {
     required this.kind,
     required this.icon,
     this.gpio,
+    this.inverted = false,
     this.output = true,
     this.unit = '',
     this.min = 0,
@@ -33,10 +35,10 @@ class ControlSpec {
 /// 21 y 22 quedan libres para una pantalla LCD por I2C.
 const casaControls = <ControlSpec>[
   ControlSpec(vpin: 7, label: 'Alarma', kind: ControlKind.alarm, icon: Icons.shield_outlined, output: false),
-  ControlSpec(vpin: 1, label: 'Luz sala', kind: ControlKind.toggle, icon: Icons.lightbulb_outline, gpio: 23),
-  ControlSpec(vpin: 2, label: 'Luz cocina', kind: ControlKind.toggle, icon: Icons.lightbulb_outline, gpio: 19),
-  ControlSpec(vpin: 8, label: 'Luz cuarto', kind: ControlKind.toggle, icon: Icons.lightbulb_outline, gpio: 18),
-  ControlSpec(vpin: 9, label: 'Ventilador', kind: ControlKind.toggle, icon: Icons.mode_fan_off_outlined, gpio: 5),
+  ControlSpec(vpin: 1, label: 'Luz sala', kind: ControlKind.toggle, icon: Icons.lightbulb_outline, gpio: 23, inverted: true),
+  ControlSpec(vpin: 2, label: 'Luz cocina', kind: ControlKind.toggle, icon: Icons.lightbulb_outline, gpio: 19, inverted: true),
+  ControlSpec(vpin: 8, label: 'Luz cuarto', kind: ControlKind.toggle, icon: Icons.lightbulb_outline, gpio: 18, inverted: true),
+  ControlSpec(vpin: 9, label: 'Ventilador', kind: ControlKind.toggle, icon: Icons.mode_fan_off_outlined, gpio: 5, inverted: true),
   ControlSpec(vpin: 3, label: 'Puerta principal', kind: ControlKind.servoToggle, icon: Icons.door_front_door_outlined, gpio: 13),
   ControlSpec(vpin: 4, label: 'Ventana', kind: ControlKind.slider, icon: Icons.window_outlined, gpio: 14, unit: '°'),
   ControlSpec(vpin: 5, label: 'Timbre', kind: ControlKind.button, icon: Icons.notifications_none, gpio: 27),
@@ -44,6 +46,16 @@ const casaControls = <ControlSpec>[
   ControlSpec(vpin: 10, label: 'Temperatura', kind: ControlKind.reading, icon: Icons.thermostat_outlined, output: false, unit: ' °C'),
   ControlSpec(vpin: 11, label: 'Movimiento', kind: ControlKind.reading, icon: Icons.sensors, gpio: 34, output: false),
 ];
+
+/// Revisa si un GPIO del ESP32 sirve para un control. Devuelve el problema, o null si está bien.
+/// El programa de la placa aplica las mismas reglas.
+String? gpioProblem(int gpio, {required bool output}) {
+  if (gpio < 0 || gpio > 39) return 'El ESP32 tiene GPIO del 0 al 39.';
+  if (gpio >= 6 && gpio <= 11) return 'Los GPIO 6 a 11 los usa la memoria de la placa.';
+  if (const {20, 24, 28, 29, 30, 31}.contains(gpio)) return 'El GPIO $gpio no existe en el ESP32.';
+  if (output && gpio >= 34) return 'Los GPIO 34 a 39 solo sirven como entrada.';
+  return null;
+}
 
 /// Pines virtuales del carro.
 class CarPins {

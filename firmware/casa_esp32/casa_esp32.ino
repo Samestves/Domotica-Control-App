@@ -89,6 +89,15 @@ Channel* findCh(int vpin) {
 }
 int indexOf(Channel* c) { return c - ch; }
 
+// Mismas reglas que gpioProblem() en la app. Devuelve el problema, o nullptr si el GPIO sirve.
+const char* gpioProblem(int gpio, bool output) {
+  if (gpio < 0 || gpio > 39) return "no existe (0 a 39)";
+  if (gpio >= 6 && gpio <= 11) return "lo usa la memoria de la placa";
+  if (gpio == 20 || gpio == 24 || (gpio >= 28 && gpio <= 31)) return "no existe en el ESP32";
+  if (output && gpio >= 34) return "solo sirve como entrada";
+  return nullptr;
+}
+
 void writeDigital(Channel& c, bool on) {
   digitalWrite(c.gpio, (on != c.inverted) ? HIGH : LOW);
 }
@@ -173,8 +182,9 @@ void handleLine(String line) {
     int gpio = line.substring(a + 1, b).toInt();
     bool inv = line.substring(b + 1).toInt() == 1;
     Channel* c = findCh(vpin);
-    if (!c || a < 0 || b < 0 || gpio < 0 || gpio > 39) { sendLine("ERR:CFG " + line); return; }
-    if (c->kind != INPUT_PIN && gpio >= 34) { sendLine("ERR:GPIO " + String(gpio) + " solo sirve como entrada"); return; }
+    if (!c || a < 0 || b < 0) { sendLine("ERR:CFG " + line); return; }
+    const char* problem = gpioProblem(gpio, c->kind != INPUT_PIN);
+    if (problem) { sendLine("ERR:GPIO " + String(gpio) + " " + problem); return; }
     if (c->kind == DIGITAL || c->kind == BUZZER) writeDigital(*c, false);
     c->gpio = gpio; c->inverted = inv;
     setupChannel(*c);

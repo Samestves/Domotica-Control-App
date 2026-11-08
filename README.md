@@ -2,6 +2,8 @@
 
 App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por Bluetooth LE o Wi‑Fi. Cada placa abre su propio panel: **Casa Domótica** o **Auto Robot**.
 
+**¿Vas a la reunión con el equipo?** Lee [docs/GUIA-REUNION.md](docs/GUIA-REUNION.md).
+
 ## Qué hay en esta carpeta
 
 | Carpeta | Qué es |

@@ -4,6 +4,7 @@ import '../core/link.dart';
 import '../main.dart';
 import '../models/device.dart';
 import '../state/app_state.dart';
+import '../version.dart';
 import 'add_device_screen.dart';
 import 'carro_panel.dart';
 import 'casa_panel.dart';
@@ -75,6 +76,13 @@ class HomeScreen extends StatelessWidget {
                     textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                   ),
                 ),
+              ),
+            ),
+            const SliverPadding(
+              padding: EdgeInsets.only(bottom: 24),
+              sliver: SliverToBoxAdapter(
+                child: Text('$appVersion · Mantén presionado un dispositivo para eliminarlo',
+                    textAlign: TextAlign.center, style: TextStyle(color: C.ink2, fontSize: 12)),
               ),
             ),
           ],
