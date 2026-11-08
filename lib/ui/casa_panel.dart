@@ -216,7 +216,7 @@ class _CasaPanelState extends State<CasaPanel> {
           ]),
         ),
         FilledButton.tonal(
-          style: FilledButton.styleFrom(minimumSize: const Size(84, 40)),
+          style: FilledButton.styleFrom(minimumSize: const Size(84, 40), backgroundColor: const Color(0xFFE7F0FF), foregroundColor: C.accent),
           onPressed: s.connected
               ? () {
                   HapticFeedback.mediumImpact();
@@ -349,7 +349,7 @@ class _CasaPanelState extends State<CasaPanel> {
           ]),
         ),
         FilledButton.tonal(
-          style: FilledButton.styleFrom(minimumSize: const Size(84, 40)),
+          style: FilledButton.styleFrom(minimumSize: const Size(84, 40), backgroundColor: const Color(0xFFE7F0FF), foregroundColor: C.accent),
           onPressed: s.connected
               ? () {
                   HapticFeedback.mediumImpact();

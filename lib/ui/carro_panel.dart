@@ -145,7 +145,7 @@ class _CarroPanelState extends State<CarroPanel> {
             const SizedBox(width: 12),
             // Derecha: acelerador y botones
             SizedBox(
-              width: 170,
+              width: 196,
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Throttle(
                   value: _throttle,
@@ -213,11 +213,13 @@ class _CarroPanelState extends State<CarroPanel> {
   Widget _btn(String label, bool active, Color color, VoidCallback? onTap) => FilledButton(
         style: FilledButton.styleFrom(
           minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           backgroundColor: active ? color : Colors.white,
           foregroundColor: active ? Colors.white : C.ink,
         ),
         onPressed: onTap,
-        child: Text(label),
+        child: FittedBox(child: Text(label, maxLines: 1)),
       );
 
   Widget _miniLog(Session s) {

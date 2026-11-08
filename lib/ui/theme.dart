@@ -47,6 +47,13 @@ ThemeData buildTheme() {
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
     ),
+    sliderTheme: const SliderThemeData(
+      activeTrackColor: C.accent,
+      inactiveTrackColor: Color(0xFFDDE3EA),
+      thumbColor: Colors.white,
+      overlayColor: Color(0x220A7CFF),
+      trackHeight: 5,
+    ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: C.night,
