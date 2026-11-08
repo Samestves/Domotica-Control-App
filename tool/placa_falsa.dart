@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 // Placa falsa para probar la conexión Wi‑Fi sin ESP32.
 //
 // Se hace pasar por la maqueta: escucha en el puerto 3333 de tu PC, responde como
