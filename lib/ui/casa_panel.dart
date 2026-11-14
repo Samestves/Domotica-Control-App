@@ -82,7 +82,7 @@ class _CasaPanelState extends State<CasaPanel> {
           Row(children: [
             Expanded(child: _reading(s, _spec(10), v[10] == null ? '—' : '${v[10]!.replaceAll('.', ',')} °C')),
             const SizedBox(width: 10),
-            Expanded(child: _reading(s, _spec(11), v[11] == '1' ? 'Detectado' : 'Sin movimiento', alert: v[11] == '1')),
+            Expanded(child: _motion(s)),
           ]),
           const SizedBox(height: 10),
           _lcdCard(s),
@@ -153,8 +153,9 @@ class _CasaPanelState extends State<CasaPanel> {
   // ---------- Luces y switches ----------
   Widget _toggleTile(Session s, ControlSpec c) {
     final on = s.values[c.vpin] == '1';
+    final usable = s.connected && c.isEnabledOn(s.device);
     return Panel(
-      onTap: s.connected ? () => _toggle(s, c, !on) : null,
+      onTap: usable ? () => _toggle(s, c, !on) : null,
       onLongPress: () => showPinSheet(context, s, c),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -169,7 +170,7 @@ class _CasaPanelState extends State<CasaPanel> {
             ),
             child: Icon(c.icon, size: 19, color: on ? const Color(0xFF7A6100) : C.ink2),
           ),
-          CupertinoSwitch(value: on, activeTrackColor: C.ok, onChanged: s.connected ? (x) => _toggle(s, c, x) : null),
+          CupertinoSwitch(value: on, activeTrackColor: C.ok, onChanged: usable ? (x) => _toggle(s, c, x) : null),
         ]),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c.label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
@@ -269,6 +270,13 @@ class _CasaPanelState extends State<CasaPanel> {
   }
 
   // ---------- Lecturas ----------
+  Widget _motion(Session s) {
+    final c = _spec(11);
+    if (!c.isEnabledOn(s.device)) return _reading(s, c, 'Sin sensor');
+    final detected = s.values[11] == '1';
+    return _reading(s, c, detected ? 'Detectado' : 'Sin movimiento', alert: detected);
+  }
+
   Widget _reading(Session s, ControlSpec c, String text, {bool alert = false}) {
     return Panel(
       onLongPress: c.gpio != null ? () => showPinSheet(context, s, c) : null,

@@ -51,6 +51,7 @@ class DemoLink extends DeviceLink {
     if (m.kind == 'PING') return emitLine('PONG');
     if (m.kind == 'CFG') return emitLine('OK:${m.value}');
     if (m.kind == 'TEST') return emitLine('OK:prueba de salidas');
+    if (m.kind == 'SYNC') return emitLine('V7:${_armed ? 1 : 0}');
     if (!m.isPin) return;
     switch (m.pin) {
       case 6:

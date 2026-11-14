@@ -25,7 +25,7 @@ class ConnectionBar extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(stateLabel(st), style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text(session.retrying ? 'Reconectando…' : stateLabel(st), style: const TextStyle(fontWeight: FontWeight.w600)),
             Text(err ?? session.device.subtitle, style: TextStyle(fontSize: 12, color: err != null ? C.danger : C.ink2)),
           ]),
         ),
@@ -90,6 +90,7 @@ class _PinSheet extends StatefulWidget {
 class _PinSheetState extends State<_PinSheet> {
   late final TextEditingController _gpio;
   late bool _inverted;
+  late bool _enabled;
   String? _error;
 
   ControlSpec get _spec => widget.spec;
@@ -98,9 +99,10 @@ class _PinSheetState extends State<_PinSheet> {
   @override
   void initState() {
     super.initState();
-    final current = _session.device.pins[_spec.vpin] ?? PinConfig(_spec.gpio ?? 0, _spec.inverted);
+    final current = _spec.pinsFor(_session.device)!;
     _gpio = TextEditingController(text: '${current.gpio}');
     _inverted = current.inverted;
+    _enabled = current.enabled;
   }
 
   @override
@@ -116,17 +118,20 @@ class _PinSheetState extends State<_PinSheet> {
       setState(() => _error = problem);
       return;
     }
-    _session.device.pins[_spec.vpin] = PinConfig(g!, _inverted);
-    await widget.onSaved();
-    _session.sendRaw(cfgMsg(_spec.vpin, g, _inverted));
+    await _apply(PinConfig(g!, inverted: _inverted, enabled: _enabled), custom: true);
     if (mounted) Navigator.pop(context);
   }
 
   Future<void> _reset() async {
-    final g = _spec.gpio!;
-    _session.device.pins.remove(_spec.vpin);
+    await _apply(PinConfig(_spec.gpio!, inverted: _spec.inverted, enabled: _spec.enabled), custom: false);
+  }
+
+  /// Guarda el ajuste en la app, lo envía a la placa y cierra la hoja.
+  Future<void> _apply(PinConfig p, {required bool custom}) async {
+    final pins = _session.device.pins;
+    custom ? pins[_spec.vpin] = p : pins.remove(_spec.vpin);
     await widget.onSaved();
-    _session.sendRaw(cfgMsg(_spec.vpin, g, _spec.inverted));
+    _session.sendRaw(cfgMsg(_spec.vpin, p.gpio, inverted: p.inverted, enabled: p.enabled));
     if (mounted) Navigator.pop(context);
   }
 
@@ -163,6 +168,17 @@ class _PinSheetState extends State<_PinSheet> {
             onChanged: (v) => setState(() => _inverted = v),
           ),
         ),
+        const SizedBox(height: 8),
+        Panel(
+          padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Conectado en la maqueta'),
+            subtitle: const Text('Apágalo si esta pieza no existe. Un sensor sin conectar da lecturas falsas.'),
+            value: _enabled,
+            onChanged: (v) => setState(() => _enabled = v),
+          ),
+        ),
         const SizedBox(height: 16),
         FilledButton(onPressed: _save, child: Text(connected ? 'Guardar y enviar a la placa' : 'Guardar')),
         if (custom) TextButton(onPressed: _reset, child: Text('Volver al GPIO ${_spec.gpio}')),
@@ -178,8 +194,8 @@ class _PinSheetState extends State<_PinSheet> {
 }
 
 String pinLabel(SavedDevice d, ControlSpec s) {
-  final p = d.pins[s.vpin];
-  final g = p?.gpio ?? s.gpio;
-  if (g == null) return 'V${s.vpin}';
-  return 'V${s.vpin} · GPIO $g${(p?.inverted ?? s.inverted) ? ' · inv' : ''}';
+  final p = s.pinsFor(d);
+  if (p == null) return 'V${s.vpin}';
+  if (!p.enabled) return 'V${s.vpin} · sin conectar';
+  return 'V${s.vpin} · GPIO ${p.gpio}${p.inverted ? ' · inv' : ''}';
 }

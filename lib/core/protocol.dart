@@ -5,7 +5,8 @@
 /// App → placa:
 ///   `V1:1`            pin virtual 1 con valor 1
 ///   `V20:-40,85`      joystick (x,y)
-///   `CFG:V1:23:1`     el pin virtual 1 usa el GPIO 23 y va invertido
+///   `CFG:V1:23:1:1`   el pin virtual 1 usa el GPIO 23, invertido y activado
+///   `SYNC`            la placa responde con el estado actual de todo
 ///   `TEST`            la placa activa cada salida una por una
 ///   `PING`
 ///
@@ -43,7 +44,8 @@ class Msg {
 
 String pinMsg(int pin, Object value) => 'V$pin:${clean(value.toString())}';
 
-String cfgMsg(int pin, int gpio, bool inverted) => 'CFG:V$pin:$gpio:${inverted ? 1 : 0}';
+String cfgMsg(int pin, int gpio, {required bool inverted, bool enabled = true}) =>
+    'CFG:V$pin:$gpio:${inverted ? 1 : 0}:${enabled ? 1 : 0}';
 
 /// Quita saltos de línea para que un texto no rompa el protocolo.
 String clean(String s) => s.replaceAll(RegExp(r'[\r\n]'), ' ');

@@ -5,11 +5,12 @@
   las salidas de la maqueta. También envía lecturas y alarmas de vuelta a la app.
 
   Mensajes (una línea cada uno):
-    V1:1          enciende la luz de la sala      V3:90       puerta (servo) a 90°
-    V7:1 / V7:0   arma / desarma la alarma        V6:Hola     texto para la LCD
-    CFG:V1:23:1   la luz de la sala pasa al GPIO 23 e invertida (se guarda en la placa)
-    TEST          activa cada salida una por una para ver qué es cada cosa
-    PING          la placa responde PONG
+    V1:1            enciende la luz de la sala      V3:90     puerta (servo) a 90°
+    V7:1 / V7:0     arma / desarma la alarma        V6:Hola   texto para la LCD
+    CFG:V1:23:1:1   V1 pasa al GPIO 23, invertido (1) y activado (1). Se guarda en la placa.
+    SYNC            la placa responde con el estado actual de todo
+    TEST            activa cada salida una por una para ver qué es cada cosa
+    PING            la placa responde PONG
 
   Librerías (Arduino IDE → Gestor de librerías):
     - ESP32Servo (Kevin Harrington)                       obligatoria
@@ -38,35 +39,39 @@ const uint16_t TCP_PORT = 3333;
 #define DHT_TYPE     DHT11
 // ====================================================
 
-enum Kind { DIGITAL, SERVO, BUZZER, INPUT_PIN };
+enum Kind { K_SWITCH, K_SERVO, K_BUZZER, K_SENSOR };
 
 struct Channel {
   uint8_t vpin;      // pin virtual que usa la app (V1, V2...)
   int8_t  gpio;      // pin físico del ESP32
   Kind    kind;
-  bool    inverted;  // true si el módulo se activa con señal baja (casi todos los relés)
+  bool    inverted;  // true si se activa con señal baja (casi todos los módulos de relé)
+  bool    enabled;   // false = no conectado: la placa lo ignora
   const char* name;
+  int16_t value;     // último valor: 0/1 en interruptores, ángulo en servos
 };
 
 // Tabla de la maqueta. Debe coincidir con los cables reales.
-// Los números se pueden cambiar desde la app sin volver a cargar el programa.
+// Todo esto se puede cambiar desde la app sin volver a cargar el programa.
+// El sensor de movimiento viene desactivado: si no hay sensor, su pin queda
+// «al aire», lee valores al azar y dispararía la alarma sola.
 Channel ch[] = {
-  {1,  23, DIGITAL,   true,  "Luz sala"},
-  {2,  19, DIGITAL,   true,  "Luz cocina"},
-  {8,  18, DIGITAL,   true,  "Luz cuarto"},
-  {9,   5, DIGITAL,   true,  "Ventilador"},
-  {3,  13, SERVO,     false, "Puerta"},
-  {4,  14, SERVO,     false, "Ventana"},
-  {5,  27, BUZZER,    false, "Timbre"},
-  {11, 34, INPUT_PIN, false, "Sensor movimiento"},
+  {1,  23, K_SWITCH, true,  true,  "Luz sala",          0},
+  {2,  19, K_SWITCH, true,  true,  "Luz cocina",        0},
+  {8,  18, K_SWITCH, true,  true,  "Luz cuarto",        0},
+  {9,   5, K_SWITCH, true,  true,  "Ventilador",        0},
+  {3,  13, K_SERVO,  false, true,  "Puerta",            0},
+  {4,  14, K_SERVO,  false, true,  "Ventana",           0},
+  {5,  27, K_BUZZER, false, true,  "Timbre",            0},
+  {11, 34, K_SENSOR, false, false, "Sensor movimiento", 0},
 };
 const int N = sizeof(ch) / sizeof(ch[0]);
+const uint8_t VPIN_BUZZER = 5, VPIN_LCD = 6, VPIN_ALARM = 7, VPIN_TEMP = 10, VPIN_MOTION = 11;
 
 Servo servos[N];
-int   servoAngle[N];
 Preferences prefs;
 
-bool armed = false, triggered = false, lastMotion = false;
+bool armed = false, triggered = false;
 unsigned long buzzerOffAt = 0, lastSensorAt = 0, lastTempAt = 0;
 
 #if USE_LCD
@@ -79,7 +84,6 @@ unsigned long buzzerOffAt = 0, lastSensorAt = 0, lastTempAt = 0;
   DHT dht(DHT_PIN, DHT_TYPE);
 #endif
 
-// ---------- Envío de mensajes a la app ----------
 void sendLine(const String& line);
 
 // ---------- Salidas ----------
@@ -98,22 +102,31 @@ const char* gpioProblem(int gpio, bool output) {
   return nullptr;
 }
 
-void writeDigital(Channel& c, bool on) {
+// Pone una salida digital en encendido o apagado, respetando el «invertir».
+void writeOutput(Channel& c, bool on) {
+  if (!c.enabled) return;
   digitalWrite(c.gpio, (on != c.inverted) ? HIGH : LOW);
 }
 
+void setBuzzer(bool on) {
+  Channel* b = findCh(VPIN_BUZZER);
+  if (b) writeOutput(*b, on);
+}
+
+// Prepara el pin de un canal y lo deja en su valor actual.
 void setupChannel(Channel& c) {
   int i = indexOf(&c);
+  if (c.kind == K_SERVO && servos[i].attached()) servos[i].detach();
+  if (!c.enabled) return;
   switch (c.kind) {
-    case DIGITAL: pinMode(c.gpio, OUTPUT); writeDigital(c, false); break;
-    case BUZZER:  pinMode(c.gpio, OUTPUT); writeDigital(c, false); break;
-    case SERVO:
-      if (servos[i].attached()) servos[i].detach();
+    case K_SWITCH: pinMode(c.gpio, OUTPUT); writeOutput(c, c.value == 1); break;
+    case K_BUZZER: pinMode(c.gpio, OUTPUT); writeOutput(c, false); break;
+    case K_SERVO:
       servos[i].setPeriodHertz(50);
       servos[i].attach(c.gpio, 500, 2400);
-      servos[i].write(servoAngle[i]);
+      servos[i].write(c.value);
       break;
-    case INPUT_PIN: pinMode(c.gpio, INPUT); break;   // GPIO 34-39 solo sirven como entrada
+    case K_SENSOR: pinMode(c.gpio, INPUT); break;   // GPIO 34-39 solo sirven como entrada
   }
 }
 
@@ -123,6 +136,7 @@ void loadConfig() {
     String k = "v" + String(ch[i].vpin);
     ch[i].gpio = prefs.getChar((k + "g").c_str(), ch[i].gpio);
     ch[i].inverted = prefs.getBool((k + "i").c_str(), ch[i].inverted);
+    ch[i].enabled = prefs.getBool((k + "e").c_str(), ch[i].enabled);
   }
   prefs.end();
 }
@@ -132,13 +146,12 @@ void saveConfig(Channel& c) {
   String k = "v" + String(c.vpin);
   prefs.putChar((k + "g").c_str(), c.gpio);
   prefs.putBool((k + "i").c_str(), c.inverted);
+  prefs.putBool((k + "e").c_str(), c.enabled);
   prefs.end();
 }
 
 void beep(int ms) {
-  Channel* b = findCh(5);
-  if (!b) return;
-  writeDigital(*b, true);
+  setBuzzer(true);
   buzzerOffAt = millis() + ms;
 }
 
@@ -156,70 +169,99 @@ void showLcd(const String& text) {
 void runTest() {
   for (int i = 0; i < N; i++) {
     Channel& c = ch[i];
-    if (c.kind == INPUT_PIN) continue;
+    if (c.kind == K_SENSOR || !c.enabled) continue;
     sendLine("OK:TEST V" + String(c.vpin) + " " + c.name + " GPIO " + String(c.gpio));
-    if (c.kind == SERVO) {
-      servos[i].write(90); delay(700); servos[i].write(0); delay(500);
-      servoAngle[i] = 0;
+    if (c.kind == K_SERVO) {
+      servos[i].write(90); delay(700);
+      servos[i].write(c.value); delay(500);
     } else {
-      writeDigital(c, true); delay(700); writeDigital(c, false); delay(300);
+      writeOutput(c, true); delay(700);
+      writeOutput(c, c.kind == K_SWITCH && c.value == 1); delay(300);
     }
   }
   sendLine("OK:TEST terminado");
 }
 
+String alarmState() {
+  return triggered ? "DISPARO" : (armed ? "1" : "0");
+}
+
+// Envía el estado real de la casa, para que la app muestre lo que hay y no lo que recuerda.
+void sendState() {
+  for (int i = 0; i < N; i++) {
+    Channel& c = ch[i];
+    if (c.kind == K_BUZZER || !c.enabled) continue;
+    sendLine("V" + String(c.vpin) + ":" + String(c.value));
+  }
+  sendLine("V" + String(VPIN_ALARM) + ":" + alarmState());
+}
+
 // ---------- Mensajes de la app ----------
+// CFG:V<pin>:<gpio>:<invertido>[:<activado>]
+void handleConfig(const String& line) {
+  int a = line.indexOf(':', 5);
+  int b = a < 0 ? -1 : line.indexOf(':', a + 1);
+  if (a < 0 || b < 0) { sendLine("ERR:CFG " + line); return; }
+  int e = line.indexOf(':', b + 1);
+
+  Channel* c = findCh(line.substring(5, a).toInt());
+  if (!c) { sendLine("ERR:CFG " + line); return; }
+  int gpio = line.substring(a + 1, b).toInt();
+  bool inverted = line.substring(b + 1, e < 0 ? line.length() : e).toInt() == 1;
+  bool enabled = e < 0 ? true : line.substring(e + 1).toInt() == 1;
+
+  const char* problem = gpioProblem(gpio, c->kind != K_SENSOR);
+  if (problem) { sendLine("ERR:GPIO " + String(gpio) + " " + problem); return; }
+
+  bool changed = c->gpio != gpio || c->inverted != inverted || c->enabled != enabled;
+  if (changed) {
+    if (c->kind == K_SWITCH || c->kind == K_BUZZER) writeOutput(*c, false);   // apaga el pin anterior
+    c->gpio = gpio; c->inverted = inverted; c->enabled = enabled;
+    setupChannel(*c);
+    saveConfig(*c);
+  }
+  sendLine("OK:V" + String(c->vpin) + " GPIO " + String(gpio) + (inverted ? " inv" : "") + (enabled ? "" : " off"));
+}
+
+void handleAlarm(const String& val) {
+  armed = val.toInt() == 1;
+  triggered = false;
+  setBuzzer(false);
+  sendLine("V" + String(VPIN_ALARM) + ":" + alarmState());
+}
+
 void handleLine(String line) {
   line.trim();
   if (line.length() == 0) return;
 
   if (line == "PING") { sendLine("PONG"); return; }
+  if (line == "SYNC") { sendState(); return; }
   if (line == "TEST") { runTest(); return; }
+  if (line.startsWith("CFG:V")) { handleConfig(line); return; }
 
-  if (line.startsWith("CFG:V")) {                 // CFG:V1:23:1
-    int a = line.indexOf(':', 5), b = line.indexOf(':', a + 1);
-    int vpin = line.substring(5, a).toInt();
-    int gpio = line.substring(a + 1, b).toInt();
-    bool inv = line.substring(b + 1).toInt() == 1;
-    Channel* c = findCh(vpin);
-    if (!c || a < 0 || b < 0) { sendLine("ERR:CFG " + line); return; }
-    const char* problem = gpioProblem(gpio, c->kind != INPUT_PIN);
-    if (problem) { sendLine("ERR:GPIO " + String(gpio) + " " + problem); return; }
-    if (c->kind == DIGITAL || c->kind == BUZZER) writeDigital(*c, false);
-    c->gpio = gpio; c->inverted = inv;
-    setupChannel(*c);
-    saveConfig(*c);
-    sendLine("OK:V" + String(vpin) + " GPIO " + String(gpio) + (inv ? " invertido" : ""));
-    return;
-  }
-
-  if (line[0] != 'V') { sendLine("ERR:no entiendo " + line); return; }
   int colon = line.indexOf(':');
-  if (colon < 0) return;
+  if (line[0] != 'V' || colon < 0) { sendLine("ERR:no entiendo " + line); return; }
   int vpin = line.substring(1, colon).toInt();
   String val = line.substring(colon + 1);
 
-  switch (vpin) {
-    case 6: showLcd(val); sendLine("V6:OK"); return;
-    case 7: {
-      armed = val.toInt() == 1;
-      triggered = false;
-      Channel* bz = findCh(5);
-      if (bz) writeDigital(*bz, false);
-      sendLine(String("OK:alarma ") + (armed ? "armada" : "desarmada"));
-      return;
-    }
-  }
+  if (vpin == VPIN_LCD) { showLcd(val); sendLine("V6:OK"); return; }
+  if (vpin == VPIN_ALARM) { handleAlarm(val); return; }
 
   Channel* c = findCh(vpin);
   if (!c) { sendLine("ERR:V" + String(vpin) + " no existe"); return; }
-  int i = indexOf(c);
+  if (!c->enabled) { sendLine("ERR:V" + String(vpin) + " desactivado"); return; }
   switch (c->kind) {
-    case DIGITAL: writeDigital(*c, val.toInt() == 1); break;
-    case SERVO:   servoAngle[i] = constrain(val.toInt(), 0, 180); servos[i].write(servoAngle[i]); break;
-    case BUZZER:  beep(300); break;
-    case INPUT_PIN: break;
+    case K_SWITCH: c->value = val.toInt() == 1; writeOutput(*c, c->value == 1); break;
+    case K_SERVO:  c->value = constrain(val.toInt(), 0, 180); servos[indexOf(c)].write(c->value); break;
+    case K_BUZZER: beep(300); break;
+    case K_SENSOR: break;
   }
+}
+
+// Junta caracteres hasta completar una línea y entonces la procesa.
+void feedChar(String& buffer, char k) {
+  if (k == '\n') { handleLine(buffer); buffer = ""; }
+  else if (k != '\r' && buffer.length() < 120) buffer += k;
 }
 
 // ---------- Bluetooth LE (servicio Nordic UART) ----------
@@ -230,9 +272,11 @@ void handleLine(String line) {
 #define NUS_SERVICE "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_RX      "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_TX      "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+const size_t BLE_CHUNK = 20;          // cabe en cualquier conexión BLE
 BLECharacteristic* txChar = nullptr;
-bool bleConnected = false;
-String bleBuffer, bleInbox;
+volatile bool bleConnected = false;
+QueueHandle_t bleRxQueue;             // bytes recibidos; el Bluetooth corre en otra tarea
+String bleBuffer;
 
 class ServerCb : public BLEServerCallbacks {
   void onConnect(BLEServer*) override { bleConnected = true; }
@@ -240,16 +284,13 @@ class ServerCb : public BLEServerCallbacks {
 };
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
-    bleBuffer += String(c->getValue().c_str());
-    int nl;
-    while ((nl = bleBuffer.indexOf('\n')) >= 0) {
-      bleInbox += bleBuffer.substring(0, nl) + "\n";   // se procesa en loop(), no aquí
-      bleBuffer.remove(0, nl + 1);
-    }
+    const uint8_t* data = c->getData();
+    for (size_t i = 0; i < c->getLength(); i++) xQueueSend(bleRxQueue, &data[i], 0);
   }
 };
 
 void setupBle() {
+  bleRxQueue = xQueueCreate(512, sizeof(uint8_t));
   BLEDevice::init(DEVICE_NAME);
   BLEServer* server = BLEDevice::createServer();
   server->setCallbacks(new ServerCb());
@@ -264,6 +305,23 @@ void setupBle() {
   adv->setScanResponse(true);
   BLEDevice::startAdvertising();
   Serial.println("Bluetooth listo: busca \"" DEVICE_NAME "\" en la app");
+}
+
+void loopBle() {
+  uint8_t k;
+  while (xQueueReceive(bleRxQueue, &k, 0) == pdTRUE) feedChar(bleBuffer, (char)k);
+}
+
+// Envía en trozos pequeños para que los mensajes largos no se corten.
+void bleSend(const String& out) {
+  if (!bleConnected || !txChar) return;
+  const uint8_t* data = (const uint8_t*)out.c_str();
+  for (size_t i = 0; i < out.length(); i += BLE_CHUNK) {
+    size_t len = min(BLE_CHUNK, (size_t)out.length() - i);
+    txChar->setValue((uint8_t*)(data + i), len);
+    txChar->notify();
+    delay(6);
+  }
 }
 #endif
 
@@ -291,29 +349,45 @@ void setupWifi() {
 void loopWifi() {
   if (tcpServer.hasClient()) {
     if (tcpClient && tcpClient.connected()) tcpClient.stop();   // una app a la vez
-    tcpClient = tcpServer.available();
+    tcpClient = tcpServer.accept();
+    tcpBuffer = "";
     sendLine("HELLO:" DEVICE_NAME);
   }
-  while (tcpClient && tcpClient.connected() && tcpClient.available()) {
-    char k = tcpClient.read();
-    if (k == '\n') { handleLine(tcpBuffer); tcpBuffer = ""; }
-    else if (k != '\r' && tcpBuffer.length() < 120) tcpBuffer += k;
-  }
+  while (tcpClient && tcpClient.connected() && tcpClient.available()) feedChar(tcpBuffer, tcpClient.read());
 }
 #endif
 
 void sendLine(const String& line) {
   Serial.println("-> " + line);
 #if USE_BLE
-  if (bleConnected && txChar) {
-    String out = line + "\n";
-    txChar->setValue((uint8_t*)out.c_str(), out.length());
-    txChar->notify();
-  }
+  bleSend(line + "\n");
 #endif
 #if USE_WIFI
   if (tcpClient && tcpClient.connected()) tcpClient.print(line + "\n");
 #endif
+}
+
+// ---------- Sensores y alarma ----------
+void loopMotion(unsigned long now) {
+  if (now - lastSensorAt < 150) return;
+  lastSensorAt = now;
+  Channel* pir = findCh(VPIN_MOTION);
+  if (!pir || !pir->enabled) return;
+
+  bool motion = (digitalRead(pir->gpio) == HIGH) != pir->inverted;
+  if (motion != (pir->value == 1)) {
+    pir->value = motion;
+    sendLine("V" + String(VPIN_MOTION) + ":" + String(pir->value));
+  }
+  if (armed && motion && !triggered) {
+    triggered = true;
+    sendLine("V" + String(VPIN_ALARM) + ":DISPARO");
+  }
+}
+
+void loopBuzzer(unsigned long now) {
+  if (triggered) { setBuzzer((now / 300) % 2); return; }   // sirena intermitente hasta desarmar
+  if (buzzerOffAt && now > buzzerOffAt) { setBuzzer(false); buzzerOffAt = 0; }
 }
 
 // ---------- Programa principal ----------
@@ -344,53 +418,23 @@ void setup() {
 
 void loop() {
   // Mensajes escritos en el Monitor Serie (útil para probar sin teléfono)
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n') { handleLine(serialBuffer); serialBuffer = ""; }
-    else if (c != '\r' && serialBuffer.length() < 120) serialBuffer += c;
-  }
+  while (Serial.available()) feedChar(serialBuffer, Serial.read());
 #if USE_BLE
-  if (bleInbox.length()) {
-    String inbox = bleInbox; bleInbox = "";
-    int nl;
-    while ((nl = inbox.indexOf('\n')) >= 0) { handleLine(inbox.substring(0, nl)); inbox.remove(0, nl + 1); }
-  }
+  loopBle();
 #endif
 #if USE_WIFI
   loopWifi();
 #endif
 
   unsigned long now = millis();
-
-  // Apagar el timbre cuando termina el pitido (si no está sonando la alarma)
-  if (buzzerOffAt && now > buzzerOffAt && !triggered) {
-    Channel* b = findCh(5); if (b) writeDigital(*b, false);
-    buzzerOffAt = 0;
-  }
-
-  // Sensor de movimiento y alarma
-  if (now - lastSensorAt > 150) {
-    lastSensorAt = now;
-    Channel* pir = findCh(11);
-    if (pir) {
-      bool motion = (digitalRead(pir->gpio) == HIGH) != pir->inverted;
-      if (motion != lastMotion) { lastMotion = motion; sendLine(String("V11:") + (motion ? "1" : "0")); }
-      if (armed && motion && !triggered) {
-        triggered = true;
-        sendLine("V7:DISPARO");
-      }
-      if (triggered) {                     // sirena intermitente hasta que se desarme
-        Channel* b = findCh(5);
-        if (b) writeDigital(*b, (now / 300) % 2);
-      }
-    }
-  }
+  loopMotion(now);
+  loopBuzzer(now);
 
 #if USE_DHT
   if (now - lastTempAt > 5000) {
     lastTempAt = now;
     float t = dht.readTemperature();
-    if (!isnan(t)) sendLine("V10:" + String(t, 1));
+    if (!isnan(t)) sendLine("V" + String(VPIN_TEMP) + ":" + String(t, 1));
   }
 #endif
 }

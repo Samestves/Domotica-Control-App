@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'device.dart';
+
 enum ControlKind { toggle, servoToggle, slider, button, text, alarm, reading }
 
 /// Un control del panel Casa. El número de pin virtual (V1, V2…) es lo que viaja en el mensaje.
@@ -11,6 +13,7 @@ class ControlSpec {
   final IconData icon;
   final int? gpio;
   final bool inverted; // por defecto; los módulos de relé se activan con señal baja
+  final bool enabled; // por defecto; false si la pieza puede no estar en la maqueta
   final bool output; // false: no se controla, solo se muestra o se lee
   final String unit;
   final int min, max;
@@ -23,6 +26,7 @@ class ControlSpec {
     required this.icon,
     this.gpio,
     this.inverted = false,
+    this.enabled = true,
     this.output = true,
     this.unit = '',
     this.min = 0,
@@ -44,8 +48,16 @@ const casaControls = <ControlSpec>[
   ControlSpec(vpin: 5, label: 'Timbre', kind: ControlKind.button, icon: Icons.notifications_none, gpio: 27),
   ControlSpec(vpin: 6, label: 'Pantalla LCD', kind: ControlKind.text, icon: Icons.tv_outlined, output: false),
   ControlSpec(vpin: 10, label: 'Temperatura', kind: ControlKind.reading, icon: Icons.thermostat_outlined, output: false, unit: ' °C'),
-  ControlSpec(vpin: 11, label: 'Movimiento', kind: ControlKind.reading, icon: Icons.sensors, gpio: 34, output: false),
+  ControlSpec(vpin: 11, label: 'Movimiento', kind: ControlKind.reading, icon: Icons.sensors, gpio: 34, enabled: false, output: false),
 ];
+
+extension ControlPins on ControlSpec {
+  /// El ajuste vigente de este control: el guardado para la placa o el de fábrica.
+  PinConfig? pinsFor(SavedDevice d) =>
+      d.pins[vpin] ?? (gpio == null ? null : PinConfig(gpio!, inverted: inverted, enabled: enabled));
+
+  bool isEnabledOn(SavedDevice d) => pinsFor(d)?.enabled ?? true;
+}
 
 /// Revisa si un GPIO del ESP32 sirve para un control. Devuelve el problema, o null si está bien.
 /// El programa de la placa aplica las mismas reglas.

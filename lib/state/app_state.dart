@@ -27,38 +27,75 @@ class Session extends ChangeNotifier {
   String? lastAlert;
   final _subs = <StreamSubscription>[];
 
-  Session(this.device);
+  /// Crea la conexión de una placa. Las pruebas pueden pasar otra para simular fallos.
+  final DeviceLink Function(SavedDevice) _linkFor;
+
+  /// Esperas entre reintentos cuando la conexión se cae sola.
+  static const retryDelays = [Duration(seconds: 2), Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 15)];
+  bool _wantConnected = false;
+  int _retries = 0;
+  Timer? _retryTimer;
+
+  Session(this.device, {DeviceLink Function(SavedDevice)? linkFor}) : _linkFor = linkFor ?? _defaultLink;
+
+  static DeviceLink _defaultLink(SavedDevice d) => switch (d.transport) {
+        Transport.ble => BleLink(d.address),
+        Transport.wifi => WifiLink(d.address, d.port),
+        Transport.demo => DemoLink(d.profile.name),
+      };
 
   LinkState get state => _link?.state ?? LinkState.disconnected;
   String? get error => _link?.lastError;
   bool get connected => state == LinkState.connected;
 
+  /// true mientras la app espera para reintentar una conexión caída.
+  bool get retrying => _retryTimer?.isActive ?? false;
+
+  /// Conecta porque el usuario lo pidió. Si después se cae, la app reintenta sola.
   Future<void> connect() async {
+    _wantConnected = true;
+    _retries = 0;
+    _retryTimer?.cancel();
+    await _open();
+  }
+
+  /// Desconecta porque el usuario lo pidió: no se reintenta.
+  Future<void> disconnect() async {
+    _wantConnected = false;
+    _retryTimer?.cancel();
+    await _link?.disconnect();
+    notifyListeners();
+  }
+
+  Future<void> _open() async {
     if (state == LinkState.connected || state == LinkState.connecting) return;
     await _teardown();
-    final link = switch (device.transport) {
-      Transport.ble => BleLink(device.address),
-      Transport.wifi => WifiLink(device.address, device.port),
-      Transport.demo => DemoLink(device.profile.name),
-    };
+    final link = _linkFor(device);
     _link = link;
-    _subs.add(link.states.listen((_) => notifyListeners()));
+    _subs.add(link.states.listen(_onState));
     _subs.add(link.lines.listen(_onLine));
     notifyListeners();
     await link.connect();
-    if (connected) _pushPinConfig();
+    if (connected) {
+      _retries = 0;
+      _pushPinConfig();
+      sendRaw('SYNC');
+    }
+    notifyListeners();
+  }
+
+  void _onState(LinkState s) {
+    if (s == LinkState.error && _wantConnected && _retries < retryDelays.length) {
+      _retryTimer?.cancel();
+      _retryTimer = Timer(retryDelays[_retries++], _open);
+    }
     notifyListeners();
   }
 
   /// La app es la fuente de verdad de los pines: al conectar, envía a la placa
   /// todos los ajustes guardados, aunque se hayan hecho sin conexión.
   void _pushPinConfig() {
-    device.pins.forEach((vpin, p) => sendRaw(cfgMsg(vpin, p.gpio, p.inverted)));
-  }
-
-  Future<void> disconnect() async {
-    await _link?.disconnect();
-    notifyListeners();
+    device.pins.forEach((vpin, p) => sendRaw(cfgMsg(vpin, p.gpio, inverted: p.inverted, enabled: p.enabled)));
   }
 
   void _onLine(String line) {
@@ -109,6 +146,8 @@ class Session extends ChangeNotifier {
 
   @override
   void dispose() {
+    _wantConnected = false;
+    _retryTimer?.cancel();
     _teardown();
     super.dispose();
   }

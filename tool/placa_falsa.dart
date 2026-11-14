@@ -63,6 +63,7 @@ void _serve(Socket client) {
     print('-> $line');
     if (line == 'PING') return send('PONG');
     if (line == 'TEST') return send('OK:TEST terminado');
+    if (line == 'SYNC') return send('V7:${armed ? 1 : 0}');
     if (line.startsWith('CFG:')) return send('OK:${line.substring(4)}');
     final m = RegExp(r'^V(\d+):(.*)$').firstMatch(line);
     if (m == null) return send('ERR:no entiendo $line');

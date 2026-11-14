@@ -28,7 +28,8 @@ void main() {
 
     test('arma mensajes y quita saltos de línea', () {
       expect(pinMsg(6, 'Hola\nmundo'), 'V6:Hola mundo');
-      expect(cfgMsg(1, 23, true), 'CFG:V1:23:1');
+      expect(cfgMsg(1, 23, inverted: true), 'CFG:V1:23:1:1');
+      expect(cfgMsg(11, 34, inverted: false, enabled: false), 'CFG:V11:34:0:0');
     });
 
     test('junta trozos en líneas completas', () {
@@ -41,11 +42,12 @@ void main() {
 
   test('guarda y lee dispositivos con sus pines', () {
     final d = SavedDevice(id: 'x', name: 'Casa', profile: Profile.casa, transport: Transport.wifi, address: '192.168.1.40');
-    d.pins[1] = const PinConfig(22, true);
+    d.pins[1] = const PinConfig(22, inverted: true, enabled: false);
     final back = SavedDevice.fromJson(d.toJson());
     expect(back.transport, Transport.wifi);
     expect(back.pins[1]!.gpio, 22);
     expect(back.pins[1]!.inverted, isTrue);
+    expect(back.pins[1]!.enabled, isFalse);
   });
 
   test('valida los GPIO igual que la placa', () {
@@ -59,12 +61,35 @@ void main() {
 
   test('al conectar envía los pines guardados a la placa', () async {
     final d = SavedDevice(id: 'd', name: 'Casa', profile: Profile.casa, transport: Transport.demo);
-    d.pins[1] = const PinConfig(22, false);
+    d.pins[1] = const PinConfig(22, inverted: false);
     final s = Session(d);
     await s.connect();
     await Future<void>.delayed(const Duration(milliseconds: 200));
-    expect(s.log.map((l) => l.text), containsAll(['CFG:V1:22:0', 'OK:V1:22:0']));
+    expect(s.log.map((l) => l.text), containsAll(['CFG:V1:22:0:1', 'OK:V1:22:0:1', 'SYNC']));
     await s.disconnect();
+  });
+
+  test('si la conexión se cae, reintenta sola; si el usuario desconecta, no', () async {
+    final links = <_FlakyLink>[];
+    final d = SavedDevice(id: 'r', name: 'Casa', profile: Profile.casa, transport: Transport.ble);
+    final s = Session(d, linkFor: (_) {
+      links.add(_FlakyLink());
+      return links.last;
+    });
+    await s.connect();
+    expect(s.connected, isTrue);
+
+    links.last.drop();
+    await Future<void>.delayed(Duration.zero);
+    expect(s.retrying, isTrue);
+    await Future<void>.delayed(Session.retryDelays.first + const Duration(milliseconds: 300));
+    expect(links.length, 2);
+    expect(s.connected, isTrue);
+
+    await s.disconnect();
+    await Future<void>.delayed(Session.retryDelays.first + const Duration(milliseconds: 300));
+    expect(links.length, 2);
+    expect(s.connected, isFalse);
   });
 
   test('la placa demo responde y dispara la alarma', () async {
@@ -90,4 +115,18 @@ void main() {
     expect(find.text('Auto Robot (demo)'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'Agregar dispositivo'), findsOneWidget);
   });
+}
+
+/// Conexión de prueba que se puede tumbar a mano.
+class _FlakyLink extends DeviceLink {
+  @override
+  Future<void> connect() async => setState(LinkState.connected);
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {}
+
+  void drop() => setState(LinkState.error, 'caída simulada');
 }

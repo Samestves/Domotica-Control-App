@@ -17,14 +17,16 @@ extension ProfileLabel on Profile {
       };
 }
 
-/// Ajuste de un control: a qué GPIO va y si está invertido.
+/// Ajuste de un control: a qué GPIO va, si está invertido y si está conectado en la maqueta.
 class PinConfig {
   final int gpio;
   final bool inverted;
-  const PinConfig(this.gpio, this.inverted);
+  final bool enabled;
+  const PinConfig(this.gpio, {required this.inverted, this.enabled = true});
 
-  Map<String, dynamic> toJson() => {'g': gpio, 'i': inverted};
-  factory PinConfig.fromJson(Map<String, dynamic> j) => PinConfig(j['g'] as int, j['i'] as bool? ?? false);
+  Map<String, dynamic> toJson() => {'g': gpio, 'i': inverted, 'e': enabled};
+  factory PinConfig.fromJson(Map<String, dynamic> j) =>
+      PinConfig(j['g'] as int, inverted: j['i'] as bool? ?? false, enabled: j['e'] as bool? ?? true);
 }
 
 /// Una placa guardada en el teléfono.
