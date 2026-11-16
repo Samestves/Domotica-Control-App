@@ -2,7 +2,7 @@
 
 App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por Bluetooth LE o Wi‑Fi. Cada placa abre su propio panel: **Casa Domótica** o **Auto Robot**.
 
-**¿Vas a la reunión con el equipo?** Lee [docs/GUIA-REUNION.md](docs/GUIA-REUNION.md).
+**Casa del grupo:** cómo probarla, cargar el ESP32 y volver atrás está en [docs/GUIA-REUNION.md](docs/GUIA-REUNION.md).
 
 ## Qué hay en esta carpeta
 
@@ -10,7 +10,9 @@ App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por
 |---|---|
 | `lib/` | La app |
 | `firmware/casa_esp32/` | El programa para el ESP32 de la maqueta |
+| `firmware/versiones/` | Programas ya compilados y probados, listos para volver a cargar |
 | `tool/placa_falsa.dart` | Una placa simulada en la PC para probar el Wi‑Fi sin hardware |
+| `tool/cargar_esp32.ps1` | Carga una versión guardada en el ESP32, o le devuelve su Blynk |
 | `test/` | Pruebas automáticas |
 
 ## Probar sin hardware

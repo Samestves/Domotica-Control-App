@@ -160,7 +160,9 @@ class _PinSheetState extends State<_PinSheet> {
           child: SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Invertir'),
-            subtitle: const Text('Actívalo si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'),
+            subtitle: Text(_spec.kind == ControlKind.light
+                ? 'Actívalo si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'
+                : 'Actívalo si el servo gira hacia el lado contrario, por cómo quedó montado.'),
             value: _inverted,
             onChanged: (v) => setState(() => _inverted = v),
           ),

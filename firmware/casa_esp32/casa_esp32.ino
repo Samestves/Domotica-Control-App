@@ -23,6 +23,7 @@
 
   Otros mensajes:
     CFG:V10:2:0:1   V10 pasa al GPIO 2, sin invertir (0) y activado (1). Se guarda en la placa.
+                    En puertas y persianas, invertir = el servo gira al lado contrario.
     SYNC            la placa responde con el estado actual de todo
     TEST            mueve cada salida una por una para ver qué es cada cosa
     PING            la placa responde PONG
@@ -49,7 +50,7 @@ struct Channel {
   uint8_t vpin;      // pin virtual (el mismo número que en Blynk)
   int8_t  gpio;      // pin físico del ESP32
   Kind    kind;
-  bool    inverted;  // true si se activa con señal baja (módulos de relé)
+  bool    inverted;  // luces y sirena: se activan con señal baja (relés). Servos: giran al lado contrario
   bool    enabled;   // false = no está conectado en la maqueta
   const char* name;
   int16_t value;     // puertas 0/1, persianas 0..180, luces y sirena 0/1
@@ -117,9 +118,10 @@ void writeDigital(const Channel& c, bool on) {
   if (c.enabled) digitalWrite(c.gpio, (on != c.inverted) ? HIGH : LOW);
 }
 
+// Ángulo real del servo. Invertido = montado al revés: usa el ángulo opuesto (180 - ángulo).
 int servoAngle(const Channel& c) {
-  if (c.kind == K_DOOR) return c.value ? DOOR_OPEN : DOOR_CLOSED;
-  return c.value;
+  int angle = c.kind == K_DOOR ? (c.value ? DOOR_OPEN : DOOR_CLOSED) : c.value;
+  return c.inverted ? 180 - angle : angle;
 }
 
 // Lleva una salida a su valor guardado. Con la alarma sonando, las luces las maneja el parpadeo.
