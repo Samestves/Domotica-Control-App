@@ -1,4 +1,4 @@
-# Guía de la casa domótica · Alpha 0.3
+# Guía de la casa domótica · Alpha 0.4
 
 ## Dónde estamos
 
@@ -59,7 +59,13 @@ Para probar sin teléfono, escribe mensajes como `V10:1` en el monitor serie:
 
 Si algo deja de funcionar después de un cambio, el ESP32 se puede devolver a un estado conocido:
 
-- **A la versión probada con el Redmi:**
+- **A la versión actual (con Invertir para servos):**
+
+  ```powershell
+  .\tool\cargar_esp32.ps1 -Version alpha-0.4 -Puerto COM3
+  ```
+
+- **A la primera versión probada con el Redmi:**
 
   ```powershell
   .\tool\cargar_esp32.ps1 -Version alpha-0.3-probada -Puerto COM3
