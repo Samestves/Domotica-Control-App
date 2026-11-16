@@ -1,97 +1,107 @@
 /*
-  Casa Domótica · programa para ESP32
-  -----------------------------------
+  Casa Domótica · programa para el ESP32 de la maqueta
+  ----------------------------------------------------
   Recibe mensajes de la app (por Bluetooth LE, Wi-Fi o el Monitor Serie) y mueve
-  las salidas de la maqueta. También envía lecturas y alarmas de vuelta a la app.
+  las salidas de la maqueta. También avisa a la app de cada cambio y de la alarma.
 
-  Mensajes (una línea cada uno):
-    V1:1            enciende la luz de la sala      V3:90     puerta (servo) a 90°
-    V7:1 / V7:0     arma / desarma la alarma        V6:Hola   texto para la LCD
-    CFG:V1:23:1:1   V1 pasa al GPIO 23, invertido (1) y activado (1). Se guarda en la placa.
+  Los pines virtuales son LOS MISMOS que usaba el grupo en Blynk, así que su
+  documento «Conexiones GPIO» sigue valiendo:
+
+    V0..V4    puertas (servo): 1 = abrir (90°), 0 = cerrar (0°)
+              V0 garaje · V1 principal · V2 salón · V3 baño · V4 cuarto
+    V5..V8    persianas (servo): 0..180
+              V5 sala · V6 cuarto · V7 cocina 1 · V8 cocina 2
+    V9        sirena: 1 = sonar a mano, 0 = apagar y desarmar
+    V10..V15  luces: 1 / 0
+              V10 sala 1 · V11 sala 2 · V12 cocina · V13 baño · V14 cuarto · V15 garaje
+    V16       todas las luces: 1 / 0
+    V17       seguridad: 1 = armada, 0 = desarmada
+    V18       avisos de texto (de la placa a la app)
+
+  Seguridad (igual que en su versión de Blynk): con la seguridad armada, si el garaje
+  o la puerta principal quedan abiertos 20 s, suena la sirena y las luces parpadean.
+
+  Otros mensajes:
+    CFG:V10:2:0:1   V10 pasa al GPIO 2, sin invertir (0) y activado (1). Se guarda en la placa.
     SYNC            la placa responde con el estado actual de todo
-    TEST            activa cada salida una por una para ver qué es cada cosa
+    TEST            mueve cada salida una por una para ver qué es cada cosa
     PING            la placa responde PONG
 
-  Librerías (Arduino IDE → Gestor de librerías):
-    - ESP32Servo (Kevin Harrington)                       obligatoria
-    - LiquidCrystal I2C (Frank de Brabander)              solo si USE_LCD = 1
-    - DHT sensor library (Adafruit)                       solo si USE_DHT = 1
-
-  Placa: "ESP32 Dev Module". Si usas Bluetooth y Wi-Fi a la vez, elige en
-  Herramientas → Partition Scheme → "Huge APP (3MB No OTA)", porque el programa es grande.
+  Librerías: ESP32Servo (Kevin Harrington). Placa: "ESP32 Dev Module".
 */
 
 #include <Arduino.h>
 #include <Preferences.h>
 #include <ESP32Servo.h>
 
-// ============ CONFIGURACIÓN: cambia esto ============
+// ============ CONFIGURACIÓN ============
 #define DEVICE_NAME  "Casa Domotica"
 #define USE_BLE      1        // 1 = conectar por Bluetooth LE
-#define USE_WIFI     0        // 1 = conectar por Wi-Fi (escribe tu red abajo)
-#define USE_LCD      0        // 1 = hay una pantalla LCD I2C (SDA 21, SCL 22)
-#define USE_DHT      0        // 1 = hay un sensor de temperatura DHT11/DHT22
+#define USE_WIFI     0        // 1 = conectar por Wi-Fi (escribe la red abajo)
 const char* WIFI_SSID = "TuRed";
 const char* WIFI_PASS = "TuClave";
 const uint16_t TCP_PORT = 3333;
-#define LCD_ADDR     0x27     // dirección típica; algunas pantallas usan 0x3F
-#define DHT_PIN      4
-#define DHT_TYPE     DHT11
-// ====================================================
+// =======================================
 
-enum Kind { K_SWITCH, K_SERVO, K_BUZZER, K_SENSOR };
+enum Kind { K_DOOR, K_BLIND, K_SIREN, K_LIGHT };
 
 struct Channel {
-  uint8_t vpin;      // pin virtual que usa la app (V1, V2...)
+  uint8_t vpin;      // pin virtual (el mismo número que en Blynk)
   int8_t  gpio;      // pin físico del ESP32
   Kind    kind;
-  bool    inverted;  // true si se activa con señal baja (casi todos los módulos de relé)
-  bool    enabled;   // false = no conectado: la placa lo ignora
+  bool    inverted;  // true si se activa con señal baja (módulos de relé)
+  bool    enabled;   // false = no está conectado en la maqueta
   const char* name;
-  int16_t value;     // último valor: 0/1 en interruptores, ángulo en servos
+  int16_t value;     // puertas 0/1, persianas 0..180, luces y sirena 0/1
 };
 
-// Tabla de la maqueta. Debe coincidir con los cables reales.
-// Todo esto se puede cambiar desde la app sin volver a cargar el programa.
-// El sensor de movimiento viene desactivado: si no hay sensor, su pin queda
-// «al aire», lee valores al azar y dispararía la alarma sola.
+// Cableado de la maqueta, según «Conexiones GPIO - Casa Domótica con ESP32».
+// Se puede corregir desde la app sin volver a cargar el programa.
 Channel ch[] = {
-  {1,  23, K_SWITCH, true,  true,  "Luz sala",          0},
-  {2,  19, K_SWITCH, true,  true,  "Luz cocina",        0},
-  {8,  18, K_SWITCH, true,  true,  "Luz cuarto",        0},
-  {9,   5, K_SWITCH, true,  true,  "Ventilador",        0},
-  {3,  13, K_SERVO,  false, true,  "Puerta",            0},
-  {4,  14, K_SERVO,  false, true,  "Ventana",           0},
-  {5,  27, K_BUZZER, false, true,  "Timbre",            0},
-  {11, 34, K_SENSOR, false, false, "Sensor movimiento", 0},
+  {0,  13, K_DOOR,  false, true, "Porton garaje",     0},
+  {1,  14, K_DOOR,  false, true, "Puerta principal",  0},
+  {2,  15, K_DOOR,  false, true, "Puerta salon",      0},
+  {3,  16, K_DOOR,  false, true, "Puerta bano",       0},
+  {4,  17, K_DOOR,  false, true, "Puerta cuarto",     0},
+  {5,  18, K_BLIND, false, true, "Persiana sala",     0},
+  {6,  19, K_BLIND, false, true, "Persiana cuarto",   0},
+  {7,  21, K_BLIND, false, true, "Persiana cocina 1", 0},
+  {8,  22, K_BLIND, false, true, "Persiana cocina 2", 0},
+  {9,  27, K_SIREN, false, true, "Sirena",            0},
+  {10,  2, K_LIGHT, false, true, "Luz sala 1",        0},   // GPIO 2 = LED azul de la placa
+  {11,  4, K_LIGHT, false, true, "Luz sala 2",        0},
+  {12,  5, K_LIGHT, false, true, "Luz cocina",        0},
+  {13, 12, K_LIGHT, false, true, "Luz bano",          0},
+  {14, 25, K_LIGHT, false, true, "Luz cuarto",        0},
+  {15, 26, K_LIGHT, false, true, "Luz garaje",        0},
 };
 const int N = sizeof(ch) / sizeof(ch[0]);
-const uint8_t VPIN_BUZZER = 5, VPIN_LCD = 6, VPIN_ALARM = 7, VPIN_TEMP = 10, VPIN_MOTION = 11;
+
+const uint8_t VPIN_GARAGE = 0, VPIN_MAIN_DOOR = 1, VPIN_SIREN = 9;
+const uint8_t VPIN_ALL_LIGHTS = 16, VPIN_ARMED = 17, VPIN_NOTICE = 18;
+const int DOOR_OPEN = 90, DOOR_CLOSED = 0;
+const unsigned long GRACE_MS = 20000;   // tiempo para desarmar antes de que suene
+const unsigned long FLASH_MS = 200;     // parpadeo de las luces con la alarma
+const char* PREFS_NS = "casa2";
 
 Servo servos[N];
 Preferences prefs;
 
-bool armed = false, triggered = false;
-unsigned long buzzerOffAt = 0, lastSensorAt = 0, lastTempAt = 0;
-
-#if USE_LCD
-  #include <Wire.h>
-  #include <LiquidCrystal_I2C.h>
-  LiquidCrystal_I2C lcd(LCD_ADDR, 16, 2);
-#endif
-#if USE_DHT
-  #include <DHT.h>
-  DHT dht(DHT_PIN, DHT_TYPE);
-#endif
+bool armed = false, sounding = false, flashOn = false;
+unsigned long graceStart = 0, lastFlash = 0;
 
 void sendLine(const String& line);
 
-// ---------- Salidas ----------
+// ---------- Utilidades ----------
 Channel* findCh(int vpin) {
   for (int i = 0; i < N; i++) if (ch[i].vpin == vpin) return &ch[i];
   return nullptr;
 }
 int indexOf(Channel* c) { return c - ch; }
+bool isServo(const Channel& c) { return c.kind == K_DOOR || c.kind == K_BLIND; }
+
+void notice(const String& text) { sendLine("V" + String(VPIN_NOTICE) + ":" + text); }
+void report(const Channel& c) { sendLine("V" + String(c.vpin) + ":" + String(c.value)); }
 
 // Mismas reglas que gpioProblem() en la app. Devuelve el problema, o nullptr si el GPIO sirve.
 const char* gpioProblem(int gpio, bool output) {
@@ -102,36 +112,118 @@ const char* gpioProblem(int gpio, bool output) {
   return nullptr;
 }
 
-// Pone una salida digital en encendido o apagado, respetando el «invertir».
-void writeOutput(Channel& c, bool on) {
-  if (!c.enabled) return;
-  digitalWrite(c.gpio, (on != c.inverted) ? HIGH : LOW);
+// ---------- Salidas ----------
+void writeDigital(const Channel& c, bool on) {
+  if (c.enabled) digitalWrite(c.gpio, (on != c.inverted) ? HIGH : LOW);
 }
 
-void setBuzzer(bool on) {
-  Channel* b = findCh(VPIN_BUZZER);
-  if (b) writeOutput(*b, on);
+int servoAngle(const Channel& c) {
+  if (c.kind == K_DOOR) return c.value ? DOOR_OPEN : DOOR_CLOSED;
+  return c.value;
+}
+
+// Lleva una salida a su valor guardado. Con la alarma sonando, las luces las maneja el parpadeo.
+void applyOutput(Channel& c) {
+  if (!c.enabled) return;
+  if (isServo(c)) { servos[indexOf(&c)].write(servoAngle(c)); return; }
+  if (c.kind == K_LIGHT && sounding) return;
+  writeDigital(c, c.value == 1);
 }
 
 // Prepara el pin de un canal y lo deja en su valor actual.
 void setupChannel(Channel& c) {
   int i = indexOf(&c);
-  if (c.kind == K_SERVO && servos[i].attached()) servos[i].detach();
+  if (isServo(c) && servos[i].attached()) servos[i].detach();
   if (!c.enabled) return;
+  if (isServo(c)) {
+    servos[i].setPeriodHertz(50);
+    servos[i].attach(c.gpio, 500, 2400);
+  } else {
+    pinMode(c.gpio, OUTPUT);
+  }
+  applyOutput(c);
+}
+
+void setValue(Channel& c, int value) {
   switch (c.kind) {
-    case K_SWITCH: pinMode(c.gpio, OUTPUT); writeOutput(c, c.value == 1); break;
-    case K_BUZZER: pinMode(c.gpio, OUTPUT); writeOutput(c, false); break;
-    case K_SERVO:
-      servos[i].setPeriodHertz(50);
-      servos[i].attach(c.gpio, 500, 2400);
-      servos[i].write(c.value);
-      break;
-    case K_SENSOR: pinMode(c.gpio, INPUT); break;   // GPIO 34-39 solo sirven como entrada
+    case K_DOOR:  c.value = value > 0 ? 1 : 0; break;
+    case K_BLIND: c.value = constrain(value, 0, 180); break;
+    default:      c.value = value == 1 ? 1 : 0; break;
+  }
+  applyOutput(c);
+  report(c);
+}
+
+void restoreLights() {
+  for (int i = 0; i < N; i++) if (ch[i].kind == K_LIGHT) writeDigital(ch[i], ch[i].value == 1);
+}
+
+// ---------- Seguridad ----------
+void setSiren(bool on) {
+  Channel* s = findCh(VPIN_SIREN);
+  if (!s) return;
+  s->value = on;
+  writeDigital(*s, on);
+}
+
+void startAlarm(const String& reason) {
+  sounding = true;
+  armed = true;
+  graceStart = 0;
+  lastFlash = 0;
+  setSiren(true);
+  sendLine("V" + String(VPIN_SIREN) + ":1");
+  sendLine("V" + String(VPIN_ARMED) + ":1");
+  notice(reason);
+}
+
+void stopAlarm() {
+  if (!sounding) return;
+  sounding = false;
+  setSiren(false);
+  restoreLights();
+  sendLine("V" + String(VPIN_SIREN) + ":0");
+}
+
+void setArmed(bool on) {
+  armed = on;
+  graceStart = 0;
+  if (!on) stopAlarm();
+  sendLine("V" + String(VPIN_ARMED) + ":" + String(on ? 1 : 0));
+  notice(on ? "Seguridad armada" : "Seguridad desarmada");
+}
+
+bool entranceOpen() {
+  Channel* garage = findCh(VPIN_GARAGE);
+  Channel* front = findCh(VPIN_MAIN_DOOR);
+  return (garage && garage->value) || (front && front->value);
+}
+
+void loopSecurity(unsigned long now) {
+  if (!armed || sounding) return;
+  if (entranceOpen()) {
+    if (graceStart == 0) {
+      graceStart = now | 1;   // nunca 0, que significa «sin contar»
+      notice("Acceso detectado: " + String(GRACE_MS / 1000) + " s para desarmar");
+    } else if (now - graceStart >= GRACE_MS) {
+      startAlarm("Alarma sonando: entrada abierta");
+    }
+  } else if (graceStart != 0) {
+    graceStart = 0;
+    notice("Entradas cerradas");
   }
 }
 
+void loopFlash(unsigned long now) {
+  if (!sounding || now - lastFlash < FLASH_MS) return;
+  lastFlash = now;
+  flashOn = !flashOn;
+  for (int i = 0; i < N; i++) if (ch[i].kind == K_LIGHT) writeDigital(ch[i], flashOn);
+}
+
+// ---------- Configuración guardada ----------
 void loadConfig() {
-  prefs.begin("pines", true);
+  prefs.begin(PREFS_NS, true);
   for (int i = 0; i < N; i++) {
     String k = "v" + String(ch[i].vpin);
     ch[i].gpio = prefs.getChar((k + "g").c_str(), ch[i].gpio);
@@ -141,8 +233,8 @@ void loadConfig() {
   prefs.end();
 }
 
-void saveConfig(Channel& c) {
-  prefs.begin("pines", false);
+void saveConfig(const Channel& c) {
+  prefs.begin(PREFS_NS, false);
   String k = "v" + String(c.vpin);
   prefs.putChar((k + "g").c_str(), c.gpio);
   prefs.putBool((k + "i").c_str(), c.inverted);
@@ -150,53 +242,31 @@ void saveConfig(Channel& c) {
   prefs.end();
 }
 
-void beep(int ms) {
-  setBuzzer(true);
-  buzzerOffAt = millis() + ms;
+// ---------- Mensajes de la app ----------
+// Envía el estado real de la casa, para que la app muestre lo que hay y no lo que recuerda.
+void sendState() {
+  for (int i = 0; i < N; i++) if (ch[i].enabled) report(ch[i]);
+  sendLine("V" + String(VPIN_ARMED) + ":" + String(armed ? 1 : 0));
 }
 
-void showLcd(const String& text) {
-#if USE_LCD
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(text.substring(0, 16));
-  if (text.length() > 16) { lcd.setCursor(0, 1); lcd.print(text.substring(16, 32)); }
-#endif
-  Serial.println("LCD: " + text);
-}
-
-// Activa cada salida un momento para identificar qué hay en cada pin.
+// Mueve cada salida un momento para identificar qué hay en cada pin.
 void runTest() {
   for (int i = 0; i < N; i++) {
     Channel& c = ch[i];
-    if (c.kind == K_SENSOR || !c.enabled) continue;
+    if (!c.enabled) continue;
     sendLine("OK:TEST V" + String(c.vpin) + " " + c.name + " GPIO " + String(c.gpio));
-    if (c.kind == K_SERVO) {
+    if (isServo(c)) {
       servos[i].write(90); delay(700);
-      servos[i].write(c.value); delay(500);
     } else {
-      writeOutput(c, true); delay(700);
-      writeOutput(c, c.kind == K_SWITCH && c.value == 1); delay(300);
+      writeDigital(c, true); delay(c.kind == K_SIREN ? 200 : 700);
     }
+    applyOutput(c);
+    if (c.kind == K_SIREN) writeDigital(c, sounding);
+    delay(300);
   }
   sendLine("OK:TEST terminado");
 }
 
-String alarmState() {
-  return triggered ? "DISPARO" : (armed ? "1" : "0");
-}
-
-// Envía el estado real de la casa, para que la app muestre lo que hay y no lo que recuerda.
-void sendState() {
-  for (int i = 0; i < N; i++) {
-    Channel& c = ch[i];
-    if (c.kind == K_BUZZER || !c.enabled) continue;
-    sendLine("V" + String(c.vpin) + ":" + String(c.value));
-  }
-  sendLine("V" + String(VPIN_ALARM) + ":" + alarmState());
-}
-
-// ---------- Mensajes de la app ----------
 // CFG:V<pin>:<gpio>:<invertido>[:<activado>]
 void handleConfig(const String& line) {
   int a = line.indexOf(':', 5);
@@ -210,24 +280,17 @@ void handleConfig(const String& line) {
   bool inverted = line.substring(b + 1, e < 0 ? line.length() : e).toInt() == 1;
   bool enabled = e < 0 ? true : line.substring(e + 1).toInt() == 1;
 
-  const char* problem = gpioProblem(gpio, c->kind != K_SENSOR);
+  const char* problem = gpioProblem(gpio, true);
   if (problem) { sendLine("ERR:GPIO " + String(gpio) + " " + problem); return; }
 
   bool changed = c->gpio != gpio || c->inverted != inverted || c->enabled != enabled;
   if (changed) {
-    if (c->kind == K_SWITCH || c->kind == K_BUZZER) writeOutput(*c, false);   // apaga el pin anterior
+    if (!isServo(*c)) writeDigital(*c, false);   // apaga el pin anterior
     c->gpio = gpio; c->inverted = inverted; c->enabled = enabled;
     setupChannel(*c);
     saveConfig(*c);
   }
   sendLine("OK:V" + String(c->vpin) + " GPIO " + String(gpio) + (inverted ? " inv" : "") + (enabled ? "" : " off"));
-}
-
-void handleAlarm(const String& val) {
-  armed = val.toInt() == 1;
-  triggered = false;
-  setBuzzer(false);
-  sendLine("V" + String(VPIN_ALARM) + ":" + alarmState());
 }
 
 void handleLine(String line) {
@@ -242,20 +305,23 @@ void handleLine(String line) {
   int colon = line.indexOf(':');
   if (line[0] != 'V' || colon < 0) { sendLine("ERR:no entiendo " + line); return; }
   int vpin = line.substring(1, colon).toInt();
-  String val = line.substring(colon + 1);
+  int value = line.substring(colon + 1).toInt();
 
-  if (vpin == VPIN_LCD) { showLcd(val); sendLine("V6:OK"); return; }
-  if (vpin == VPIN_ALARM) { handleAlarm(val); return; }
+  if (vpin == VPIN_ARMED) { setArmed(value == 1); return; }
+  if (vpin == VPIN_SIREN) {
+    if (value == 1) startAlarm("Alarma activada a mano");
+    else setArmed(false);
+    return;
+  }
+  if (vpin == VPIN_ALL_LIGHTS) {
+    for (int i = 0; i < N; i++) if (ch[i].kind == K_LIGHT) setValue(ch[i], value);
+    return;
+  }
 
   Channel* c = findCh(vpin);
   if (!c) { sendLine("ERR:V" + String(vpin) + " no existe"); return; }
   if (!c->enabled) { sendLine("ERR:V" + String(vpin) + " desactivado"); return; }
-  switch (c->kind) {
-    case K_SWITCH: c->value = val.toInt() == 1; writeOutput(*c, c->value == 1); break;
-    case K_SERVO:  c->value = constrain(val.toInt(), 0, 180); servos[indexOf(c)].write(c->value); break;
-    case K_BUZZER: beep(300); break;
-    case K_SENSOR: break;
-  }
+  setValue(*c, value);
 }
 
 // Junta caracteres hasta completar una línea y entonces la procesa.
@@ -367,53 +433,28 @@ void sendLine(const String& line) {
 #endif
 }
 
-// ---------- Sensores y alarma ----------
-void loopMotion(unsigned long now) {
-  if (now - lastSensorAt < 150) return;
-  lastSensorAt = now;
-  Channel* pir = findCh(VPIN_MOTION);
-  if (!pir || !pir->enabled) return;
-
-  bool motion = (digitalRead(pir->gpio) == HIGH) != pir->inverted;
-  if (motion != (pir->value == 1)) {
-    pir->value = motion;
-    sendLine("V" + String(VPIN_MOTION) + ":" + String(pir->value));
-  }
-  if (armed && motion && !triggered) {
-    triggered = true;
-    sendLine("V" + String(VPIN_ALARM) + ":DISPARO");
-  }
-}
-
-void loopBuzzer(unsigned long now) {
-  if (triggered) { setBuzzer((now / 300) % 2); return; }   // sirena intermitente hasta desarmar
-  if (buzzerOffAt && now > buzzerOffAt) { setBuzzer(false); buzzerOffAt = 0; }
-}
-
 // ---------- Programa principal ----------
 String serialBuffer;
 
 void setup() {
-  Serial.begin(115200);
-  delay(300);
-  Serial.println("\n== " DEVICE_NAME " ==");
   loadConfig();
-  for (int i = 0; i < N; i++) setupChannel(ch[i]);
-#if USE_LCD
-  Wire.begin(21, 22);
-  lcd.init(); lcd.backlight();
-  showLcd("Casa lista");
-#endif
-#if USE_DHT
-  dht.begin();
-#endif
+  // Luces y sirena apagadas lo antes posible; después, servos a su posición cerrada.
+  for (int i = 0; i < N; i++) if (!isServo(ch[i])) setupChannel(ch[i]);
+
+  Serial.begin(115200);
+  delay(200);
+  Serial.println("\n== " DEVICE_NAME " ==");
+
+  for (int t = 0; t < 4; t++) ESP32PWM::allocateTimer(t);
+  for (int i = 0; i < N; i++) if (isServo(ch[i])) setupChannel(ch[i]);
+
 #if USE_BLE
   setupBle();
 #endif
 #if USE_WIFI
   setupWifi();
 #endif
-  Serial.println("Escribe mensajes aqui mismo para probar, por ejemplo: V1:1");
+  Serial.println("Escribe mensajes aqui mismo para probar, por ejemplo: V10:1");
 }
 
 void loop() {
@@ -427,14 +468,6 @@ void loop() {
 #endif
 
   unsigned long now = millis();
-  loopMotion(now);
-  loopBuzzer(now);
-
-#if USE_DHT
-  if (now - lastTempAt > 5000) {
-    lastTempAt = now;
-    float t = dht.readTemperature();
-    if (!isnan(t)) sendLine("V" + String(VPIN_TEMP) + ":" + String(t, 1));
-  }
-#endif
+  loopSecurity(now);
+  loopFlash(now);
 }

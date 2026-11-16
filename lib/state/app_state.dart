@@ -10,6 +10,7 @@ import '../core/link.dart';
 import '../core/protocol.dart';
 import '../core/wifi_link.dart';
 import '../models/device.dart';
+import '../models/pins.dart';
 
 class LogLine {
   final bool incoming;
@@ -103,8 +104,8 @@ class Session extends ChangeNotifier {
     final m = Msg.parse(line);
     if (m.isPin) {
       values[m.pin!] = m.value;
-      if (m.pin == 7 && m.value.toUpperCase().startsWith('DISPARO')) {
-        lastAlert = 'Alarma: se detectó movimiento en ${device.name}';
+      if (device.profile == Profile.casa && m.pin == CasaPins.siren && m.value == '1') {
+        lastAlert = 'Alarma sonando en ${device.name}';
       }
     }
     notifyListeners();

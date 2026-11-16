@@ -1,28 +1,26 @@
 // ignore_for_file: avoid_print
 // Placa falsa para probar la conexión Wi‑Fi sin ESP32.
 //
-// Se hace pasar por la maqueta: escucha en el puerto 3333 de tu PC, responde como
-// el ESP32 y muestra en pantalla qué haría con cada mensaje.
+// Se hace pasar por la maqueta: escucha en el puerto 3333 de tu PC, responde igual
+// que el programa del ESP32 y muestra en pantalla qué haría con cada mensaje.
 //
 // Uso (desde la carpeta del proyecto):
 //   dart run tool/placa_falsa.dart
 // Luego, en la app: Agregar dispositivo → Wi‑Fi → la IP que aparece aquí y el puerto 3333.
 // El teléfono y la PC deben estar en la misma red Wi‑Fi.
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+
+import 'package:control_domotica/core/casa_sim.dart';
+import 'package:control_domotica/core/protocol.dart';
+import 'package:control_domotica/models/pins.dart';
 
 const port = 3333;
 
-final names = {
-  1: 'Luz sala',
-  2: 'Luz cocina',
-  8: 'Luz cuarto',
-  9: 'Ventilador',
-  3: 'Puerta (servo)',
-  4: 'Ventana (servo)',
-  5: 'Timbre',
+const names = {
+  0: 'Portón garaje', 1: 'Puerta principal', 2: 'Puerta salón', 3: 'Puerta baño', 4: 'Puerta cuarto',
+  5: 'Persiana sala', 6: 'Persiana cuarto', 7: 'Persiana cocina 1', 8: 'Persiana cocina 2',
+  10: 'Luz sala 1', 11: 'Luz sala 2', 12: 'Luz cocina', 13: 'Luz baño', 14: 'Luz cuarto', 15: 'Luz garaje',
 };
 
 Future<void> main() async {
@@ -42,64 +40,40 @@ Future<void> main() async {
 }
 
 void _serve(Socket client) {
-  final rnd = Random();
-  var temp = 24.0;
-  var armed = false;
-  Timer? alarm;
-  void send(String l) {
-    print('  <- $l');
-    client.write('$l\n');
-  }
-
-  send('HELLO:Placa falsa');
-  final tick = Timer.periodic(const Duration(seconds: 4), (_) {
-    temp += (rnd.nextDouble() - .5) * .4;
-    send('V10:${temp.toStringAsFixed(1)}');
+  final sim = CasaSim((line) {
+    print('  <- ${_describe(line)}');
+    client.write('$line\n');
   });
+  client.write('HELLO:Placa falsa\n');
 
-  client.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen((raw) {
-    final line = raw.trim();
-    if (line.isEmpty) return;
-    print('-> $line');
-    if (line == 'PING') return send('PONG');
-    if (line == 'TEST') return send('OK:TEST terminado');
-    if (line == 'SYNC') return send('V7:${armed ? 1 : 0}');
-    if (line.startsWith('CFG:')) return send('OK:${line.substring(4)}');
-    final m = RegExp(r'^V(\d+):(.*)$').firstMatch(line);
-    if (m == null) return send('ERR:no entiendo $line');
-    final pin = int.parse(m.group(1)!);
-    final val = m.group(2)!;
-    switch (pin) {
-      case 6:
-        print('  [LCD] "$val"');
-        send('V6:OK');
-      case 7:
-        armed = val == '1';
-        alarm?.cancel();
-        print('  [Alarma] ${armed ? 'armada' : 'desarmada'}');
-        if (armed) {
-          alarm = Timer(const Duration(seconds: 6), () {
-            send('V11:1');
-            send('V7:DISPARO');
-          });
-        } else {
-          send('V11:0');
-        }
-      default:
-        final what = names[pin] ?? 'V$pin';
-        final desc = switch (pin) {
-          3 || 4 => 'a $val grados',
-          5 => 'suena',
-          _ => val == '1' ? 'ENCENDIDA' : 'apagada',
-        };
-        print('  [$what] $desc');
-    }
-  }, onDone: () {
-    tick.cancel();
-    alarm?.cancel();
-    print('App desconectada\n');
-  }, onError: (_) {
-    tick.cancel();
-    alarm?.cancel();
-  });
+  client.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen(
+    (raw) {
+      final line = raw.trim();
+      if (line.isEmpty) return;
+      print('-> $line');
+      sim.handle(line);
+    },
+    onDone: () {
+      sim.dispose();
+      print('App desconectada\n');
+    },
+    onError: (_) => sim.dispose(),
+  );
+}
+
+/// Traduce una respuesta de la placa a algo legible, por ejemplo «V10:1  [Luz sala 1 ENCENDIDA]».
+String _describe(String line) {
+  final m = Msg.parse(line);
+  final pin = m.pin;
+  if (pin == null) return line;
+  final name = names[pin];
+  final what = switch (pin) {
+    _ when CasaPins.doors.contains(pin) => '$name ${m.value == '1' ? 'ABIERTA' : 'cerrada'}',
+    _ when CasaPins.blinds.contains(pin) => '$name a ${m.value} grados',
+    _ when CasaPins.lights.contains(pin) => '$name ${m.value == '1' ? 'ENCENDIDA' : 'apagada'}',
+    CasaPins.siren => m.value == '1' ? 'SIRENA SONANDO' : 'sirena apagada',
+    CasaPins.armed => m.value == '1' ? 'seguridad armada' : 'seguridad desarmada',
+    _ => null,
+  };
+  return what == null ? line : '$line  [$what]';
 }

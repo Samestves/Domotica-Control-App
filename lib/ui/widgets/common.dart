@@ -99,7 +99,7 @@ class _PinSheetState extends State<_PinSheet> {
   @override
   void initState() {
     super.initState();
-    final current = _spec.pinsFor(_session.device)!;
+    final current = _spec.pinsFor(_session.device);
     _gpio = TextEditingController(text: '${current.gpio}');
     _inverted = current.inverted;
     _enabled = current.enabled;
@@ -113,17 +113,16 @@ class _PinSheetState extends State<_PinSheet> {
 
   Future<void> _save() async {
     final g = int.tryParse(_gpio.text.trim());
-    final problem = g == null ? 'Escribe un número.' : gpioProblem(g, output: _spec.output);
+    final problem = g == null ? 'Escribe un número.' : gpioProblem(g);
     if (problem != null) {
       setState(() => _error = problem);
       return;
     }
     await _apply(PinConfig(g!, inverted: _inverted, enabled: _enabled), custom: true);
-    if (mounted) Navigator.pop(context);
   }
 
   Future<void> _reset() async {
-    await _apply(PinConfig(_spec.gpio!, inverted: _spec.inverted, enabled: _spec.enabled), custom: false);
+    await _apply(PinConfig(_spec.gpio, inverted: _spec.inverted, enabled: _spec.enabled), custom: false);
   }
 
   /// Guarda el ajuste en la app, lo envía a la placa y cierra la hoja.
@@ -142,7 +141,7 @@ class _PinSheetState extends State<_PinSheet> {
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 24),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(_spec.label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+        Text('${_spec.room} · ${_spec.label}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
         Text('Pin virtual V${_spec.vpin} · por defecto GPIO ${_spec.gpio}', style: const TextStyle(color: C.ink2)),
         const SizedBox(height: 16),
         TextField(
@@ -161,9 +160,7 @@ class _PinSheetState extends State<_PinSheet> {
           child: SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Invertir'),
-            subtitle: Text(_spec.output
-                ? 'Actívalo si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'
-                : 'Actívalo si el sensor marca movimiento cuando no lo hay.'),
+            subtitle: const Text('Actívalo si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'),
             value: _inverted,
             onChanged: (v) => setState(() => _inverted = v),
           ),
@@ -174,7 +171,7 @@ class _PinSheetState extends State<_PinSheet> {
           child: SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Conectado en la maqueta'),
-            subtitle: const Text('Apágalo si esta pieza no existe. Un sensor sin conectar da lecturas falsas.'),
+            subtitle: const Text('Apágalo si esta pieza no existe en la maqueta.'),
             value: _enabled,
             onChanged: (v) => setState(() => _enabled = v),
           ),
@@ -195,7 +192,6 @@ class _PinSheetState extends State<_PinSheet> {
 
 String pinLabel(SavedDevice d, ControlSpec s) {
   final p = s.pinsFor(d);
-  if (p == null) return 'V${s.vpin}';
   if (!p.enabled) return 'V${s.vpin} · sin conectar';
   return 'V${s.vpin} · GPIO ${p.gpio}${p.inverted ? ' · inv' : ''}';
 }

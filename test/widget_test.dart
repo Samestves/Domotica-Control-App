@@ -1,3 +1,4 @@
+import 'package:control_domotica/core/casa_sim.dart';
 import 'package:control_domotica/core/demo_link.dart';
 import 'package:control_domotica/core/link.dart';
 import 'package:control_domotica/core/protocol.dart';
@@ -92,17 +93,57 @@ void main() {
     expect(s.connected, isFalse);
   });
 
-  test('la placa demo responde y dispara la alarma', () async {
-    final link = DemoLink('casa');
-    final lines = <String>[];
-    link.lines.listen(lines.add);
-    await link.connect();
-    expect(link.state, LinkState.connected);
-    await link.sendLine('PING');
-    await link.sendLine('V6:Hola');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-    expect(lines, containsAll(['PONG', 'V6:OK']));
-    await link.dispose();
+  group('Casa del grupo', () {
+    test('el mapa de pines coincide con su documento de conexiones', () {
+      final all = [...casaControls, casaSiren];
+      expect(all.map((c) => c.vpin).toSet(), {for (var v = 0; v <= 15; v++) v});
+      expect(all.map((c) => c.gpio).toSet().length, all.length, reason: 'dos controles en el mismo GPIO');
+      expect(casaControls.firstWhere((c) => c.vpin == 10).gpio, 2); // Luz sala 1 = LED azul de la placa
+      expect(casaRooms, ['Entrada', 'Sala', 'Cocina', 'Baño', 'Cuarto', 'Garaje']);
+    });
+
+    test('todas las luces se encienden con V16', () {
+      final out = <String>[];
+      CasaSim(out.add).handle('V16:1');
+      expect(out, ['V10:1', 'V11:1', 'V12:1', 'V13:1', 'V14:1', 'V15:1']);
+    });
+
+    test('armada y con la puerta principal abierta, suena al terminar el tiempo de gracia', () async {
+      final out = <String>[];
+      final sim = CasaSim(out.add, grace: const Duration(milliseconds: 50));
+      sim.handle('V17:1');
+      sim.handle('V1:1');
+      expect(out, contains(startsWith('V18:Acceso detectado')));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(out, containsAll(['V9:1', 'V18:Alarma sonando: entrada abierta']));
+
+      out.clear();
+      sim.handle('V17:0');
+      expect(out, containsAll(['V9:0', 'V17:0']));
+    });
+
+    test('si se cierra la puerta a tiempo, no suena', () async {
+      final out = <String>[];
+      final sim = CasaSim(out.add, grace: const Duration(milliseconds: 50));
+      sim.handle('V17:1');
+      sim.handle('V0:1');
+      sim.handle('V0:0');
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(out, contains('V18:Entradas cerradas'));
+      expect(out, isNot(contains('V9:1')));
+    });
+
+    test('la app avisa cuando suena la sirena', () async {
+      final d = SavedDevice(id: 'a', name: 'Casa', profile: Profile.casa, transport: Transport.demo);
+      final s = Session(d, linkFor: (_) => DemoLink('casa', casaGrace: const Duration(milliseconds: 50)));
+      await s.connect();
+      s.send(CasaPins.armed, 1);
+      s.send(CasaPins.garage, 1);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(s.lastAlert, 'Alarma sonando en Casa');
+      expect(s.values[CasaPins.siren], '1');
+      await s.disconnect();
+    });
   });
 
   testWidgets('la pantalla de inicio muestra las placas demo', (tester) async {
