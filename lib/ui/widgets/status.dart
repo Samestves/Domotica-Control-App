@@ -5,10 +5,10 @@ import '../../models/device.dart';
 import '../theme.dart';
 
 Color stateColor(LinkState s) => switch (s) {
-      LinkState.connected => C.ok,
-      LinkState.connecting => C.warn,
-      LinkState.error => C.danger,
-      LinkState.disconnected => const Color(0xFFB8C0CA),
+      LinkState.connected => C.green,
+      LinkState.connecting => C.orange,
+      LinkState.error => C.red,
+      LinkState.disconnected => const Color(0xFFAEAEB2),
     };
 
 String stateLabel(LinkState s) => switch (s) {
@@ -18,47 +18,131 @@ String stateLabel(LinkState s) => switch (s) {
       LinkState.disconnected => 'Desconectado',
     };
 
-class StatusDot extends StatelessWidget {
+/// Punto de color con un halo suave; late despacio mientras conecta.
+class StatusDot extends StatefulWidget {
   final LinkState state;
   final double size;
   const StatusDot(this.state, {super.key, this.size = 8});
 
   @override
+  State<StatusDot> createState() => _StatusDotState();
+}
+
+class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMixin {
+  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+
+  @override
+  void didUpdateWidget(StatusDot old) {
+    super.didUpdateWidget(old);
+    _sync();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  void _sync() {
+    if (widget.state == LinkState.connecting) {
+      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
+    } else {
+      _pulse.stop();
+      _pulse.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final c = stateColor(state);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: c,
-        shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: c.withValues(alpha: .25), spreadRadius: 3)],
+    final c = stateColor(widget.state);
+    return FadeTransition(
+      opacity: Tween(begin: 0.35, end: 1.0).animate(_pulse),
+      child: Container(
+        width: widget.size,
+        height: widget.size,
+        decoration: BoxDecoration(
+          color: c,
+          shape: BoxShape.circle,
+          boxShadow: [BoxShadow(color: c.withValues(alpha: 0.35), blurRadius: widget.size, spreadRadius: 1)],
+        ),
       ),
     );
   }
 }
 
-class TransportChip extends StatelessWidget {
-  final Transport t;
-  const TransportChip(this.t, {super.key});
+IconData profileIcon(Profile p) => switch (p) {
+      Profile.casa => Icons.home_rounded,
+      Profile.carro => Icons.directions_car_filled_rounded,
+    };
+
+/// Degradado del icono de cada perfil.
+List<Color> profileColors(Profile p) => switch (p) {
+      Profile.casa => const [Color(0xFF4CD9A0), Color(0xFF16A37A)],
+      Profile.carro => const [Color(0xFF5AB0FF), Color(0xFF1E6FF0)],
+    };
+
+IconData transportIcon(Transport t) => switch (t) {
+      Transport.ble => Icons.bluetooth_rounded,
+      Transport.wifi => Icons.wifi_rounded,
+      Transport.demo => Icons.auto_awesome_rounded,
+    };
+
+/// Icono del perfil dentro de un cuadrado de esquinas continuas con degradado.
+class ProfileBadge extends StatelessWidget {
+  final Profile profile;
+  final double size;
+  const ProfileBadge(this.profile, {super.key, this.size = 52});
 
   @override
   Widget build(BuildContext context) {
-    final (bg, fg) = switch (t) {
-      Transport.ble => (const Color(0xFFE7F0FF), const Color(0xFF0A5FD1)),
-      Transport.wifi => (const Color(0xFFE5F7EC), const Color(0xFF16893D)),
-      Transport.demo => (C.fill, C.ink2),
-    };
+    final colors = profileColors(profile);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(99)),
-      child: Text(t.label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg)),
+      width: size,
+      height: size,
+      decoration: ShapeDecoration(
+        shape: squircle(size * 0.3),
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: colors),
+        shadows: [BoxShadow(color: colors.last.withValues(alpha: 0.3), blurRadius: 14, offset: const Offset(0, 6))],
+      ),
+      child: Icon(profileIcon(profile), color: Colors.white, size: size * 0.52),
     );
   }
 }
 
-IconData profileIcon(Profile p) => switch (p) {
-      Profile.casa => Icons.home_outlined,
-      Profile.carro => Icons.directions_car_outlined,
-    };
+/// «● Conectado · Bluetooth»: estado de una placa en una sola línea.
+class ConnectionLine extends StatelessWidget {
+  final LinkState state;
+  final Transport transport;
+  final bool retrying;
+  final Color? textColor;
+  const ConnectionLine({super.key, required this.state, required this.transport, this.retrying = false, this.textColor});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = retrying ? 'Reconectando…' : stateLabel(state);
+    final color = textColor ?? C.label2;
+    // Un solo texto con el icono dentro: si no cabe, se corta con «…» en vez de desbordarse.
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      StatusDot(retrying ? LinkState.connecting : state, size: 7),
+      const SizedBox(width: 7),
+      Flexible(
+        child: Text.rich(
+          TextSpan(style: T.footnote.copyWith(color: color), children: [
+            TextSpan(text: label, style: const TextStyle(fontWeight: FontWeight.w500)),
+            TextSpan(text: '  ·  ', style: TextStyle(color: color.withValues(alpha: 0.5))),
+            WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(transportIcon(transport), size: 13, color: color)),
+            TextSpan(text: ' ${transport.label}'),
+          ]),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    ]);
+  }
+}

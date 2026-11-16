@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-/// Joystick de dos ejes. Entrega x e y entre −100 y 100 (y positivo = adelante).
-/// Al soltarlo vuelve al centro.
+/// Joystick de dos ejes en vidrio oscuro. Entrega x e y entre −100 y 100 (y positivo = adelante).
+/// Al soltarlo vuelve al centro con un pequeño rebote.
 class Joystick extends StatefulWidget {
   final double size;
   final void Function(int x, int y) onChanged;
   final bool enabled;
-  const Joystick({super.key, this.size = 170, required this.onChanged, this.enabled = true});
+  const Joystick({super.key, this.size = 176, required this.onChanged, this.enabled = true});
 
   @override
   State<Joystick> createState() => _JoystickState();
@@ -20,7 +20,7 @@ class _JoystickState extends State<Joystick> {
   Offset _knob = Offset.zero;
   bool _dragging = false;
 
-  double get _r => widget.size / 2 - 32;
+  double get _r => widget.size / 2 - 34;
 
   void _update(Offset local) {
     var d = local - Offset(widget.size / 2, widget.size / 2);
@@ -40,16 +40,17 @@ class _JoystickState extends State<Joystick> {
   @override
   Widget build(BuildContext context) {
     final s = widget.size;
+    final on = widget.enabled;
     return GestureDetector(
-      onPanStart: widget.enabled
+      onPanStart: on
           ? (d) {
               _dragging = true;
               _update(d.localPosition);
             }
           : null,
-      onPanUpdate: widget.enabled ? (d) => _update(d.localPosition) : null,
-      onPanEnd: widget.enabled ? (_) => _release() : null,
-      onPanCancel: widget.enabled ? _release : null,
+      onPanUpdate: on ? (d) => _update(d.localPosition) : null,
+      onPanEnd: on ? (_) => _release() : null,
+      onPanCancel: on ? _release : null,
       child: SizedBox(
         width: s,
         height: s,
@@ -57,30 +58,38 @@ class _JoystickState extends State<Joystick> {
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: const RadialGradient(colors: [Colors.white, Color(0xFFEEF2F7)], stops: [0, .75]),
-              border: Border.all(color: const Color(0xFFD5DCE5), width: 1.5),
-              boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 6))],
+              gradient: const RadialGradient(colors: [Color(0x1FFFFFFF), Color(0x0AFFFFFF)]),
+              border: Border.all(color: C.nightEdge),
             ),
           ),
-          Container(width: 1, height: s - 30, color: const Color(0xFFD5DCE5)),
-          Container(width: s - 30, height: 1, color: const Color(0xFFD5DCE5)),
-          const Positioned(top: 8, child: Text('ADELANTE', style: TextStyle(fontSize: 9, color: C.ink2, letterSpacing: .8))),
-          const Positioned(bottom: 8, child: Text('ATRÁS', style: TextStyle(fontSize: 9, color: C.ink2, letterSpacing: .8))),
+          Container(
+            width: s * 0.56,
+            height: s * 0.56,
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0x14FFFFFF))),
+          ),
+          for (final (a, icon) in const [
+            (Alignment.topCenter, Icons.keyboard_arrow_up_rounded),
+            (Alignment.bottomCenter, Icons.keyboard_arrow_down_rounded),
+            (Alignment.centerLeft, Icons.keyboard_arrow_left_rounded),
+            (Alignment.centerRight, Icons.keyboard_arrow_right_rounded),
+          ])
+            Align(alignment: a, child: Padding(padding: const EdgeInsets.all(6), child: Icon(icon, color: const Color(0x4DFFFFFF), size: 22))),
           AnimatedContainer(
-            duration: _dragging ? Duration.zero : const Duration(milliseconds: 350),
+            duration: _dragging ? Duration.zero : const Duration(milliseconds: 380),
             curve: Curves.easeOutBack,
             transform: Matrix4.translationValues(_knob.dx, _knob.dy, 0),
             transformAlignment: Alignment.center,
-            width: 62,
-            height: 62,
+            width: 66,
+            height: 66,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: widget.enabled ? const [Color(0xFF2A8DFF), Color(0xFF0A6BE0)] : const [Color(0xFFB8C0CA), Color(0xFF9AA4B0)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: on ? const [Color(0xFF4AA8FF), Color(0xFF0A6BE0)] : const [Color(0xFF4A5363), Color(0xFF2C3340)],
               ),
-              boxShadow: [BoxShadow(color: C.accent.withValues(alpha: widget.enabled ? .4 : 0), blurRadius: 16, offset: const Offset(0, 6))],
+              border: Border.all(color: const Color(0x40FFFFFF)),
+              boxShadow: [BoxShadow(color: C.blue.withValues(alpha: on ? 0.55 : 0), blurRadius: 24, offset: const Offset(0, 6))],
             ),
           ),
         ]),
@@ -95,7 +104,7 @@ class Dial360 extends StatelessWidget {
   final double size;
   final ValueChanged<int> onChanged;
   final bool enabled;
-  const Dial360({super.key, required this.value, required this.onChanged, this.size = 104, this.enabled = true});
+  const Dial360({super.key, required this.value, required this.onChanged, this.size = 108, this.enabled = true});
 
   void _fromPos(Offset p) {
     final c = Offset(size / 2, size / 2);
@@ -117,7 +126,9 @@ class Dial360 extends StatelessWidget {
           painter: _DialPainter(value, enabled),
           child: SizedBox.square(
             dimension: size,
-            child: Center(child: Text('$value°', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
+            child: Center(
+              child: Text('$value°', style: T.title3.copyWith(color: Colors.white, fontFeatures: const [FontFeature.tabularFigures()])),
+            ),
           ),
         ),
       ),
@@ -133,20 +144,22 @@ class _DialPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final c = size.center(Offset.zero);
-    final r = size.width / 2 - 9;
-    canvas.drawCircle(c, r + 6, Paint()..color = Colors.white);
+    final r = size.width / 2 - 10;
+    canvas.drawCircle(c, r + 8, Paint()..color = const Color(0x14FFFFFF));
     canvas.drawCircle(c, r, Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
-      ..color = const Color(0xFFD5DCE5));
+      ..strokeWidth = 6
+      ..color = const Color(0x1FFFFFFF));
     final tick = Paint()
-      ..color = const Color(0xFFC4CCD6)
-      ..strokeWidth = 1.2;
-    for (var i = 0; i < 4; i++) {
-      final a = i * pi / 2;
-      canvas.drawLine(c + Offset(cos(a), sin(a)) * (r - 8), c + Offset(cos(a), sin(a)) * (r - 3), tick);
+      ..color = const Color(0x40FFFFFF)
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    for (var i = 0; i < 12; i++) {
+      final a = i * pi / 6;
+      final inner = i % 3 == 0 ? r - 14 : r - 10;
+      canvas.drawLine(c + Offset(cos(a), sin(a)) * inner, c + Offset(cos(a), sin(a)) * (r - 6), tick);
     }
-    final color = enabled ? C.accent : const Color(0xFF9AA4B0);
+    final color = enabled ? C.blue : const Color(0xFF4A5363);
     if (value > 0) {
       canvas.drawArc(
         Rect.fromCircle(center: c, radius: r),
@@ -155,15 +168,15 @@ class _DialPainter extends CustomPainter {
         false,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 5
+          ..strokeWidth = 6
           ..strokeCap = StrokeCap.round
           ..color = color,
       );
     }
     final a = (value - 90) * pi / 180;
     final h = c + Offset(cos(a), sin(a)) * r;
-    canvas.drawCircle(h, 8.5, Paint()..color = Colors.white);
-    canvas.drawCircle(h, 6.5, Paint()..color = color);
+    canvas.drawCircle(h, 10, Paint()..color = Colors.white);
+    canvas.drawCircle(h, 6, Paint()..color = color);
   }
 
   @override
@@ -176,7 +189,7 @@ class Throttle extends StatelessWidget {
   final ValueChanged<int> onChanged;
   final bool enabled;
   final double width;
-  const Throttle({super.key, required this.value, required this.onChanged, this.enabled = true, this.width = 54});
+  const Throttle({super.key, required this.value, required this.onChanged, this.enabled = true, this.width = 60});
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +204,10 @@ class Throttle extends StatelessWidget {
           onTapDown: enabled ? (d) => set(d.localPosition) : null,
           child: Container(
             width: width,
-            decoration: BoxDecoration(color: const Color(0xFFDFE5EC), borderRadius: BorderRadius.circular(width / 2)),
+            decoration: ShapeDecoration(
+              shape: squircle(22, side: const BorderSide(color: C.nightEdge)),
+              color: C.nightGlass,
+            ),
             clipBehavior: Clip.antiAlias,
             child: Stack(children: [
               Align(
@@ -203,7 +219,7 @@ class Throttle extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.bottomCenter,
                       end: Alignment.topCenter,
-                      colors: enabled ? const [Color(0xFF0A6BE0), Color(0xFF3FA0FF)] : const [Color(0xFF9AA4B0), Color(0xFFB8C0CA)],
+                      colors: enabled ? const [Color(0xFF0A6BE0), Color(0xFF4AA8FF)] : const [Color(0xFF2C3340), Color(0xFF4A5363)],
                     ),
                   ),
                 ),
@@ -211,9 +227,14 @@ class Throttle extends StatelessWidget {
               Positioned(
                 left: 0,
                 right: 0,
-                bottom: 10,
-                child: Text('$value', textAlign: TextAlign.center,
-                    style: TextStyle(fontWeight: FontWeight.w700, color: value > 12 ? Colors.white : C.ink2)),
+                top: 12,
+                child: Icon(Icons.speed_rounded, color: Colors.white.withValues(alpha: 0.6), size: 20),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 12,
+                child: Text('$value', textAlign: TextAlign.center, style: T.headline.copyWith(color: Colors.white)),
               ),
             ]),
           ),

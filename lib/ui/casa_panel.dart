@@ -8,11 +8,17 @@ import '../state/app_state.dart';
 import 'theme.dart';
 import 'widgets/casa_tiles.dart';
 import 'widgets/common.dart';
+import 'widgets/glass.dart';
+import 'widgets/large_title_scaffold.dart';
 
 /// Panel de la maqueta del grupo, ordenado por habitaciones.
 class CasaPanel extends StatefulWidget {
   final SavedDevice device;
-  const CasaPanel({super.key, required this.device});
+
+  /// Sesión a mostrar. Por defecto, la de la app para este dispositivo.
+  final Session? session;
+
+  const CasaPanel({super.key, required this.device, this.session});
 
   @override
   State<CasaPanel> createState() => _CasaPanelState();
@@ -23,44 +29,35 @@ class _CasaPanelState extends State<CasaPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final s = AppScope.of(context).session(widget.device);
+    final app = AppScope.of(context);
+    final s = widget.session ?? app.session(widget.device);
+    final showPins = app.showPins;
     _maybeAlert(s);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.device.name),
-        actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Más opciones',
-            onSelected: (k) {
-              if (k == 'test') s.sendRaw('TEST');
-              if (k == 'off') s.disconnect();
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'test', child: Text('Probar salidas una por una')),
-              PopupMenuItem(value: 'off', child: Text('Desconectar')),
-            ],
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-        children: [
-          ConnectionBar(session: s),
-          const SizedBox(height: 12),
-          SecurityCard(session: s),
-          const SizedBox(height: 10),
-          AllLightsCard(session: s),
-          for (final room in casaRooms) _RoomSection(session: s, room: room),
-          const SizedBox(height: 20),
-          MessageConsole(session: s),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(4, 12, 4, 0),
-            child: Text('Mantén presionado un control para cambiar su pin, invertirlo o marcarlo como no conectado.',
-                style: TextStyle(color: C.ink2, fontSize: 12.5)),
-          ),
-        ],
-      ),
+    return LargeTitleScaffold(
+      title: widget.device.name,
+      subtitle: ConnectionSubtitle(session: s),
+      actions: [_Menu(session: s, showPins: showPins, onShowPins: app.setShowPins)],
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          sliver: SliverList.list(children: [
+            SummaryStrip(session: s),
+            const SizedBox(height: 14),
+            SecurityCard(session: s),
+            const SizedBox(height: 12),
+            AllLightsRow(session: s),
+            for (final room in casaRooms) _RoomSection(session: s, room: room, showPins: showPins),
+            const SectionTitle('Mensajes', small: true),
+            MessageConsole(session: s),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Text('Mantén presionado un control para cambiar su pin, invertirlo o marcarlo como no conectado.',
+                  style: T.footnote, textAlign: TextAlign.center),
+            ),
+          ]),
+        ),
+      ],
     );
   }
 
@@ -80,38 +77,80 @@ class _CasaPanelState extends State<CasaPanel> {
   }
 }
 
-class _RoomSection extends StatelessWidget {
+class _Menu extends StatelessWidget {
   final Session session;
-  final String room;
-  const _RoomSection({required this.session, required this.room});
+  final bool showPins;
+  final ValueChanged<bool> onShowPins;
+  const _Menu({required this.session, required this.showPins, required this.onShowPins});
 
   @override
   Widget build(BuildContext context) {
-    final controls = casaControls.where((c) => c.room == room);
+    PopupMenuItem<String> item(String value, IconData icon, String label, {Color color = C.label}) => PopupMenuItem(
+          value: value,
+          child: Row(children: [
+            Expanded(child: Text(label, style: T.body.copyWith(color: color))),
+            Icon(icon, size: 20, color: color),
+          ]),
+        );
+
+    return PopupMenuButton<String>(
+      tooltip: 'Más opciones',
+      offset: const Offset(0, 52),
+      onSelected: (k) => switch (k) {
+        'pins' => onShowPins(!showPins),
+        'test' => session.sendRaw('TEST'),
+        'sync' => session.sendRaw('SYNC'),
+        'off' => session.disconnect(),
+        'on' => session.connect(),
+        _ => null,
+      },
+      itemBuilder: (_) => [
+        item('pins', Icons.memory_rounded, showPins ? 'Ocultar pines' : 'Mostrar pines'),
+        item('test', Icons.play_circle_outline_rounded, 'Probar salidas una por una'),
+        item('sync', Icons.sync_rounded, 'Leer estado de la placa'),
+        const PopupMenuDivider(),
+        session.connected
+            ? item('off', Icons.link_off_rounded, 'Desconectar', color: C.red)
+            : item('on', Icons.link_rounded, 'Conectar', color: C.blue),
+      ],
+      child: const IgnorePointer(child: GlassIconButton(icon: Icons.more_horiz_rounded, tooltip: 'Más opciones')),
+    );
+  }
+}
+
+class _RoomSection extends StatelessWidget {
+  final Session session;
+  final String room;
+  final bool showPins;
+  const _RoomSection({required this.session, required this.room, required this.showPins});
+
+  @override
+  Widget build(BuildContext context) {
+    final controls = casaControls.where((c) => c.room == room).toList();
     final squares = controls.where((c) => c.kind != ControlKind.blind).toList();
     final blinds = controls.where((c) => c.kind == ControlKind.blind);
+    final lightsOn = controls.where((c) => c.kind == ControlKind.light && session.values[c.vpin] == '1').length;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(4, 22, 4, 10),
-        child: Text(room, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -.4)),
+      SectionTitle(
+        room,
+        trailing: lightsOn == 0 ? null : Capsule('$lightsOn encendida${lightsOn == 1 ? '' : 's'}', icon: Icons.lightbulb_rounded, color: const Color(0xFFE0A100)),
       ),
       if (squares.isNotEmpty)
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 1.25,
-          children: [
-            for (final c in squares)
-              c.kind == ControlKind.light ? LightTile(session: session, spec: c) : DoorTile(session: session, spec: c),
-          ],
-        ),
+        LayoutBuilder(builder: (context, box) {
+          final half = (box.maxWidth - 10) / 2;
+          // Si quedan en número impar, la última ocupa todo el ancho para que no quede un hueco.
+          return Wrap(spacing: 10, runSpacing: 10, children: [
+            for (final (i, c) in squares.indexed)
+              SizedBox(
+                width: squares.length.isOdd && i == squares.length - 1 ? box.maxWidth : half,
+                child: AccessoryTile(session: session, spec: c, showPins: showPins),
+              ),
+          ]);
+        }),
       for (final c in blinds) ...[
         const SizedBox(height: 10),
-        BlindTile(session: session, spec: c),
+        BlindTile(session: session, spec: c, showPins: showPins),
       ],
     ]);
   }

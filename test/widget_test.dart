@@ -6,7 +6,6 @@ import 'package:control_domotica/main.dart';
 import 'package:control_domotica/models/controls.dart';
 import 'package:control_domotica/models/device.dart';
 import 'package:control_domotica/state/app_state.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -151,10 +150,11 @@ void main() {
     final state = AppState();
     await state.load();
     await tester.pumpWidget(ControlApp(state: state));
-    expect(find.text('Dispositivos'), findsOneWidget);
+    expect(find.text('Dispositivos'), findsWidgets); // título grande y el de la barra
     expect(find.text('Casa (demo)'), findsOneWidget);
     expect(find.text('Auto Robot (demo)'), findsOneWidget);
-    expect(find.widgetWithText(OutlinedButton, 'Agregar dispositivo'), findsOneWidget);
+    expect(find.text('Agregar dispositivo'), findsOneWidget);
+    expect(find.text('Control Domótica'), findsOneWidget); // cápsula con la versión
   });
 }
 

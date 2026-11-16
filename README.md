@@ -14,6 +14,8 @@ App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por
 | `tool/placa_falsa.dart` | Una placa simulada en la PC para probar el Wi‑Fi sin hardware |
 | `tool/cargar_esp32.ps1` | Carga una versión guardada en el ESP32, o le devuelve su Blynk |
 | `test/` | Pruebas automáticas |
+| `capturas/` | Dibuja las pantallas en PNG para revisar el diseño: `flutter test capturas --update-goldens` |
+| `tool/generar_icono.py` | Genera el icono de la app en todos los tamaños de Android |
 
 ## Probar sin hardware
 

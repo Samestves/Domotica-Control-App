@@ -23,7 +23,11 @@ class AppScope extends InheritedNotifier<AppState> {
 
 class ControlApp extends StatelessWidget {
   final AppState state;
-  const ControlApp({super.key, required this.state});
+
+  /// Pantalla inicial. Por defecto, la lista de dispositivos; las capturas de diseño usan otras.
+  final Widget home;
+
+  const ControlApp({super.key, required this.state, this.home = const HomeScreen()});
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +37,7 @@ class ControlApp extends StatelessWidget {
         title: 'Control Domótica',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
-        home: const HomeScreen(),
+        home: home,
       ),
     );
   }

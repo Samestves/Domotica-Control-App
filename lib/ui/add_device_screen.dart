@@ -1,11 +1,14 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../main.dart';
 import '../models/device.dart';
 import 'theme.dart';
+import 'widgets/glass.dart';
+import 'widgets/large_title_scaffold.dart';
 
 class AddDeviceScreen extends StatefulWidget {
   const AddDeviceScreen({super.key});
@@ -15,12 +18,14 @@ class AddDeviceScreen extends StatefulWidget {
 }
 
 class _AddDeviceScreenState extends State<AddDeviceScreen> {
+  static const _esp32 = 'ESP32', _hm10 = 'Arduino + HM‑10';
+
   final _name = TextEditingController();
   final _ip = TextEditingController(text: '192.168.1.');
   final _port = TextEditingController(text: '3333');
   Profile _profile = Profile.casa;
   Transport _transport = Transport.ble;
-  String _board = 'ESP32';
+  String _board = _esp32;
 
   // Bluetooth
   List<ScanResult> _results = [];
@@ -100,134 +105,216 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Agregar dispositivo')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-        children: [
-          _label('Nombre'),
-          TextField(
-            controller: _name,
-            decoration: const InputDecoration(hintText: 'Ej.: Casa de la feria'),
-            textCapitalization: TextCapitalization.sentences,
-            onChanged: (_) => setState(() {}),
-          ),
-          _label('Perfil del panel'),
-          _segmented<Profile>(
-            value: _profile,
-            items: const {Profile.casa: 'Casa Domótica', Profile.carro: 'Auto Robot'},
-            onChanged: (v) => setState(() => _profile = v),
-          ),
-          _label('Placa'),
-          _segmented<String>(
-            value: _board,
-            items: const {'ESP32': 'ESP32', 'Arduino + HM‑10': 'Arduino + HM‑10'},
-            onChanged: (v) => setState(() {
-              _board = v;
-              if (v != 'ESP32' && _transport == Transport.wifi) _transport = Transport.ble;
-            }),
-          ),
-          _label('Conexión'),
-          _segmented<Transport>(
-            value: _transport,
-            items: {
-              Transport.ble: 'Bluetooth',
-              if (_board == 'ESP32') Transport.wifi: 'Wi‑Fi',
-              Transport.demo: 'Demo',
+    return LargeTitleScaffold(
+      title: 'Nuevo dispositivo',
+      bottomBar: FilledButton(onPressed: _valid ? _save : null, child: const Text('Guardar dispositivo')),
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverList.list(children: [
+            const SectionTitle('Nombre', small: true),
+            GlassGroup(children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextField(
+                  controller: _name,
+                  style: T.body,
+                  decoration: const InputDecoration(hintText: 'Ej.: Casa de la feria'),
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ]),
+            const SectionTitle('Panel', small: true),
+            _segmented<Profile>(
+              value: _profile,
+              items: const {Profile.casa: 'Casa domótica', Profile.carro: 'Auto Robot'},
+              onChanged: (v) => _profile = v,
+            ),
+            const SectionTitle('Placa', small: true),
+            _segmented<String>(
+              value: _board,
+              items: const {_esp32: _esp32, _hm10: _hm10},
+              onChanged: (v) {
+                _board = v;
+                if (v != _esp32 && _transport == Transport.wifi) _transport = Transport.ble;
+              },
+            ),
+            const SectionTitle('Conexión', small: true),
+            _segmented<Transport>(
+              value: _transport,
+              items: {
+                Transport.ble: 'Bluetooth',
+                if (_board == _esp32) Transport.wifi: 'Wi‑Fi',
+                Transport.demo: 'Demo',
+              },
+              onChanged: (v) => _transport = v,
+            ),
+            ...switch (_transport) {
+              Transport.ble => _bleSection(),
+              Transport.wifi => _wifiSection(),
+              Transport.demo => const [
+                  SizedBox(height: 10),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('Una placa simulada dentro del teléfono. Sirve para probar y mostrar los paneles sin hardware.', style: T.footnote),
+                  ),
+                ],
             },
-            onChanged: (v) => setState(() => _transport = v),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  /// Selector segmentado de iOS sobre vidrio.
+  Widget _segmented<V extends Object>({required V value, required Map<V, String> items, required ValueChanged<V> onChanged}) {
+    return CupertinoSlidingSegmentedControl<V>(
+      groupValue: value,
+      backgroundColor: const Color(0x24787880),
+      thumbColor: Colors.white,
+      padding: const EdgeInsets.all(3),
+      children: {
+        for (final e in items.entries)
+          e.key: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            child: Text(e.value, style: T.subhead.copyWith(fontWeight: FontWeight.w600)),
           ),
-          const SizedBox(height: 16),
-          ...switch (_transport) {
-            Transport.ble => _bleSection(),
-            Transport.wifi => _wifiSection(),
-            Transport.demo => [
-                const Panel(child: Text('Una placa simulada dentro del teléfono. Sirve para probar los paneles sin hardware.', style: TextStyle(color: C.ink2))),
-              ],
-          },
-          const SizedBox(height: 24),
-          FilledButton(onPressed: _valid ? _save : null, child: const Text('Guardar dispositivo')),
-        ],
-      ),
+      },
+      onValueChanged: (v) {
+        if (v != null) setState(() => onChanged(v));
+      },
     );
   }
 
   List<Widget> _bleSection() => [
-        Panel(
-          padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
-          child: Column(children: [
-            Row(children: [
-              const Expanded(child: Text('Placas cercanas', style: TextStyle(fontWeight: FontWeight.w600))),
-              if (_scanning) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-              TextButton(onPressed: _scanning ? FlutterBluePlus.stopScan : _scan, child: Text(_scanning ? 'Detener' : 'Buscar')),
-            ]),
-            if (_scanError != null) Padding(padding: const EdgeInsets.all(8), child: Text(_scanError!, style: const TextStyle(color: C.danger))),
-            if (_results.isEmpty && !_scanning && _scanError == null)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(0, 4, 8, 10),
-                child: Text('Toca «Buscar» con la placa encendida y cerca del teléfono.', style: TextStyle(color: C.ink2)),
-              ),
-            for (final r in _results)
-              ListTile(
-                contentPadding: const EdgeInsets.only(left: 0, right: 8),
-                leading: Icon(Icons.bluetooth, color: _picked == r ? C.accent : C.ink2),
-                title: Text(_nameOf(r)),
-                subtitle: Text('${r.device.remoteId.str} · ${r.rssi} dBm', style: const TextStyle(fontSize: 12)),
-                trailing: _picked == r ? const Icon(Icons.check_circle, color: C.accent) : null,
-                onTap: () => setState(() {
-                  _picked = r;
-                  if (_name.text.trim().isEmpty) _name.text = _nameOf(r);
-                }),
-              ),
+        SectionTitle(
+          'Placas cercanas',
+          small: true,
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (_scanning) const Padding(padding: EdgeInsets.only(right: 8), child: CupertinoActivityIndicator(radius: 8)),
+            GestureDetector(
+              onTap: _scanning ? FlutterBluePlus.stopScan : _scan,
+              child: Text(_scanning ? 'Detener' : 'Buscar', style: T.subhead.copyWith(color: C.blue, fontWeight: FontWeight.w600)),
+            ),
           ]),
+        ),
+        GlassGroup(
+          footer: _scanError ?? (_results.isEmpty ? 'Toca «Buscar» con la placa encendida y cerca del teléfono.' : null),
+          children: [
+            if (_results.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 22),
+                child: Column(children: [
+                  Icon(_scanning ? Icons.bluetooth_searching_rounded : Icons.bluetooth_rounded, color: C.label3, size: 30),
+                  const SizedBox(height: 6),
+                  Text(_scanning ? 'Buscando…' : 'Sin resultados todavía', style: T.subhead.copyWith(color: C.label2)),
+                ]),
+              ),
+            for (final r in _results) _BoardRow(
+              name: _nameOf(r),
+              id: r.device.remoteId.str,
+              rssi: r.rssi,
+              selected: _picked == r,
+              onTap: () => setState(() {
+                _picked = r;
+                if (_name.text.trim().isEmpty) _name.text = _nameOf(r);
+              }),
+            ),
+          ],
         ),
       ];
 
   List<Widget> _wifiSection() => [
-        Row(children: [
-          Expanded(
-            flex: 3,
-            child: TextField(
-              controller: _ip,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'IP de la placa'),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: _port,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Puerto'),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
-        ]),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(4, 8, 4, 0),
-          child: Text('El ESP32 muestra su IP en el monitor serie al conectarse al Wi‑Fi. El teléfono debe estar en la misma red.',
-              style: TextStyle(color: C.ink2, fontSize: 13)),
+        const SectionTitle('Dirección en la red', small: true),
+        GlassGroup(
+          footer: 'El ESP32 muestra su IP en el monitor serie al conectarse al Wi‑Fi. El teléfono debe estar en la misma red.',
+          children: [
+            _FieldRow(label: 'IP', controller: _ip, onChanged: () => setState(() {})),
+            _FieldRow(label: 'Puerto', controller: _port, onChanged: () => setState(() {})),
+          ],
         ),
       ];
+}
 
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
-        child: Text(t.toUpperCase(), style: const TextStyle(fontSize: 12, letterSpacing: .6, color: C.ink2, fontWeight: FontWeight.w600)),
-      );
+/// Una placa encontrada por Bluetooth, con su señal.
+class _BoardRow extends StatelessWidget {
+  final String name, id;
+  final int rssi;
+  final bool selected;
+  final VoidCallback onTap;
+  const _BoardRow({required this.name, required this.id, required this.rssi, required this.selected, required this.onTap});
 
-  Widget _segmented<T>({required T value, required Map<T, String> items, required ValueChanged<T> onChanged}) {
-    return SegmentedButton<T>(
-      segments: [for (final e in items.entries) ButtonSegment(value: e.key, label: Text(e.value))],
-      selected: {value},
-      showSelectedIcon: false,
-      onSelectionChanged: (s) => onChanged(s.first),
-      style: SegmentedButton.styleFrom(
-        backgroundColor: C.card,
-        selectedBackgroundColor: C.accent,
-        selectedForegroundColor: Colors.white,
-        side: const BorderSide(color: C.line),
+  @override
+  Widget build(BuildContext context) {
+    final bars = rssi > -60 ? 3 : (rssi > -75 ? 2 : 1);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 11, 16, 11),
+        child: Row(children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: ShapeDecoration(shape: squircle(10), color: selected ? C.blue : const Color(0x1A007AFF)),
+            child: Icon(Icons.bluetooth_rounded, size: 19, color: selected ? Colors.white : C.blue),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, style: T.body.copyWith(fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(id, style: T.caption),
+            ]),
+          ),
+          _SignalBars(bars),
+          const SizedBox(width: 12),
+          SizedBox(width: 22, child: selected ? const Icon(Icons.check_rounded, color: C.blue) : null),
+        ]),
       ),
+    );
+  }
+}
+
+class _SignalBars extends StatelessWidget {
+  final int level; // 1 a 3
+  const _SignalBars(this.level);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+      for (var i = 1; i <= 3; i++)
+        Container(
+          margin: const EdgeInsets.only(left: 2),
+          width: 4,
+          height: 5.0 + i * 4,
+          decoration: ShapeDecoration(shape: const StadiumBorder(), color: i <= level ? C.label : C.label3),
+        ),
+    ]);
+  }
+}
+
+class _FieldRow extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+  const _FieldRow({required this.label, required this.controller, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(children: [
+        SizedBox(width: 80, child: Text(label, style: T.body)),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            textAlign: TextAlign.right,
+            style: T.body.copyWith(color: C.label2),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => onChanged(),
+          ),
+        ),
+      ]),
     );
   }
 }

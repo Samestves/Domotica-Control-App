@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 import 'device.dart';
 import 'pins.dart';
 
@@ -28,11 +26,7 @@ class ControlSpec {
     this.enabled = true,
   });
 
-  IconData get icon => switch (kind) {
-        ControlKind.light => Icons.lightbulb_outline,
-        ControlKind.door => vpin == CasaPins.garage ? Icons.garage_outlined : Icons.door_front_door_outlined,
-        ControlKind.blind => Icons.blinds_outlined,
-      };
+  bool get isGarage => vpin == CasaPins.garage;
 }
 
 /// Cableado de la maqueta del grupo, según su documento «Conexiones GPIO».

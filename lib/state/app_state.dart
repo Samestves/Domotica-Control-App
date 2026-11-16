@@ -167,9 +167,22 @@ class AppState extends ChangeNotifier {
 
   int get connectedCount => _sessions.values.where((s) => s.connected).length;
 
+  static const _showPinsKey = 'ui_show_pins';
+
+  /// Modo técnico: muestra el pin virtual y el GPIO de cada control. Apagado, el panel se ve más limpio.
+  bool showPins = false;
+
+  Future<void> setShowPins(bool v) async {
+    showPins = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showPinsKey, v);
+  }
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
+    showPins = prefs.getBool(_showPinsKey) ?? false;
     devices.clear();
     if (raw != null) {
       try {
