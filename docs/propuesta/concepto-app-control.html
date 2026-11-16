@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Concepto · App de Control para Robótica y Domótica</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Documento A4 sobrio tipo Apple: papel blanco, tinta azul noche, acento azul plano. Portada en azul plano con retícula. */
+:root{
+  --ink:#0d1b2a; --ink-2:#4a5a6b; --ink-3:#8593a3;
+  --rule:#dfe4ea; --soft:#f3f5f8;
+  --bp:#0c355e; --bp-deep:#082640; --accent:#0a7cff; --mark:#e8a317;
+  --ok:#1f9d55; --warn:#c77700;
+  --sans:"Geist","Segoe UI",system-ui,sans-serif;
+  --mono:"Geist Mono",Consolas,ui-monospace,monospace;
+}
+@page{size:A4;margin:0}
+*{box-sizing:border-box}
+html,body{margin:0;background:#fff}
+body{font-family:var(--sans);color:var(--ink);font-size:10.5pt;line-height:1.55;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page{width:210mm;height:297mm;padding:22mm 20mm 18mm;position:relative;overflow:hidden;page-break-after:always;break-after:page;display:flex;flex-direction:column}
+.page:last-child{page-break-after:auto;break-after:auto}
+h1,h2,h3{margin:0;letter-spacing:-.02em;text-wrap:balance}
+p{margin:0}
+.mono{font-family:var(--mono)}
+.kicker{font-family:var(--mono);font-size:8pt;letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+h2{font-size:24pt;font-weight:600;line-height:1.1;margin:6px 0 10px}
+.intro{font-size:12pt;color:var(--ink-2);max-width:150mm;margin-bottom:9mm}
+h3{font-size:12pt;font-weight:600;margin-bottom:4px}
+.foot{position:absolute;left:20mm;right:20mm;bottom:10mm;display:flex;justify-content:space-between;font-family:var(--mono);font-size:7.5pt;color:var(--ink-3);border-top:1px solid var(--rule);padding-top:3mm}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:7mm}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm}
+.card{background:var(--soft);border-radius:12px;padding:5mm}
+.card p{color:var(--ink-2);font-size:9.8pt}
+.num{font-family:var(--mono);font-size:8pt;color:var(--ink-3);margin-bottom:2mm}
+table{width:100%;border-collapse:collapse;font-size:9.4pt}
+th{text-align:left;font-family:var(--mono);font-weight:400;font-size:7.5pt;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);padding:0 3mm 2.5mm;border-bottom:1.5px solid var(--ink)}
+td{padding:3mm;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+td:first-child{color:var(--ink);font-weight:500}
+.y{color:var(--ok);font-weight:600}.n{color:#c0392b;font-weight:600}.m{color:var(--warn);font-weight:600}
+tr.us td{background:#eef5ff}
+tr.us td:first-child{border-left:3px solid var(--accent)}
+.pill{display:inline-block;font-family:var(--mono);font-size:7.5pt;padding:1px 7px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.pill.ok{color:var(--ok)}.pill.ask{color:var(--warn)}
+pre{margin:0;font-family:var(--mono);font-size:8.6pt;line-height:1.65;background:var(--bp-deep);color:#d6e9fb;border-radius:12px;padding:5mm 6mm}
+pre .c{color:#7f9fbd}pre .k{color:#8fd6ff}pre .s{color:#ffc457}
+.callout{border-left:3px solid var(--accent);padding:1mm 0 1mm 5mm;font-size:11pt;color:var(--ink)}
+ul.clean{margin:0;padding:0;list-style:none;display:grid;gap:2mm}
+ul.clean li{padding-left:5mm;position:relative;color:var(--ink-2)}
+ul.clean li::before{content:"";position:absolute;left:0;top:.62em;width:2.2mm;height:1px;background:var(--accent)}
+
+/* Portada */
+.cover{background:
+  linear-gradient(rgba(176,216,255,.13) 1px,transparent 1px) 0 0/6mm 6mm,
+  linear-gradient(90deg,rgba(176,216,255,.13) 1px,transparent 1px) 0 0/6mm 6mm,
+  linear-gradient(rgba(176,216,255,.07) 1px,transparent 1px) 0 0/30mm 30mm,
+  linear-gradient(90deg,rgba(176,216,255,.07) 1px,transparent 1px) 0 0/30mm 30mm,
+  radial-gradient(160mm 120mm at 80% 0%,#145087 0%,var(--bp) 55%,var(--bp-deep) 100%);
+  color:#e9f4ff;padding:24mm 20mm}
+.cover .kicker{color:#9cc2e6}
+.cover h1{font-size:40pt;line-height:1.02;font-weight:600;margin:10mm 0 6mm;letter-spacing:-.035em}
+.cover h1 span{font-weight:300;color:#9cc2e6}
+.cover .sub{font-size:13pt;color:#c9def3;max-width:135mm}
+.tb{position:absolute;right:20mm;bottom:22mm;width:82mm;border:1.2px solid #e9f4ff;font-family:var(--mono);font-size:8pt}
+.tb div{display:grid;grid-template-columns:26mm 1fr;border-top:1px solid rgba(233,244,255,.35)}
+.tb div:first-child{border-top:0}
+.tb b{font-weight:400;color:#9cc2e6;padding:2mm 3mm;border-right:1px solid rgba(233,244,255,.35)}
+.tb span{padding:2mm 3mm}
+.cover svg.hero{position:absolute;left:20mm;bottom:22mm;width:85mm}
+
+/* Pantallas */
+.wire{display:grid;grid-template-columns:44mm 1fr;gap:5mm;align-items:start}
+.wire svg{width:44mm;height:auto;display:block}
+.phases{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--rule);border-radius:12px;overflow:hidden}
+.phase{padding:5mm;border-left:1px solid var(--rule)}
+.phase:first-child{border-left:0;background:#eef5ff}
+.phase .kicker{margin-bottom:2mm}
+.phase h3{font-size:11.5pt;margin-bottom:3mm}
+.steps{counter-reset:s;display:grid;gap:3.5mm}
+.steps div{display:grid;grid-template-columns:9mm 1fr;gap:2mm;align-items:start}
+.steps b{font-family:var(--mono);font-weight:500;color:var(--accent);font-size:10pt}
+.compact td{padding:2mm 3mm}.compact .intro{margin-bottom:6mm}
+</style>
+</head>
+<body>
+
+<!-- 1 · Portada -->
+<section class="page cover">
+  <div class="kicker">Documento de concepto · Versión 1.0</div>
+  <h1>App de control para<br>robótica y domótica<br><span>Tres dispositivos, una sola app.</span></h1>
+  <p class="sub">Propuesta para desarrollar una app móvil propia que registre placas Arduino y ESP32, se conecte por Bluetooth o Wi‑Fi y abra un panel de control distinto para cada dispositivo.</p>
+
+  <svg class="hero" viewBox="0 0 340 200" fill="none" stroke="#e9f4ff" stroke-width="1.4" font-family="Geist Mono, Consolas, monospace">
+    <rect x="4" y="30" width="62" height="120" rx="12"/>
+    <rect x="12" y="40" width="46" height="100" rx="6" stroke="#9cc2e6" stroke-dasharray="3 3"/>
+    <rect x="18" y="56" width="34" height="12" rx="3" fill="rgba(233,244,255,.15)"/>
+    <rect x="18" y="74" width="34" height="12" rx="3" fill="rgba(233,244,255,.15)"/>
+    <rect x="18" y="92" width="34" height="12" rx="3" fill="rgba(233,244,255,.15)"/>
+    <path d="M70 80 C 150 80, 150 30, 220 30"/><path d="M70 90 C 150 90, 150 90, 220 90"/><path d="M70 100 C 150 100, 150 150, 220 150"/>
+    <circle cx="150" cy="56" r="3.5" fill="#8fd6ff" stroke="none"/><circle cx="150" cy="90" r="3.5" fill="#ffc457" stroke="none"/><circle cx="150" cy="124" r="3.5" fill="#8fd6ff" stroke="none"/>
+    <rect x="222" y="14" width="114" height="34" rx="4"/><rect x="222" y="74" width="114" height="34" rx="4"/><rect x="222" y="134" width="114" height="34" rx="4"/>
+    <g fill="#e9f4ff" stroke="none" font-size="9"><text x="232" y="35">CASA · Wi‑Fi</text><text x="232" y="95">CARRO · BLE</text><text x="232" y="155">SENSORES · BLE</text></g>
+  </svg>
+
+  <div class="tb">
+    <div><b>Proyecto</b><span>App de control IoT</span></div>
+    <div><b>Plataforma</b><span>Android (Flutter)</span></div>
+    <div><b>Placas</b><span>ESP32 · Arduino</span></div>
+    <div><b>Conexión</b><span>Bluetooth LE · Wi‑Fi</span></div>
+    <div><b>Fecha</b><span>5 de noviembre de 2026</span></div>
+  </div>
+</section>
+
+<!-- 2 · Resumen y decisión -->
+<section class="page">
+  <div class="kicker">01 · Resumen</div>
+  <h2>Lo que queremos lograr</h2>
+  <p class="intro">El equipo necesita manejar al menos tres dispositivos desde la misma app: una casa domótica, un carro robot y otros proyectos. Cada uno debe tener sus propios controles y conectarse por Bluetooth o Wi‑Fi.</p>
+
+  <div class="grid3" style="margin-bottom:10mm">
+    <div class="card"><div class="num">OBJETIVO 1</div><h3>Una app, varias placas</h3><p>Registrar, guardar y conectar tres o más placas a la vez.</p></div>
+    <div class="card"><div class="num">OBJETIVO 2</div><h3>Un panel por placa</h3><p>Cada dispositivo abre controles hechos para su propósito.</p></div>
+    <div class="card"><div class="num">OBJETIVO 3</div><h3>Comunicación en dos sentidos</h3><p>Órdenes hacia la placa, y sensores y alarmas de vuelta a la app.</p></div>
+  </div>
+
+  <div class="kicker" style="margin-bottom:3mm">02 · Decisión</div>
+  <h3 style="font-size:15pt;margin-bottom:4mm">¿Por qué crear una app propia?</h3>
+  <p style="color:var(--ink-2);margin-bottom:5mm;max-width:160mm">Revisamos las opciones que ya existen. Cada una cubre una parte del encargo, pero ninguna lo cubre completo.</p>
+  <table>
+    <thead><tr><th>Opción</th><th>Varios a la vez</th><th>Bluetooth</th><th>Paneles a medida</th><th>Control directo, sin internet</th></tr></thead>
+    <tbody>
+      <tr><td>Blynk</td><td class="y">Sí, por Wi‑Fi</td><td class="n">No para control</td><td class="m">Con sus widgets</td><td class="n">Pasa por la nube</td></tr>
+      <tr><td>Arduino IoT Cloud</td><td class="y">Sí, por Wi‑Fi</td><td class="n">No para control</td><td class="m">Con sus widgets</td><td class="n">Pasa por la nube</td></tr>
+      <tr><td>RemoteXY</td><td class="m">Pensada para uno</td><td class="y">Sí</td><td class="y">Sí, con límites</td><td class="y">Sí</td></tr>
+      <tr><td>Dabble</td><td class="n">Uno a la vez</td><td class="y">Sí</td><td class="n">Pantallas fijas</td><td class="y">Sí</td></tr>
+      <tr class="us"><td>App propia</td><td class="y">Sí, 3 o más</td><td class="y">Sí</td><td class="y">Totalmente</td><td class="y">Sí</td></tr>
+    </tbody>
+  </table>
+  <p class="callout" style="margin-top:8mm">Recomendación: desarrollar una app propia. Es la única opción que reúne varios dispositivos, Bluetooth y paneles a medida en un solo lugar.</p>
+  <div class="foot"><span>App de control para robótica y domótica</span><span>2</span></div>
+</section>
+
+<!-- 3 · Requisitos -->
+<section class="page">
+  <div class="kicker">03 · Requisitos</div>
+  <h2>Qué pide el equipo y cómo se cumple</h2>
+  <p class="intro">Cada requisito del encargo tiene una respuesta concreta en la app.</p>
+  <table>
+    <thead><tr><th style="width:32%">Requisito</th><th>Solución</th><th style="width:20mm">Estado</th></tr></thead>
+    <tbody>
+      <tr><td>Registrar y guardar varias placas</td><td>Lista de dispositivos guardada en el teléfono, con nombre, tipo de placa, conexión y perfil.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Conexión por Bluetooth o Wi‑Fi</td><td>Bluetooth LE para ESP32 y módulos HM‑10. Wi‑Fi en la red local mediante WebSocket.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Tres dispositivos a la vez</td><td>Una conexión independiente por placa, cada una con su propio estado.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Panel propio por dispositivo</td><td>Perfiles como plantillas: Casa Domótica, Auto Robot y Personalizado.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Casa: puertas, ventanas, luces, alarma, pantalla y sonido</td><td>Servos con botón y slider, switches para relés, alarma que se puede armar, texto para la LCD y buzzer.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Carro: dirección, aceleración y reversa</td><td>Modo conducción en horizontal: joystick, acelerador, reversa, freno, luces y bocina.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Botones, sliders y giro de 360°</td><td>Catálogo de controles configurables, cada uno asignado a un pin virtual.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Alarmas y mensajes</td><td>Alertas que envía la placa y una consola de mensajes en los dos sentidos.</td><td><span class="pill ok">Cubierto</span></td></tr>
+      <tr><td>Traducción o procesamiento de datos</td><td>El protocolo común resuelve el procesamiento. Falta definir si «traducción» se refiere a idiomas o a comandos de voz.</td><td><span class="pill ask">Por definir</span></td></tr>
+    </tbody>
+  </table>
+  <div class="foot"><span>App de control para robótica y domótica</span><span>3</span></div>
+</section>
+
+<!-- 4 · Arquitectura -->
+<section class="page">
+  <div class="kicker">04 · Arquitectura</div>
+  <h2>Cómo se conecta todo</h2>
+  <p class="intro">El teléfono se comunica directo con cada placa, sin servidores de por medio. Por eso responde al instante y funciona aunque no haya internet.</p>
+
+  <svg viewBox="0 0 680 300" style="width:100%;margin-bottom:8mm" font-family="Geist Mono, Consolas, monospace">
+    <rect width="680" height="300" rx="14" fill="#0c355e"/>
+    <g stroke="rgba(176,216,255,.12)"><path d="M0 50H680M0 100H680M0 150H680M0 200H680M0 250H680M85 0V300M170 0V300M255 0V300M340 0V300M425 0V300M510 0V300M595 0V300"/></g>
+    <g fill="none" stroke="#e9f4ff" stroke-width="1.5">
+      <rect x="50" y="55" width="96" height="190" rx="18"/>
+      <rect x="62" y="85" width="72" height="22" rx="5" fill="rgba(233,244,255,.12)"/>
+      <rect x="62" y="113" width="72" height="22" rx="5" fill="rgba(233,244,255,.12)"/>
+      <rect x="62" y="141" width="72" height="22" rx="5" fill="rgba(233,244,255,.12)"/>
+      <path d="M150 120 C 270 120, 290 60, 420 60"/>
+      <path d="M150 150 C 270 150, 290 150, 420 150"/>
+      <path d="M150 180 C 270 180, 290 240, 420 240"/>
+      <rect x="425" y="32" width="210" height="56" rx="6"/>
+      <rect x="425" y="122" width="210" height="56" rx="6"/>
+      <rect x="425" y="212" width="210" height="56" rx="6"/>
+    </g>
+    <g fill="#e9f4ff" font-size="9.5">
+      <text x="98" y="100" text-anchor="middle">Casa</text><text x="98" y="128" text-anchor="middle">Carro</text><text x="98" y="156" text-anchor="middle">Sensores</text>
+      <text x="98" y="268" text-anchor="middle" font-size="10">APP MÓVIL</text>
+      <text x="440" y="55" font-size="11">CASA DOMÓTICA</text><text x="440" y="145" font-size="11">AUTO ROBOT</text><text x="440" y="235" font-size="11">ESTACIÓN DE SENSORES</text>
+    </g>
+    <g fill="#9cc2e6" font-size="8.5">
+      <text x="440" y="72">ESP32 · relés, servos, alarma, LCD</text>
+      <text x="440" y="162">Arduino + HM‑10 · motores, servo 360°</text>
+      <text x="440" y="252">ESP32 · temperatura, humedad, luz</text>
+      <text x="245" y="80">Wi‑Fi local</text><text x="245" y="142">Bluetooth LE</text><text x="245" y="232">Bluetooth LE</text>
+    </g>
+    <g><circle cx="300" cy="86" r="4" fill="#8fd6ff"/><circle cx="330" cy="150" r="4" fill="#ffc457"/><circle cx="300" cy="214" r="4" fill="#8fd6ff"/></g>
+  </svg>
+
+  <div class="grid2">
+    <div>
+      <div class="kicker" style="margin-bottom:2mm">05 · Protocolo</div>
+      <h3>Un mismo idioma para todas las placas</h3>
+      <p style="color:var(--ink-2);margin-bottom:4mm">Cada mensaje dice qué pin virtual cambia y con qué valor. Es la misma idea de los pines virtuales de Blynk, y funciona igual por Bluetooth o por Wi‑Fi.</p>
+      <ul class="clean">
+        <li>La app no depende del modelo de placa.</li>
+        <li>Agregar una placa nueva no exige cambiar la app.</li>
+        <li>Los mensajes se pueden leer y depurar a simple vista.</li>
+      </ul>
+    </div>
+<pre><span class="c"># app → placa</span>
+<span class="k">V1</span>:<span class="s">1</span>         <span class="c">enciende la luz</span>
+<span class="k">V3</span>:<span class="s">90</span>        <span class="c">servo puerta a 90°</span>
+<span class="k">V20</span>:<span class="s">-40,85</span>   <span class="c">joystick del carro</span>
+
+<span class="c"># placa → app</span>
+<span class="k">V10</span>:<span class="s">24.1</span>     <span class="c">temperatura</span>
+<span class="k">V7</span>:<span class="s">DISPARO</span>   <span class="c">alarma activada</span>
+<span class="k">V22</span>:<span class="s">18</span>       <span class="c">obstáculo a 18 cm</span></pre>
+  </div>
+  <div class="foot"><span>App de control para robótica y domótica</span><span>4</span></div>
+</section>
+
+<!-- 5 · Experiencia -->
+<section class="page compact">
+  <div class="kicker">06 · Experiencia</div>
+  <h2>Un panel distinto para cada dispositivo</h2>
+  <p class="intro">La pantalla de inicio muestra las placas guardadas. Al tocar una, se abre el panel de su perfil.</p>
+
+  <div class="grid2" style="gap:8mm;margin-bottom:7mm">
+    <div class="wire">
+      <svg viewBox="0 0 130 260">
+        <rect x="1" y="1" width="128" height="258" rx="20" fill="#fff" stroke="#0d1b2a" stroke-width="1.6"/>
+        <rect x="47" y="8" width="36" height="9" rx="4.5" fill="#0d1b2a"/>
+        <text x="12" y="38" font-family="Geist, Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#0d1b2a">Casa</text>
+        <rect x="10" y="46" width="110" height="24" rx="7" fill="#0d1b2a"/><text x="17" y="61" font-size="7" fill="#fff" font-family="Geist, Segoe UI, sans-serif">Alarma · Armada</text>
+        <rect x="10" y="76" width="53" height="44" rx="7" fill="#f3f5f8"/><rect x="67" y="76" width="53" height="44" rx="7" fill="#f3f5f8"/>
+        <rect x="44" y="82" width="14" height="8" rx="4" fill="#1f9d55"/><rect x="101" y="82" width="14" height="8" rx="4" fill="#cfd6de"/>
+        <text x="15" y="113" font-size="6.5" fill="#0d1b2a" font-family="Geist, Segoe UI, sans-serif">Luz sala</text><text x="72" y="113" font-size="6.5" fill="#0d1b2a" font-family="Geist, Segoe UI, sans-serif">Luz cocina</text>
+        <rect x="10" y="126" width="110" height="26" rx="7" fill="#f3f5f8"/><text x="15" y="142" font-size="6.5" fill="#0d1b2a" font-family="Geist, Segoe UI, sans-serif">Puerta principal</text><rect x="88" y="132" width="26" height="14" rx="5" fill="#0a7cff"/>
+        <rect x="10" y="158" width="110" height="26" rx="7" fill="#f3f5f8"/><text x="15" y="169" font-size="6.5" fill="#0d1b2a" font-family="Geist, Segoe UI, sans-serif">Ventana · 45°</text><line x1="15" y1="177" x2="115" y2="177" stroke="#cfd6de" stroke-width="2"/><line x1="15" y1="177" x2="42" y2="177" stroke="#0a7cff" stroke-width="2"/><circle cx="42" cy="177" r="3.5" fill="#fff" stroke="#8593a3" stroke-width=".8"/>
+        <rect x="10" y="190" width="110" height="22" rx="7" fill="#1f3b18"/><text x="16" y="204" font-size="6.5" fill="#b8ff7a" font-family="Geist Mono, Consolas, monospace">LCD: Bienvenidos</text>
+        <rect x="10" y="218" width="110" height="30" rx="7" fill="#0d1b2a"/><text x="16" y="230" font-size="5.5" fill="#9fe6b8" font-family="Geist Mono, Consolas, monospace">→ V1:1</text><text x="16" y="240" font-size="5.5" fill="#ffd07a" font-family="Geist Mono, Consolas, monospace">← V10:24.1</text>
+      </svg>
+      <div><div class="kicker" style="margin-bottom:2mm">Perfil</div><h3>Casa Domótica</h3>
+        <ul class="clean" style="margin-top:3mm"><li>Luces con switches</li><li>Puerta con servo</li><li>Ventana con slider de 0° a 180°</li><li>Alarma de seguridad</li><li>Texto para la LCD y timbre</li><li>Lectura de sensores</li></ul></div>
+    </div>
+    <div class="wire">
+      <svg viewBox="0 0 130 260">
+        <rect x="1" y="1" width="128" height="258" rx="20" fill="#fff" stroke="#0d1b2a" stroke-width="1.6"/>
+        <rect x="47" y="8" width="36" height="9" rx="4.5" fill="#0d1b2a"/>
+        <text x="12" y="38" font-family="Geist, Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#0d1b2a">Auto Robot</text>
+        <g font-family="Geist, Segoe UI, sans-serif" font-size="6"><rect x="10" y="46" width="34" height="24" rx="6" fill="#f3f5f8"/><rect x="48" y="46" width="34" height="24" rx="6" fill="#f3f5f8"/><rect x="86" y="46" width="34" height="24" rx="6" fill="#f3f5f8"/>
+        <text x="14" y="56" fill="#8593a3">Vel.</text><text x="14" y="65" fill="#0d1b2a" font-weight="700">62%</text><text x="52" y="56" fill="#8593a3">Obst.</text><text x="52" y="65" fill="#0d1b2a" font-weight="700">48 cm</text><text x="90" y="56" fill="#8593a3">Bat.</text><text x="90" y="65" fill="#0d1b2a" font-weight="700">7,4 V</text></g>
+        <circle cx="52" cy="128" r="36" fill="#f3f5f8" stroke="#dfe4ea"/><line x1="52" y1="96" x2="52" y2="160" stroke="#dfe4ea"/><line x1="20" y1="128" x2="84" y2="128" stroke="#dfe4ea"/><circle cx="62" cy="114" r="13" fill="#0a7cff"/>
+        <rect x="98" y="92" width="20" height="72" rx="10" fill="#dfe4ea"/><rect x="98" y="122" width="20" height="42" rx="10" fill="#0a7cff"/>
+        <circle cx="65" cy="200" r="22" fill="none" stroke="#dfe4ea" stroke-width="1.5"/><path d="M65 178 A22 22 0 0 1 85 210" stroke="#0a7cff" stroke-width="3" fill="none" stroke-linecap="round"/><text x="65" y="203" text-anchor="middle" font-size="7" font-weight="700" fill="#0d1b2a" font-family="Geist, Segoe UI, sans-serif">120°</text>
+        <rect x="10" y="232" width="34" height="16" rx="6" fill="#c77700"/><rect x="48" y="232" width="34" height="16" rx="6" fill="#f3f5f8"/><rect x="86" y="232" width="34" height="16" rx="6" fill="#c0392b"/>
+        <g font-family="Geist, Segoe UI, sans-serif" font-size="6" text-anchor="middle"><text x="27" y="242" fill="#fff">Reversa</text><text x="65" y="242" fill="#0d1b2a">Luces</text><text x="103" y="242" fill="#fff">Freno</text></g>
+      </svg>
+      <div><div class="kicker" style="margin-bottom:2mm">Perfil</div><h3>Auto Robot</h3>
+        <ul class="clean" style="margin-top:3mm"><li>Joystick para la dirección</li><li>Barra de aceleración</li><li>Reversa, freno, luces y bocina</li><li>Dial de giro de 360°</li><li>Distancia a obstáculos en vivo</li><li>Se usa en horizontal</li></ul></div>
+    </div>
+  </div>
+
+  <div class="kicker" style="margin-bottom:3mm">Catálogo de controles</div>
+  <table>
+    <thead><tr><th>Control</th><th>Para qué sirve</th><th>Ejemplo de mensaje</th></tr></thead>
+    <tbody>
+      <tr><td>Switch</td><td>Encender o apagar relés, LEDs y motores</td><td class="mono">V1:0 | 1</td></tr>
+      <tr><td>Botón</td><td>Acciones cortas, como el timbre o la bocina</td><td class="mono">V5:1</td></tr>
+      <tr><td>Slider</td><td>Ángulo de un servo, brillo o velocidad</td><td class="mono">V4:0…180</td></tr>
+      <tr><td>Dial 360°</td><td>Servos de giro continuo y torretas</td><td class="mono">V21:0…359</td></tr>
+      <tr><td>Joystick</td><td>Conducir carros y robots</td><td class="mono">V20:x,y</td></tr>
+      <tr><td>Alarma · Mensajes · Lectura</td><td>Alertas, texto en los dos sentidos y valores de sensores</td><td class="mono">V7 · V6 · V10</td></tr>
+    </tbody>
+  </table>
+  <div class="foot"><span>App de control para robótica y domótica</span><span>5</span></div>
+</section>
+
+<!-- 6 · Tecnología y plan -->
+<section class="page">
+  <div class="kicker">07 · Tecnología</div>
+  <h2>Con qué se construye</h2>
+  <div class="grid2" style="margin:2mm 0 9mm">
+    <table>
+      <thead><tr><th>Parte</th><th>Herramienta</th></tr></thead>
+      <tbody>
+        <tr><td>App móvil</td><td>Flutter: Android primero, iPhone después con el mismo código</td></tr>
+        <tr><td>Bluetooth</td><td>Bluetooth LE con la librería flutter_blue_plus</td></tr>
+        <tr><td>Wi‑Fi</td><td>WebSocket en la red local</td></tr>
+        <tr><td>Datos guardados</td><td>Base de datos local en el teléfono</td></tr>
+        <tr><td>Placas</td><td>Librería propia para Arduino y ESP32</td></tr>
+      </tbody>
+    </table>
+    <div class="card" style="background:#fff7e6">
+      <div class="num" style="color:var(--warn)">RECOMENDACIÓN DE HARDWARE</div>
+      <h3>Preferir ESP32 o módulos BLE</h3>
+      <p style="margin-bottom:3mm">El ESP32 trae Bluetooth LE y Wi‑Fi integrados. En placas Arduino Uno, usar el módulo HM‑10.</p>
+      <p>El módulo HC‑05 usa Bluetooth clásico y no funciona con iPhone. Sirve solo si la app se queda en Android.</p>
+    </div>
+  </div>
+
+  <div class="kicker" style="margin-bottom:3mm">08 · Plan de entregas</div>
+  <div class="phases" style="margin-bottom:9mm">
+    <div class="phase"><div class="kicker">Entrega 1 · MVP</div><h3>Funciona con una placa</h3>
+      <ul class="clean"><li>App Android</li><li>Registrar y guardar placas</li><li>Bluetooth y Wi‑Fi</li><li>Perfiles Casa y Auto Robot</li><li>Librería para ESP32</li></ul></div>
+    <div class="phase"><div class="kicker">Entrega 2</div><h3>Todo conectado</h3>
+      <ul class="clean"><li>Tres placas a la vez</li><li>Alarmas con notificación</li><li>Mensajes en los dos sentidos</li><li>Gráficas de sensores</li></ul></div>
+    <div class="phase"><div class="kicker">Extras</div><h3>Si hay tiempo</h3>
+      <ul class="clean"><li>Editor de paneles</li><li>Voz o traducción</li><li>Control fuera de casa</li><li>Versión para iPhone</li></ul></div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <div class="kicker" style="margin-bottom:3mm">09 · Por definir con el equipo</div>
+      <div class="steps">
+        <div><b>01</b><span>Fecha de entrega final.</span></div>
+        <div><b>02</b><span>Si alcanza con Android o también se necesita iPhone.</span></div>
+        <div><b>03</b><span>Placas y módulos disponibles.</span></div>
+        <div><b>04</b><span>Qué significa «traducción» en el requisito.</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="kicker" style="margin-bottom:3mm">10 · Próximos pasos</div>
+      <div class="steps">
+        <div><b>01</b><span>Aprobar este concepto.</span></div>
+        <div><b>02</b><span>Preparar el entorno de desarrollo.</span></div>
+        <div><b>03</b><span>Conectar el primer ESP32 por Bluetooth.</span></div>
+        <div><b>04</b><span>Probar el perfil Auto Robot con el carro real.</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>App de control para robótica y domótica</span><span>6</span></div>
+</section>
+
+</body>
+</html>
