@@ -46,6 +46,10 @@ class Session extends ChangeNotifier {
   String? lastAlert;
   final _subs = <StreamSubscription>[];
 
+  /// Cada mensaje que llega de la placa, ya leído. Sirve para esperar una confirmación (por ejemplo, de una orden de voz).
+  final _messages = StreamController<Msg>.broadcast();
+  Stream<Msg> get messages => _messages.stream;
+
   /// Crea la conexión de una placa. Las pruebas pueden pasar otra para simular fallos.
   final DeviceLink Function(SavedDevice) _linkFor;
 
@@ -254,6 +258,7 @@ class Session extends ChangeNotifier {
   void _onLine(String line) {
     _addLog(true, line);
     final m = Msg.parse(line);
+    if (!_messages.isClosed) _messages.add(m);
     if (m.kind == 'AUTH') {
       _onClaveReply(m.value);
     } else if (m.kind == 'ERR' && clave == ClaveState.checking && !keyed && m.value.contains('AUTH')) {
@@ -306,6 +311,7 @@ class Session extends ChangeNotifier {
     _wantConnected = false;
     _retryTimer?.cancel();
     _claveTimer?.cancel();
+    _messages.close();
     _teardown();
     super.dispose();
   }

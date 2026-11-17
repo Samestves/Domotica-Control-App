@@ -5,9 +5,11 @@ import '../main.dart';
 import '../models/controls.dart';
 import '../models/device.dart';
 import '../state/app_state.dart';
+import '../voice/voice_controller.dart';
 import 'theme.dart';
 import 'widgets/casa_tiles.dart';
 import 'widgets/clave.dart';
+import 'widgets/voice_bar.dart';
 import 'widgets/common.dart';
 import 'widgets/glass.dart';
 import 'widgets/large_title_scaffold.dart';
@@ -27,6 +29,13 @@ class CasaPanel extends StatefulWidget {
 
 class _CasaPanelState extends State<CasaPanel> {
   String? _shownAlert;
+  final _voice = VoiceController();
+
+  @override
+  void dispose() {
+    _voice.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +48,7 @@ class _CasaPanelState extends State<CasaPanel> {
       title: widget.device.name,
       subtitle: ConnectionSubtitle(session: s),
       actions: [_Menu(session: s, showPins: showPins, onShowPins: app.setShowPins)],
+      bottomBar: showsClaveCard(s) ? null : VoiceBar(session: s, voice: _voice),
       slivers: [
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),

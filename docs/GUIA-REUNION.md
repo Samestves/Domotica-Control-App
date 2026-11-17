@@ -1,4 +1,4 @@
-# Guía de la casa domótica · Alpha 0.6
+# Guía de la casa domótica · Alpha 0.7
 
 ## Dónde estamos
 
@@ -45,6 +45,19 @@ El ESP32 crea su propia red. No hace falta router, internet ni datos móviles.
 2. En la app: **Agregar dispositivo → Wi‑Fi → Usar** (IP `192.168.4.1`, puerto `3333`).
 
 La contraseña de la red se cambia en `AP_PASS`, al inicio del programa. Para que el ESP32 se una a otra red, pongan `WIFI_PROPIA` en 0 y escriban esa red en `WIFI_SSID` y `WIFI_PASS`.
+
+## Órdenes por voz
+
+En el panel de la casa, toca el **micrófono** de abajo y habla. Ejemplos:
+
+- «abre la puerta principal» · «cierra el portón»
+- «prende la luz de la cocina» · «apaga todas las luces»
+- «pon la persiana de la sala a la mitad» · «sube la persiana del cuarto al 30 por ciento»
+- «arma la alarma» · «desactiva la seguridad»
+
+El aviso dice si la orden **de verdad llegó**: verde cuando el ESP32 la confirma (y lo dice en voz alta), rojo si no respondió, naranja si no entendió la frase (y entonces no mueve nada). Lo que no puede saber es si la pieza se movió en la maqueta: si un servo está desconectado, el ESP32 igual cree que lo movió.
+
+Usa el reconocimiento de voz de Google del teléfono: normalmente necesita internet, o el paquete de voz en español descargado.
 
 ## Probar con la maqueta
 

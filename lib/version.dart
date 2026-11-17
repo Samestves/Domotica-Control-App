@@ -1,3 +1,3 @@
 /// Versión que se muestra en la app. Mantener igual a `version` en pubspec.yaml.
-const appVersion = 'Alpha 0.6';
-const appBuild = 6;
+const appVersion = 'Alpha 0.7';
+const appBuild = 7;
