@@ -22,7 +22,9 @@ class ConnectionSubtitle extends StatelessWidget {
     final failed = st == LinkState.error && !session.retrying;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        Flexible(child: ConnectionLine(state: st, transport: session.device.transport, retrying: session.retrying)),
+        Flexible(
+          child: ConnectionLine(state: st, transport: session.device.transport, retrying: session.retrying, needsClave: session.needsClave),
+        ),
         if (failed || st == LinkState.disconnected) ...[
           const SizedBox(width: 10),
           GestureDetector(

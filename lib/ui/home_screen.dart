@@ -19,7 +19,7 @@ class HomeScreen extends StatelessWidget {
 
   static Future<void> open(BuildContext context, SavedDevice d) async {
     final s = AppScope.read(context).session(d);
-    if (!s.connected) s.connect();
+    if (!s.linked) s.connect();
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => d.profile == Profile.casa ? CasaPanel(device: d) : CarroPanel(device: d),
     ));
@@ -109,10 +109,13 @@ class _StateLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final st = session.retrying ? LinkState.connecting : session.state;
+    final needsClave = session.needsClave;
+    final color = needsClave ? C.orange : stateColor(st);
+    final label = session.retrying ? 'Reconectando…' : (needsClave ? 'Falta la clave' : stateLabel(st));
     return Row(children: [
-      StatusDot(st, size: 7),
+      StatusDot(st, size: 7, color: color),
       const SizedBox(width: 7),
-      Text(session.retrying ? 'Reconectando…' : stateLabel(st), style: T.footnote.copyWith(color: stateColor(st), fontWeight: FontWeight.w600)),
+      Text(label, style: T.footnote.copyWith(color: color, fontWeight: FontWeight.w600)),
     ]);
   }
 }
@@ -124,7 +127,7 @@ class _ConnectButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (session.connected) return const Icon(Icons.chevron_right_rounded, color: C.label3, size: 28);
+    if (session.connected || session.needsClave) return const Icon(Icons.chevron_right_rounded, color: C.label3, size: 28);
     if (session.state == LinkState.connecting || session.retrying) {
       return const Padding(padding: EdgeInsets.all(8), child: CupertinoActivityIndicator());
     }
@@ -304,11 +307,11 @@ void _showDeviceOptions(BuildContext context, Session s) {
         const SizedBox(height: 16),
         GlassGroup(children: [
           _SheetAction(
-            icon: s.connected ? Icons.link_off_rounded : Icons.link_rounded,
-            label: s.connected ? 'Desconectar' : 'Conectar',
+            icon: s.linked ? Icons.link_off_rounded : Icons.link_rounded,
+            label: s.linked ? 'Desconectar' : 'Conectar',
             onTap: () {
               Navigator.pop(sheet);
-              s.connected ? s.disconnect() : s.connect();
+              s.linked ? s.disconnect() : s.connect();
             },
           ),
           _SheetAction(

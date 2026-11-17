@@ -28,7 +28,20 @@
     TEST            mueve cada salida una por una para ver qué es cada cosa
     PING            la placa responde PONG
 
-  Librerías: ESP32Servo (Kevin Harrington). Placa: "ESP32 Dev Module".
+  Clave de la casa (de 4 a 8 números). Por Bluetooth y Wi-Fi, la placa no obedece hasta recibirla:
+    AUTH:123456     la app entrega la clave. Respuestas:
+                      AUTH:OK          correcta
+                      AUTH:MAL:2       incorrecta; quedan 2 intentos
+                      AUTH:ESPERA:30   demasiados intentos; hay que esperar 30 s
+                      AUTH:NUEVA       la casa todavía no tiene clave: hay que crearla
+                      AUTH:PIDE        falta la clave (se envió una orden sin entregarla)
+    CLAVE:123456    crea la clave, o la cambia si ya se entregó la actual. Responde AUTH:OK.
+    El Monitor Serie (cable USB) no necesita clave. Ahí, CLAVE:BORRAR deja la casa sin clave.
+    Sin computadora: mantener presionado BOOT 5 s con la placa encendida también la borra
+    (las luces parpadean 3 veces para confirmarlo).
+
+  Librerías: ESP32Servo (Kevin Harrington).
+  Placa: "ESP32 Dev Module" con Partition Scheme "Huge APP" (Bluetooth y Wi-Fi juntos no caben en la normal).
 */
 
 #include <Arduino.h>
@@ -38,7 +51,12 @@
 // ============ CONFIGURACIÓN ============
 #define DEVICE_NAME  "Casa Domotica"
 #define USE_BLE      1        // 1 = conectar por Bluetooth LE
-#define USE_WIFI     0        // 1 = conectar por Wi-Fi (escribe la red abajo)
+#define USE_WIFI     1        // 1 = conectar también por Wi-Fi
+#define WIFI_PROPIA  1        // 1 = el ESP32 crea su propia red · 0 = se une a la red de abajo
+// Red propia: el teléfono se conecta a «Casa Domotica» y la app usa la IP 192.168.4.1.
+// La contraseña solo evita que cualquiera entre a la red; la clave de la casa es la que protege.
+const char* AP_PASS   = "casadomotica";   // mínimo 8 letras
+// Red de la casa o del colegio (solo si WIFI_PROPIA es 0)
 const char* WIFI_SSID = "TuRed";
 const char* WIFI_PASS = "TuClave";
 const uint16_t TCP_PORT = 3333;
@@ -91,7 +109,19 @@ Preferences prefs;
 bool armed = false, sounding = false, flashOn = false;
 unsigned long graceStart = 0, lastFlash = 0;
 
+// De dónde llegó un mensaje. Cada conexión entrega la clave por su cuenta.
+enum Src : uint8_t { SRC_SERIAL, SRC_BLE, SRC_TCP };
+volatile bool authed[3] = {true, false, false};   // el cable USB no necesita clave
+String houseKey;                                  // "" = la casa todavía no tiene clave
+const uint8_t MAX_FAILS = 3;
+const unsigned long LOCK_MS = 30000;              // espera tras 3 claves incorrectas
+const unsigned long RESET_HOLD_MS = 5000;         // BOOT presionado este tiempo borra la clave
+const int BOOT_PIN = 0;
+uint8_t failCount = 0;
+unsigned long lockStart = 0;
+
 void sendLine(const String& line);
+void reply(Src src, const String& line);
 
 // ---------- Utilidades ----------
 Channel* findCh(int vpin) {
@@ -244,6 +274,93 @@ void saveConfig(const Channel& c) {
   prefs.end();
 }
 
+// ---------- Clave de la casa ----------
+void loadKey() {
+  prefs.begin(PREFS_NS, true);
+  houseKey = prefs.getString("clave", "");
+  prefs.end();
+}
+
+// Guarda la clave nueva ("" = sin clave). Las conexiones abiertas tendrán que entregarla otra vez.
+void storeKey(const String& key, Src keep) {
+  houseKey = key;
+  prefs.begin(PREFS_NS, false);
+  prefs.putString("clave", key);
+  prefs.end();
+  for (int s = SRC_BLE; s <= SRC_TCP; s++) if (s != keep) authed[s] = false;
+}
+
+bool validKey(const String& k) {
+  if (k.length() < 4 || k.length() > 8) return false;
+  for (size_t i = 0; i < k.length(); i++) if (!isDigit(k[i])) return false;
+  return true;
+}
+
+// Segundos que faltan del bloqueo por intentos fallidos (0 = sin bloqueo).
+unsigned long lockLeft(unsigned long now) {
+  if (lockStart == 0) return 0;
+  unsigned long elapsed = now - lockStart;
+  if (elapsed >= LOCK_MS) { lockStart = 0; return 0; }
+  return (LOCK_MS - elapsed + 999) / 1000;
+}
+
+// AUTH:<clave>
+void handleAuth(Src src, const String& given) {
+  if (houseKey.length() == 0) { reply(src, "AUTH:NUEVA"); return; }
+  unsigned long wait = lockLeft(millis());
+  if (wait) { reply(src, "AUTH:ESPERA:" + String(wait)); return; }
+  if (given == houseKey) {
+    failCount = 0;
+    authed[src] = true;
+    reply(src, "AUTH:OK");
+    return;
+  }
+  authed[src] = false;
+  if (given.length() == 0) { reply(src, "AUTH:PIDE"); return; }   // la app aún no la conoce: no cuenta como intento
+  if (++failCount >= MAX_FAILS) {
+    failCount = 0;
+    lockStart = millis() | 1;   // nunca 0, que significa «sin bloqueo»
+    reply(src, "AUTH:ESPERA:" + String(LOCK_MS / 1000));
+  } else {
+    reply(src, "AUTH:MAL:" + String(MAX_FAILS - failCount));
+  }
+}
+
+// CLAVE:<nueva>. Crear la primera no pide nada; cambiarla exige haber entregado la actual.
+void handleNewKey(Src src, const String& key) {
+  if (src == SRC_SERIAL && key == "BORRAR") {
+    storeKey("", SRC_SERIAL);
+    reply(src, "OK:la casa quedo sin clave");
+    return;
+  }
+  if (houseKey.length() && !authed[src]) { reply(src, "AUTH:PIDE"); return; }
+  if (!validKey(key)) { reply(src, "ERR:la clave debe tener de 4 a 8 numeros"); return; }
+  storeKey(key, src);
+  authed[src] = true;
+  reply(src, "AUTH:OK");
+  notice("Clave de la casa guardada");
+}
+
+// Mantener BOOT presionado 5 s borra la clave, por si se olvida y no hay computadora a mano.
+void loopResetButton(unsigned long now) {
+  static unsigned long pressStart = 0;
+  static bool done = false;
+  for (int i = 0; i < N; i++) if (ch[i].enabled && ch[i].gpio == BOOT_PIN) return;   // el pin se usa para otra cosa
+  if (digitalRead(BOOT_PIN) == HIGH) { pressStart = 0; done = false; return; }
+  if (pressStart == 0) pressStart = now | 1;
+  if (done || now - pressStart < RESET_HOLD_MS) return;
+  done = true;
+  storeKey("", SRC_SERIAL);
+  Serial.println("Clave borrada con el boton BOOT");
+  for (int k = 0; k < 3; k++) {
+    for (int i = 0; i < N; i++) if (ch[i].kind == K_LIGHT) writeDigital(ch[i], true);
+    delay(250);
+    for (int i = 0; i < N; i++) if (ch[i].kind == K_LIGHT) writeDigital(ch[i], false);
+    delay(250);
+  }
+  restoreLights();
+}
+
 // ---------- Mensajes de la app ----------
 // Envía el estado real de la casa, para que la app muestre lo que hay y no lo que recuerda.
 void sendState() {
@@ -295,11 +412,15 @@ void handleConfig(const String& line) {
   sendLine("OK:V" + String(c->vpin) + " GPIO " + String(gpio) + (inverted ? " inv" : "") + (enabled ? "" : " off"));
 }
 
-void handleLine(String line) {
+void handleLine(Src src, String line) {
   line.trim();
   if (line.length() == 0) return;
 
-  if (line == "PING") { sendLine("PONG"); return; }
+  if (line == "PING") { reply(src, "PONG"); return; }
+  if (line.startsWith("AUTH:")) { handleAuth(src, line.substring(5)); return; }
+  if (line.startsWith("CLAVE:")) { handleNewKey(src, line.substring(6)); return; }
+  if (!authed[src]) { reply(src, houseKey.length() ? "AUTH:PIDE" : "AUTH:NUEVA"); return; }
+
   if (line == "SYNC") { sendState(); return; }
   if (line == "TEST") { runTest(); return; }
   if (line.startsWith("CFG:V")) { handleConfig(line); return; }
@@ -327,8 +448,8 @@ void handleLine(String line) {
 }
 
 // Junta caracteres hasta completar una línea y entonces la procesa.
-void feedChar(String& buffer, char k) {
-  if (k == '\n') { handleLine(buffer); buffer = ""; }
+void feedChar(Src src, String& buffer, char k) {
+  if (k == '\n') { handleLine(src, buffer); buffer = ""; }
   else if (k != '\r' && buffer.length() < 120) buffer += k;
 }
 
@@ -347,8 +468,9 @@ QueueHandle_t bleRxQueue;             // bytes recibidos; el Bluetooth corre en 
 String bleBuffer;
 
 class ServerCb : public BLEServerCallbacks {
-  void onConnect(BLEServer*) override { bleConnected = true; }
-  void onDisconnect(BLEServer* s) override { bleConnected = false; s->getAdvertising()->start(); }
+  // Cada teléfono que se conecta tiene que entregar la clave de nuevo.
+  void onConnect(BLEServer*) override { authed[SRC_BLE] = false; bleConnected = true; }
+  void onDisconnect(BLEServer* s) override { bleConnected = false; authed[SRC_BLE] = false; s->getAdvertising()->start(); }
 };
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
@@ -377,7 +499,7 @@ void setupBle() {
 
 void loopBle() {
   uint8_t k;
-  while (xQueueReceive(bleRxQueue, &k, 0) == pdTRUE) feedChar(bleBuffer, (char)k);
+  while (xQueueReceive(bleRxQueue, &k, 0) == pdTRUE) feedChar(SRC_BLE, bleBuffer, (char)k);
 }
 
 // Envía en trozos pequeños para que los mensajes largos no se corten.
@@ -393,7 +515,7 @@ void bleSend(const String& out) {
 }
 #endif
 
-// ---------- Wi-Fi (TCP en la red local) ----------
+// ---------- Wi-Fi (TCP) ----------
 #if USE_WIFI
 #include <WiFi.h>
 WiFiServer tcpServer(TCP_PORT);
@@ -401,17 +523,21 @@ WiFiClient tcpClient;
 String tcpBuffer;
 
 void setupWifi() {
+#if WIFI_PROPIA
+  WiFi.mode(WIFI_AP);
+  if (!WiFi.softAP(DEVICE_NAME, AP_PASS)) { Serial.println("No se pudo crear la red Wi-Fi"); return; }
+  Serial.println("Wi-Fi propio listo: conecta el telefono a la red \"" DEVICE_NAME "\" y en la app usa la IP "
+                 + WiFi.softAPIP().toString() + " y el puerto " + String(TCP_PORT));
+#else
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Conectando a Wi-Fi");
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) { delay(250); Serial.print("."); }
-  if (WiFi.status() == WL_CONNECTED) {
-    tcpServer.begin();
-    tcpServer.setNoDelay(true);
-    Serial.println("\nWi-Fi listo. En la app usa la IP " + WiFi.localIP().toString() + " y el puerto " + String(TCP_PORT));
-  } else {
-    Serial.println("\nNo se pudo conectar al Wi-Fi. Revisa WIFI_SSID y WIFI_PASS.");
-  }
+  if (WiFi.status() != WL_CONNECTED) { Serial.println("\nNo se pudo conectar al Wi-Fi. Revisa WIFI_SSID y WIFI_PASS."); return; }
+  Serial.println("\nWi-Fi listo. En la app usa la IP " + WiFi.localIP().toString() + " y el puerto " + String(TCP_PORT));
+#endif
+  tcpServer.begin();
+  tcpServer.setNoDelay(true);
 }
 
 void loopWifi() {
@@ -419,19 +545,32 @@ void loopWifi() {
     if (tcpClient && tcpClient.connected()) tcpClient.stop();   // una app a la vez
     tcpClient = tcpServer.accept();
     tcpBuffer = "";
-    sendLine("HELLO:" DEVICE_NAME);
+    authed[SRC_TCP] = false;   // cada teléfono que se conecta entrega la clave de nuevo
+    reply(SRC_TCP, "HELLO:" DEVICE_NAME);
   }
-  while (tcpClient && tcpClient.connected() && tcpClient.available()) feedChar(tcpBuffer, tcpClient.read());
+  while (tcpClient && tcpClient.connected() && tcpClient.available()) feedChar(SRC_TCP, tcpBuffer, tcpClient.read());
 }
 #endif
 
+// Respuesta solo para quien preguntó (por ejemplo, el resultado de la clave).
+void reply(Src src, const String& line) {
+  Serial.println("-> " + line);
+#if USE_BLE
+  if (src == SRC_BLE) bleSend(line + "\n");
+#endif
+#if USE_WIFI
+  if (src == SRC_TCP && tcpClient && tcpClient.connected()) tcpClient.print(line + "\n");
+#endif
+}
+
+// Aviso para todos: el Monitor Serie y cada teléfono que ya entregó la clave.
 void sendLine(const String& line) {
   Serial.println("-> " + line);
 #if USE_BLE
-  bleSend(line + "\n");
+  if (authed[SRC_BLE]) bleSend(line + "\n");
 #endif
 #if USE_WIFI
-  if (tcpClient && tcpClient.connected()) tcpClient.print(line + "\n");
+  if (authed[SRC_TCP] && tcpClient && tcpClient.connected()) tcpClient.print(line + "\n");
 #endif
 }
 
@@ -440,6 +579,8 @@ String serialBuffer;
 
 void setup() {
   loadConfig();
+  loadKey();
+  pinMode(BOOT_PIN, INPUT_PULLUP);
   // Luces y sirena apagadas lo antes posible; después, servos a su posición cerrada.
   for (int i = 0; i < N; i++) if (!isServo(ch[i])) setupChannel(ch[i]);
 
@@ -456,12 +597,13 @@ void setup() {
 #if USE_WIFI
   setupWifi();
 #endif
+  Serial.println(houseKey.length() ? "La casa tiene clave." : "La casa no tiene clave: el primer telefono que se conecte la crea.");
   Serial.println("Escribe mensajes aqui mismo para probar, por ejemplo: V10:1");
 }
 
 void loop() {
   // Mensajes escritos en el Monitor Serie (útil para probar sin teléfono)
-  while (Serial.available()) feedChar(serialBuffer, Serial.read());
+  while (Serial.available()) feedChar(SRC_SERIAL, serialBuffer, Serial.read());
 #if USE_BLE
   loopBle();
 #endif
@@ -472,4 +614,5 @@ void loop() {
   unsigned long now = millis();
   loopSecurity(now);
   loopFlash(now);
+  loopResetButton(now);
 }

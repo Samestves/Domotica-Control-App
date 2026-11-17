@@ -2,6 +2,8 @@
     xmlns:tools="http://schemas.android.com/tools">
     <!-- Wi-Fi: conexión TCP con la placa en la red local -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Para usar la red propia del ESP32 aunque no tenga internet (ver MainActivity) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Bluetooth LE (Android 12 o más nuevo) -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

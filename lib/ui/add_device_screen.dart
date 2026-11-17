@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../core/ble_link.dart';
 import '../main.dart';
 import '../models/device.dart';
 import 'theme.dart';
@@ -20,15 +21,19 @@ class AddDeviceScreen extends StatefulWidget {
 class _AddDeviceScreenState extends State<AddDeviceScreen> {
   static const _esp32 = 'ESP32', _hm10 = 'Arduino + HM‑10';
 
+  /// IP del ESP32 cuando crea su propia red Wi‑Fi.
+  static const _ownIp = '192.168.4.1';
+
   final _name = TextEditingController();
-  final _ip = TextEditingController(text: '192.168.1.');
+  final _ip = TextEditingController(text: _ownIp);
   final _port = TextEditingController(text: '3333');
   Profile _profile = Profile.casa;
   Transport _transport = Transport.ble;
   String _board = _esp32;
 
-  // Bluetooth
-  List<ScanResult> _results = [];
+  // Bluetooth: arriba las placas que hablan nuestro idioma; el resto (teléfonos, relojes...) queda escondido.
+  List<ScanResult> _boards = [], _others = [];
+  bool _showOthers = false;
   ScanResult? _picked;
   bool _scanning = false;
   String? _scanError;
@@ -48,7 +53,8 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
   Future<void> _scan() async {
     setState(() {
       _scanError = null;
-      _results = [];
+      _boards = [];
+      _others = [];
       _picked = null;
     });
     try {
@@ -62,7 +68,10 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
       _resSub ??= FlutterBluePlus.scanResults.listen((r) {
         if (!mounted) return;
         final named = r.where((x) => _nameOf(x).isNotEmpty).toList()..sort((a, b) => b.rssi.compareTo(a.rssi));
-        setState(() => _results = named);
+        setState(() {
+          _boards = named.where(_isBoard).toList();
+          _others = named.where((x) => !_isBoard(x)).toList();
+        });
       });
       _scanSub ??= FlutterBluePlus.isScanning.listen((v) {
         if (mounted) setState(() => _scanning = v);
@@ -75,6 +84,11 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
 
   String _nameOf(ScanResult r) =>
       r.advertisementData.advName.isNotEmpty ? r.advertisementData.advName : r.device.platformName;
+
+  /// Anuncia el servicio de mensajes de nuestro programa (ESP32) o el de un módulo HM‑10.
+  static bool _isBoard(ScanResult r) => r.advertisementData.serviceUuids
+      .map((u) => u.str128.toLowerCase())
+      .any((u) => u == BleUuids.nus || u == BleUuids.hm10);
 
   bool get _valid {
     if (_name.text.trim().isEmpty) return false;
@@ -200,35 +214,104 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
           ]),
         ),
         GlassGroup(
-          footer: _scanError ?? (_results.isEmpty ? 'Toca «Buscar» con la placa encendida y cerca del teléfono.' : null),
+          footer: _scanError ?? _bleHint,
           children: [
-            if (_results.isEmpty)
+            if (_boards.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 22),
                 child: Column(children: [
                   Icon(_scanning ? Icons.bluetooth_searching_rounded : Icons.bluetooth_rounded, color: C.label3, size: 30),
                   const SizedBox(height: 6),
-                  Text(_scanning ? 'Buscando…' : 'Sin resultados todavía', style: T.subhead.copyWith(color: C.label2)),
+                  Text(_scanning ? 'Buscando…' : 'Ninguna placa todavía', style: T.subhead.copyWith(color: C.label2)),
                 ]),
               ),
-            for (final r in _results) _BoardRow(
-              name: _nameOf(r),
-              id: r.device.remoteId.str,
-              rssi: r.rssi,
-              selected: _picked == r,
-              onTap: () => setState(() {
-                _picked = r;
-                if (_name.text.trim().isEmpty) _name.text = _nameOf(r);
-              }),
+            for (final r in _boards) _row(r, board: true),
+          ],
+        ),
+        if (_others.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          GlassGroup(children: [
+            InkWell(
+              onTap: () => setState(() => _showOthers = !_showOthers),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 13, 14, 13),
+                child: Row(children: [
+                  Expanded(child: Text('Otros dispositivos (${_others.length})', style: T.body)),
+                  AnimatedRotation(
+                    turns: _showOthers ? 0.25 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.chevron_right_rounded, color: C.label3),
+                  ),
+                ]),
+              ),
+            ),
+            if (_showOthers) for (final r in _others) _row(r, board: false),
+          ]),
+        ],
+      ];
+
+  String? get _bleHint {
+    if (_boards.isNotEmpty) return null;
+    if (_scanning) return 'Buscando placas con nuestro programa…';
+    if (_others.isNotEmpty) return 'No apareció ninguna placa. ¿Está encendida, cerca y con nuestro programa cargado?';
+    return 'Toca «Buscar» con la placa encendida y cerca del teléfono.';
+  }
+
+  Widget _row(ScanResult r, {required bool board}) => _BoardRow(
+        name: _nameOf(r),
+        id: r.device.remoteId.str,
+        rssi: r.rssi,
+        board: board,
+        selected: _picked?.device.remoteId == r.device.remoteId,
+        onTap: () => setState(() {
+          _picked = r;
+          if (_name.text.trim().isEmpty) _name.text = _niceName(_nameOf(r));
+        }),
+      );
+
+  /// «Casa Domotica» → «Casa Domótica»: la placa no lleva tildes en su nombre Bluetooth.
+  static String _niceName(String n) => n == 'Casa Domotica' ? 'Casa Domótica' : n;
+
+  List<Widget> _wifiSection() => [
+        const SectionTitle('Red propia de la casa', small: true),
+        GlassGroup(
+          footer: 'Antes, en Ajustes → Wi‑Fi del teléfono, conéctate a la red «Casa Domotica» (contraseña: casadomotica). '
+              'No necesita internet ni datos móviles.',
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Row(children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: ShapeDecoration(shape: squircle(10), color: const Color(0x1A007AFF)),
+                  child: const Icon(Icons.wifi_rounded, size: 19, color: C.blue),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Casa Domotica', style: T.body),
+                    Text('IP 192.168.4.1 · puerto 3333', style: T.caption),
+                  ]),
+                ),
+                if (_ip.text.trim() == _ownIp && _port.text.trim() == '3333')
+                  const Icon(Icons.check_rounded, color: C.blue)
+                else
+                  GestureDetector(
+                    onTap: () => setState(() {
+                      _ip.text = _ownIp;
+                      _port.text = '3333';
+                    }),
+                    child: Text('Usar', style: T.subhead.copyWith(color: C.blue, fontWeight: FontWeight.w600)),
+                  ),
+              ]),
             ),
           ],
         ),
-      ];
-
-  List<Widget> _wifiSection() => [
-        const SectionTitle('Dirección en la red', small: true),
+        const SectionTitle('Dirección', small: true),
         GlassGroup(
-          footer: 'El ESP32 muestra su IP en el monitor serie al conectarse al Wi‑Fi. El teléfono debe estar en la misma red.',
+          footer: 'Si el ESP32 se une a otra red (la de la casa o del colegio), escribe la IP que muestra en el Monitor Serie. '
+              'El teléfono debe estar en esa misma red.',
           children: [
             _FieldRow(label: 'IP', controller: _ip, onChanged: () => setState(() {})),
             _FieldRow(label: 'Puerto', controller: _port, onChanged: () => setState(() {})),
@@ -237,13 +320,14 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
       ];
 }
 
-/// Una placa encontrada por Bluetooth, con su señal.
+/// Un dispositivo encontrado por Bluetooth, con su señal. [board]: tiene nuestro programa.
 class _BoardRow extends StatelessWidget {
   final String name, id;
   final int rssi;
+  final bool board;
   final bool selected;
   final VoidCallback onTap;
-  const _BoardRow({required this.name, required this.id, required this.rssi, required this.selected, required this.onTap});
+  const _BoardRow({required this.name, required this.id, required this.rssi, required this.board, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -256,8 +340,15 @@ class _BoardRow extends StatelessWidget {
           Container(
             width: 34,
             height: 34,
-            decoration: ShapeDecoration(shape: squircle(10), color: selected ? C.blue : const Color(0x1A007AFF)),
-            child: Icon(Icons.bluetooth_rounded, size: 19, color: selected ? Colors.white : C.blue),
+            decoration: ShapeDecoration(
+              shape: squircle(10),
+              color: selected ? C.blue : (board ? const Color(0x1A007AFF) : const Color(0x14787880)),
+            ),
+            child: Icon(
+              board ? Icons.developer_board_rounded : Icons.bluetooth_rounded,
+              size: 19,
+              color: selected ? Colors.white : (board ? C.blue : C.label2),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(

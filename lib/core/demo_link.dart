@@ -56,6 +56,7 @@ class DemoLink extends DeviceLink {
     final m = Msg.parse(line);
     if (m.kind == 'PING') return emitLine('PONG');
     if (m.kind == 'CFG') return emitLine('OK:${m.value}');
+    if (m.kind == 'AUTH') return emitLine('ERR:no entiendo ${m.raw}'); // el carrito no usa clave
     if (m.pin == CarPins.joystick) {
       final p = m.value.split(',');
       _speed = p.length == 2 ? (int.tryParse(p[1]) ?? 0).abs() : 0;

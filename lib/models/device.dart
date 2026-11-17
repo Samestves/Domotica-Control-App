@@ -42,6 +42,9 @@ class SavedDevice {
   String board;
   Map<int, PinConfig> pins; // pin virtual → ajuste
 
+  /// Clave de la casa que aceptó la placa, para entregarla sola al conectar. null = no se conoce.
+  String? clave;
+
   SavedDevice({
     required this.id,
     required this.name,
@@ -51,6 +54,7 @@ class SavedDevice {
     this.port = 3333,
     this.board = 'ESP32',
     Map<int, PinConfig>? pins,
+    this.clave,
   }) : pins = pins ?? {};
 
   String get subtitle => switch (transport) {
@@ -68,6 +72,7 @@ class SavedDevice {
         'port': port,
         'board': board,
         'pins': pins.map((k, v) => MapEntry('$k', v.toJson())),
+        if (clave != null) 'clave': clave,
       };
 
   factory SavedDevice.fromJson(Map<String, dynamic> j) => SavedDevice(
@@ -80,5 +85,6 @@ class SavedDevice {
         board: j['board'] as String? ?? 'ESP32',
         pins: ((j['pins'] as Map<String, dynamic>?) ?? {})
             .map((k, v) => MapEntry(int.parse(k), PinConfig.fromJson(v as Map<String, dynamic>))),
+        clave: j['clave'] as String?,
       );
 }

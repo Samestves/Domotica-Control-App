@@ -7,6 +7,7 @@ import '../models/device.dart';
 import '../state/app_state.dart';
 import 'theme.dart';
 import 'widgets/casa_tiles.dart';
+import 'widgets/clave.dart';
 import 'widgets/common.dart';
 import 'widgets/glass.dart';
 import 'widgets/large_title_scaffold.dart';
@@ -41,7 +42,7 @@ class _CasaPanelState extends State<CasaPanel> {
       slivers: [
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-          sliver: SliverList.list(children: [
+          sliver: SliverList.list(children: showsClaveCard(s) ? [ClaveCard(session: s)] : [
             SummaryStrip(session: s),
             const SizedBox(height: 14),
             SecurityCard(session: s),
@@ -100,6 +101,7 @@ class _Menu extends StatelessWidget {
         'pins' => onShowPins(!showPins),
         'test' => session.sendRaw('TEST'),
         'sync' => session.sendRaw('SYNC'),
+        'clave' => showChangeClaveSheet(context, session),
         'off' => session.disconnect(),
         'on' => session.connect(),
         _ => null,
@@ -108,8 +110,9 @@ class _Menu extends StatelessWidget {
         item('pins', Icons.memory_rounded, showPins ? 'Ocultar pines' : 'Mostrar pines'),
         item('test', Icons.play_circle_outline_rounded, 'Probar salidas una por una'),
         item('sync', Icons.sync_rounded, 'Leer estado de la placa'),
+        if (session.connected && session.keyed) item('clave', Icons.lock_rounded, 'Cambiar la clave'),
         const PopupMenuDivider(),
-        session.connected
+        session.linked
             ? item('off', Icons.link_off_rounded, 'Desconectar', color: C.red)
             : item('on', Icons.link_rounded, 'Conectar', color: C.blue),
       ],

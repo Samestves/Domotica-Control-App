@@ -15,15 +15,27 @@ class CasaSim {
   bool armed = false, sounding = false;
   Timer? _graceTimer;
 
-  CasaSim(this.emit, {this.grace = const Duration(seconds: 20)});
+  /// Pide la clave de la casa como la placa real. Apagado (la demo), responde como una placa sin clave.
+  final bool usesClave;
+  String clave = '';
+  bool _authed = false;
+  int _fails = 0;
+  DateTime? _lockedUntil;
+  static const _maxFails = 3, _lockSeconds = 30;
+
+  CasaSim(this.emit, {this.grace = const Duration(seconds: 20), this.usesClave = false});
 
   void dispose() => _graceTimer?.cancel();
 
   void handle(String line) {
     final m = Msg.parse(line);
+    if (m.kind == 'PING') return emit('PONG');
+    if (usesClave) {
+      if (m.kind == 'AUTH') return _auth(m.value);
+      if (m.kind == 'CLAVE') return _newClave(m.value);
+      if (!_authed) return emit(clave.isEmpty ? 'AUTH:NUEVA' : 'AUTH:PIDE');
+    }
     switch (m.kind) {
-      case 'PING':
-        return emit('PONG');
       case 'SYNC':
         return _sendState();
       case 'TEST':
@@ -46,6 +58,37 @@ class CasaSim {
     if (!values.containsKey(pin)) return emit('ERR:V$pin no existe');
     _setValue(pin, value);
     _checkEntrance();
+  }
+
+  /// Nueva conexión: hay que entregar la clave otra vez.
+  void reconnect() => _authed = false;
+
+  void _auth(String given) {
+    if (clave.isEmpty) return emit('AUTH:NUEVA');
+    final left = _lockedUntil?.difference(DateTime.now()).inSeconds ?? 0;
+    if (left > 0) return emit('AUTH:ESPERA:$left');
+    if (given == clave) {
+      _fails = 0;
+      _authed = true;
+      return emit('AUTH:OK');
+    }
+    _authed = false;
+    if (given.isEmpty) return emit('AUTH:PIDE');
+    if (++_fails >= _maxFails) {
+      _fails = 0;
+      _lockedUntil = DateTime.now().add(const Duration(seconds: _lockSeconds));
+      return emit('AUTH:ESPERA:$_lockSeconds');
+    }
+    emit('AUTH:MAL:${_maxFails - _fails}');
+  }
+
+  void _newClave(String c) {
+    if (clave.isNotEmpty && !_authed) return emit('AUTH:PIDE');
+    if (!validClave(c)) return emit('ERR:la clave debe tener de 4 a 8 numeros');
+    clave = c;
+    _authed = true;
+    emit('AUTH:OK');
+    _notice('Clave de la casa guardada');
   }
 
   void _setValue(int pin, int value) {

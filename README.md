@@ -20,7 +20,7 @@ App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por
 ## Probar sin hardware
 
 1. **Modo demo:** la app trae dos placas demo (Casa y Auto Robot). Abre cualquiera y prueba los controles.
-2. **Placa falsa por Wi‑Fi:** en la PC ejecuta `dart run tool/placa_falsa.dart`. En la app ve a *Agregar dispositivo → Wi‑Fi*, escribe la IP que muestra la PC y el puerto 3333. El teléfono y la PC deben estar en la misma red.
+2. **Placa falsa por Wi‑Fi:** en la PC ejecuta `dart run tool/placa_falsa.dart`. En la app ve a *Agregar dispositivo → Wi‑Fi*, escribe la IP que muestra la PC y el puerto 3333. El teléfono y la PC deben estar en la misma red. Pide la clave de la casa como la placa real: la primera vez se crea.
 
 ## Instalar en el teléfono
 
@@ -30,9 +30,9 @@ App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por
 ## Cargar el programa en el ESP32
 
 1. Instala el Arduino IDE, el soporte para placas ESP32 y la librería **ESP32Servo**.
-2. Abre `firmware/casa_esp32/casa_esp32.ino` y revisa la sección **CONFIGURACIÓN**: Bluetooth o Wi‑Fi, nombre de la red, LCD y sensor DHT.
+2. Abre `firmware/casa_esp32/casa_esp32.ino` y revisa la sección **CONFIGURACIÓN**: Bluetooth, Wi‑Fi propio del ESP32 o la red de la casa.
 3. Revisa la tabla `ch[]`: cada fila es una salida de la maqueta con su GPIO. **Tiene que coincidir con los cables reales.**
-4. Placa: *ESP32 Dev Module*. Si activas Bluetooth y Wi‑Fi a la vez, usa *Partition Scheme → Huge APP*.
+4. Placa: *ESP32 Dev Module* con *Partition Scheme → Huge APP* (Bluetooth y Wi‑Fi juntos no caben en la normal).
 5. Abre el Monitor Serie a 115200. Puedes escribir `V1:1` ahí mismo para probar sin teléfono.
 
 ## Si algo no responde bien
@@ -43,4 +43,4 @@ App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por
 
 ## Protocolo
 
-Una línea por mensaje. Por ejemplo, `V1:1` enciende la luz de la sala, `V3:90` mueve la puerta a 90°, `V10:24.1` es la temperatura que envía la placa, y `CFG:V1:23:1` cambia el pin de un control. Los detalles están en `lib/core/protocol.dart`.
+Una línea por mensaje. Por ejemplo, `V1:1` enciende la luz de la sala, `V3:90` mueve la puerta a 90°, `V10:24.1` es la temperatura que envía la placa, y `CFG:V1:23:1` cambia el pin de un control. Antes de obedecer, la placa pide la clave de la casa (`AUTH:`, `CLAVE:`). Los detalles están en `lib/core/protocol.dart`.

@@ -48,6 +48,9 @@ void main() {
     expect(back.pins[1]!.gpio, 22);
     expect(back.pins[1]!.inverted, isTrue);
     expect(back.pins[1]!.enabled, isFalse);
+    expect(back.clave, isNull);
+    d.clave = '482913';
+    expect(SavedDevice.fromJson(d.toJson()).clave, '482913');
   });
 
   test('valida los GPIO igual que la placa', () {
@@ -77,6 +80,7 @@ void main() {
       return links.last;
     });
     await s.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(s.connected, isTrue);
 
     links.last.drop();
@@ -84,6 +88,7 @@ void main() {
     expect(s.retrying, isTrue);
     await Future<void>.delayed(Session.retryDelays.first + const Duration(milliseconds: 300));
     expect(links.length, 2);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(s.connected, isTrue);
 
     await s.disconnect();
@@ -145,6 +150,95 @@ void main() {
     });
   });
 
+  group('Clave de la casa', () {
+    Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 30));
+
+    test('la primera vez se crea, se guarda y la siguiente conexión entra sola', () async {
+      final board = _Board();
+      var saves = 0;
+      final d = SavedDevice(id: 'k', name: 'Casa', profile: Profile.casa, transport: Transport.ble);
+      final s = Session(d, linkFor: (_) => _SimLink(board), onDeviceChanged: () => saves++);
+
+      await s.connect();
+      await settle();
+      expect(s.clave, ClaveState.create);
+      expect(s.connected, isFalse);
+      expect(s.needsClave, isTrue);
+
+      s.createClave('482913');
+      await settle();
+      expect(s.connected, isTrue);
+      expect(d.clave, '482913');
+      expect(saves, 1);
+      expect(s.log.map((l) => l.text), contains('SYNC'));
+      expect(s.log.map((l) => l.text), isNot(contains(contains('482913'))), reason: 'la clave no se muestra');
+
+      await s.disconnect();
+      await s.connect();
+      await settle();
+      expect(s.connected, isTrue, reason: 'entrega sola la clave guardada');
+      await s.disconnect();
+    });
+
+    test('clave incorrecta: avisa los intentos y después hace esperar', () async {
+      final board = _Board()..sim.clave = '1234';
+      final d = SavedDevice(id: 'w', name: 'Casa', profile: Profile.casa, transport: Transport.ble, clave: '9999');
+      final s = Session(d, linkFor: (_) => _SimLink(board));
+
+      await s.connect();
+      await settle();
+      expect(s.clave, ClaveState.ask);
+      expect(s.claveMessage, 'Clave incorrecta. Quedan 2 intentos.');
+      expect(d.clave, isNull, reason: 'olvida la clave que ya no sirve');
+
+      s.enterClave('0000');
+      await settle();
+      expect(s.claveMessage, 'Clave incorrecta. Queda 1 intento.');
+      s.enterClave('1111');
+      await settle();
+      expect(s.clave, ClaveState.locked);
+      expect(s.claveMessage, 'Demasiados intentos. Espera 30 segundos.');
+      await s.disconnect();
+    });
+
+    test('sin la clave, la placa no obedece', () {
+      final out = <String>[];
+      final sim = CasaSim(out.add, usesClave: true)..clave = '1234';
+      sim.handle('V10:1');
+      expect(out, ['AUTH:PIDE']);
+      sim.handle('AUTH:1234');
+      sim.handle('V10:1');
+      expect(out, ['AUTH:PIDE', 'AUTH:OK', 'V10:1']);
+    });
+
+    test('cambiar la clave guarda la nueva', () async {
+      final board = _Board()..sim.clave = '1234';
+      final d = SavedDevice(id: 'c', name: 'Casa', profile: Profile.casa, transport: Transport.ble, clave: '1234');
+      final s = Session(d, linkFor: (_) => _SimLink(board));
+      await s.connect();
+      await settle();
+      expect(s.connected, isTrue);
+      s.changeClave('5678');
+      await settle();
+      expect(board.sim.clave, '5678');
+      expect(d.clave, '5678');
+      expect(s.claveMessage, 'Clave cambiada');
+      expect(s.connected, isTrue);
+      await s.disconnect();
+    });
+
+    test('una placa que no contesta (el carrito) se usa sin clave', () async {
+      final d = SavedDevice(id: 'n', name: 'Carro', profile: Profile.carro, transport: Transport.ble);
+      final s = Session(d, linkFor: (_) => _SilentLink());
+      await s.connect();
+      expect(s.state, LinkState.connecting, reason: 'mientras espera la respuesta');
+      await Future<void>.delayed(Session.claveTimeout + const Duration(milliseconds: 100));
+      expect(s.connected, isTrue);
+      expect(s.keyed, isFalse);
+      await s.disconnect();
+    });
+  });
+
   testWidgets('la pantalla de inicio muestra las placas demo', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final state = AppState();
@@ -166,8 +260,51 @@ class _FlakyLink extends DeviceLink {
   @override
   Future<void> disconnect() async => setState(LinkState.disconnected);
 
+  /// Como el programa anterior del ESP32: no conoce la clave.
   @override
-  Future<void> sendLine(String line) async {}
+  Future<void> sendLine(String line) async {
+    if (line.startsWith('AUTH')) emitLine('ERR:no entiendo $line');
+  }
 
   void drop() => setState(LinkState.error, 'caída simulada');
+}
+
+/// Una casa simulada que pide clave. Recuerda la clave entre conexiones, como el ESP32.
+class _Board {
+  _SimLink? link;
+  late final CasaSim sim = CasaSim((l) => link?.emitLine(l), usesClave: true);
+}
+
+/// Conexión con la casa simulada: lo que responde la casa llega a la conexión abierta.
+class _SimLink extends DeviceLink {
+  final _Board board;
+  _SimLink(this.board);
+
+  @override
+  Future<void> connect() async {
+    board.link = this;
+    board.sim.reconnect();
+    setState(LinkState.connected);
+  }
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {
+    await Future<void>.delayed(Duration.zero);
+    board.sim.handle(line);
+  }
+}
+
+/// Una placa que nunca contesta, como un módulo HM‑10 con otro programa.
+class _SilentLink extends DeviceLink {
+  @override
+  Future<void> connect() async => setState(LinkState.connected);
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {}
 }

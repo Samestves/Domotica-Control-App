@@ -22,7 +22,10 @@ String stateLabel(LinkState s) => switch (s) {
 class StatusDot extends StatefulWidget {
   final LinkState state;
   final double size;
-  const StatusDot(this.state, {super.key, this.size = 8});
+
+  /// Color en vez del del estado (por ejemplo, naranja cuando falta la clave).
+  final Color? color;
+  const StatusDot(this.state, {super.key, this.size = 8, this.color});
 
   @override
   State<StatusDot> createState() => _StatusDotState();
@@ -60,7 +63,7 @@ class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    final c = stateColor(widget.state);
+    final c = widget.color ?? stateColor(widget.state);
     return FadeTransition(
       opacity: Tween(begin: 0.35, end: 1.0).animate(_pulse),
       child: Container(
@@ -120,16 +123,17 @@ class ConnectionLine extends StatelessWidget {
   final LinkState state;
   final Transport transport;
   final bool retrying;
+  final bool needsClave;
   final Color? textColor;
-  const ConnectionLine({super.key, required this.state, required this.transport, this.retrying = false, this.textColor});
+  const ConnectionLine({super.key, required this.state, required this.transport, this.retrying = false, this.needsClave = false, this.textColor});
 
   @override
   Widget build(BuildContext context) {
-    final label = retrying ? 'Reconectando…' : stateLabel(state);
+    final label = retrying ? 'Reconectando…' : (needsClave ? 'Falta la clave' : stateLabel(state));
     final color = textColor ?? C.label2;
     // Un solo texto con el icono dentro: si no cabe, se corta con «…» en vez de desbordarse.
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      StatusDot(retrying ? LinkState.connecting : state, size: 7),
+      StatusDot(retrying ? LinkState.connecting : state, size: 7, color: needsClave ? C.orange : null),
       const SizedBox(width: 7),
       Flexible(
         child: Text.rich(

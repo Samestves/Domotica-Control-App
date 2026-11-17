@@ -8,6 +8,7 @@
 //   dart run tool/placa_falsa.dart
 // Luego, en la app: Agregar dispositivo → Wi‑Fi → la IP que aparece aquí y el puerto 3333.
 // El teléfono y la PC deben estar en la misma red Wi‑Fi.
+// Pide la clave de la casa como la placa real: la primera conexión la crea y dura mientras corra el programa.
 import 'dart:convert';
 import 'dart:io';
 
@@ -16,6 +17,9 @@ import 'package:control_domotica/core/protocol.dart';
 import 'package:control_domotica/models/pins.dart';
 
 const port = 3333;
+
+/// Clave creada desde la app. Se comparte entre conexiones, como en la memoria del ESP32.
+var clave = '';
 
 const names = {
   0: 'Portón garaje', 1: 'Puerta principal', 2: 'Puerta salón', 3: 'Puerta baño', 4: 'Puerta cuarto',
@@ -43,15 +47,18 @@ void _serve(Socket client) {
   final sim = CasaSim((line) {
     print('  <- ${_describe(line)}');
     client.write('$line\n');
-  });
+  }, usesClave: true)
+    ..clave = clave;
   client.write('HELLO:Placa falsa\n');
 
   client.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen(
     (raw) {
       final line = raw.trim();
       if (line.isEmpty) return;
-      print('-> $line');
+      // La clave no se muestra en pantalla.
+      print('-> ${line.replaceAllMapped(RegExp(r'^(AUTH|CLAVE):.*'), (m) => '${m[1]}:••••')}');
       sim.handle(line);
+      clave = sim.clave;
     },
     onDone: () {
       sim.dispose();

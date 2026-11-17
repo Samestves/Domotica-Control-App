@@ -8,6 +8,7 @@
 import 'dart:io';
 
 import 'package:control_domotica/core/demo_link.dart';
+import 'package:control_domotica/core/link.dart';
 import 'package:control_domotica/main.dart';
 import 'package:control_domotica/models/device.dart';
 import 'package:control_domotica/state/app_state.dart';
@@ -88,6 +89,21 @@ void main() {
   testWidgets('agregar dispositivo', (t) async {
     final app = await _state();
     await _shoot(t, app, const AddDeviceScreen(), '02_agregar');
+    await t.tap(find.text('Wi‑Fi'));
+    await t.pump(const Duration(seconds: 1));
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('salida/02b_agregar_wifi.png'));
+  });
+
+  testWidgets('casa pide crear la clave', (t) async {
+    final app = await _state();
+    final casa = app.devices.firstWhere((d) => d.id == 'esp32');
+    final s = Session(casa, linkFor: (_) => _NewHouseLink());
+    await t.runAsync(() async {
+      await s.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await _shoot(t, app, _SessionPanel(session: s), '09_crear_clave');
+    await t.runAsync(s.disconnect);
   });
 
   testWidgets('casa conectada', (t) async {
@@ -143,4 +159,18 @@ class _SessionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => CasaPanel(device: session.device, session: session);
+}
+
+/// Una casa recién cargada: todavía no tiene clave.
+class _NewHouseLink extends DeviceLink {
+  @override
+  Future<void> connect() async => setState(LinkState.connected);
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {
+    if (line.startsWith('AUTH')) emitLine('AUTH:NUEVA');
+  }
 }
