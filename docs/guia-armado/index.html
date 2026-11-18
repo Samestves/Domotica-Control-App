@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guía de armado del equipo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* Plano técnico sobre negro: una sola columna estrecha (se lee en el teléfono), diagramas a todo el ancho,
+   color solo para lo eléctrico: rojo = +, gris = GND, azul = señal, ámbar = motor. */
+:root {
+  --bg: #000000;
+  --panel: #0b0d10;
+  --line: #262c34;
+  --ink: #f2f4f7;
+  --mute: #8d96a2;
+  --accent: #5aa9ff;
+  --pwr: #ff5c57;
+  --gnd: #9aa3ae;
+  --sig: #5aa9ff;
+  --mot: #ffc24b;
+  --ok: #7ee3a9;
+  --bad: #ff5c57;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.55 var(--body); }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+
+/* Portada */
+header.hero { padding: 64px 0 40px; border-bottom: 1px solid var(--line); }
+.eyebrow { font: 600 13px/1 var(--display); letter-spacing: .22em; text-transform: uppercase; color: var(--mute); }
+h1 { font: 700 clamp(44px, 11vw, 84px)/.95 var(--display); letter-spacing: .02em; text-transform: uppercase; margin: 18px 0 18px; text-wrap: balance; }
+.lead { color: #c7cdd5; font-size: 19px; max-width: 34em; margin: 0; }
+nav.toc { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 36px; }
+nav.toc a { background: var(--bg); padding: 16px 16px 18px; text-decoration: none; color: var(--ink); display: grid; gap: 6px; }
+nav.toc a:hover { background: var(--panel); }
+nav.toc b { font: 600 12px/1 var(--mono); color: var(--accent); letter-spacing: .08em; }
+nav.toc span { font: 600 20px/1.1 var(--display); text-transform: uppercase; letter-spacing: .06em; }
+nav.toc small { color: var(--mute); font-size: 14px; }
+
+/* Secciones */
+section { padding: 64px 0 24px; border-bottom: 1px solid var(--line); }
+.num { font: 600 13px/1 var(--mono); color: var(--accent); letter-spacing: .1em; }
+h2 { font: 700 clamp(34px, 8vw, 52px)/1 var(--display); text-transform: uppercase; letter-spacing: .03em; margin: 12px 0 14px; text-wrap: balance; }
+h3 { font: 600 22px/1.15 var(--display); text-transform: uppercase; letter-spacing: .07em; margin: 40px 0 12px; }
+p { margin: 0 0 14px; max-width: 38em; }
+.muted { color: var(--mute); }
+
+figure { margin: 28px 0 8px; border: 1px solid var(--line); background: var(--panel); padding: 18px 14px 14px; }
+figure svg { display: block; width: 100%; height: auto; max-width: 520px; margin: 0 auto; }
+figcaption { color: var(--mute); font-size: 14px; margin-top: 12px; padding: 0 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font: 500 13px/1 var(--mono); color: var(--mute); margin: 10px 4px 0; }
+.legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+
+/* Lista de puntos numerados del diagrama */
+ol.calls { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+ol.calls li { background: var(--bg); padding: 14px 16px; display: grid; grid-template-columns: 30px 1fr; gap: 12px; }
+ol.calls li b.n { font: 600 13px/22px var(--mono); color: var(--bg); background: var(--ink); width: 22px; height: 22px; border-radius: 50%; text-align: center; }
+ol.calls strong { font-weight: 600; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 18px 0; }
+.card { border: 1px solid var(--line); padding: 16px; background: var(--panel); }
+.card h4 { margin: 0 0 6px; font: 600 15px/1.2 var(--display); letter-spacing: .1em; text-transform: uppercase; }
+.card p { font-size: 15px; margin: 0; }
+.card.bad { border-color: rgba(255, 92, 87, .55); }
+.card.bad h4 { color: var(--bad); }
+.card.ok h4 { color: var(--ok); }
+.card.ask { border-style: dashed; }
+.card.ask h4 { color: var(--mot); }
+
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.tablebox { overflow-x: auto; border: 1px solid var(--line); margin: 16px 0; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font: 600 12px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--mute); background: var(--panel); }
+td.pin { font: 600 14px/1 var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+
+ul.tips { list-style: none; padding: 0; margin: 14px 0; display: grid; gap: 10px; }
+ul.tips li { padding-left: 22px; position: relative; max-width: 38em; }
+ul.tips li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 8px; height: 2px; background: var(--accent); }
+
+/* Demostración del lápiz */
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 26px 0 8px; }
+.duo .pane { border: 1px solid var(--line); background: var(--panel); padding: 12px; }
+.duo canvas { display: block; width: 100%; aspect-ratio: 1; }
+.duo .tag { font: 600 13px/1.3 var(--display); letter-spacing: .12em; text-transform: uppercase; margin-top: 10px; }
+.duo .tag.ok { color: var(--ok); }
+.duo .tag.bad { color: var(--bad); }
+.duo .sub { color: var(--mute); font-size: 14px; }
+
+/* Carrito: modos */
+.mode { font: 600 16px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; text-align: center; margin-top: 8px; color: var(--ink); min-height: 1em; }
+#car .body { transition: transform .9s cubic-bezier(.4, 0, .2, 1); transform-origin: 200px 280px; }
+#car .arrow { transition: transform .5s ease; transform-box: fill-box; transform-origin: center; }
+
+/* Lista antes de encender */
+.check { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 18px 0; }
+.check label { background: var(--bg); display: grid; grid-template-columns: 26px 1fr; gap: 12px; padding: 14px 16px; cursor: pointer; align-items: start; }
+.check input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--ok); }
+.check label:has(input:checked) span { color: var(--mute); text-decoration: line-through; text-decoration-color: var(--mute); }
+.check em { font-style: normal; color: var(--mute); font-size: 14px; display: block; }
+
+footer { padding: 40px 0 64px; color: var(--mute); font-size: 14px; }
+
+/* Animaciones del diagrama: la corriente avanza por los cables */
+.flow { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 2 10; animation: flow 1.1s linear infinite; }
+.flow.sig { stroke-dasharray: 6 14; animation-duration: 1.6s; }
+@keyframes flow { to { stroke-dashoffset: -12; } }
+.flow.sig { animation-name: flowsig; }
+@keyframes flowsig { to { stroke-dashoffset: -20; } }
+.pulse { animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .flow, .pulse { animation: none; }
+  #car .body, #car .arrow { transition: none; }
+}
+@media (max-width: 520px) {
+  .duo { grid-template-columns: 1fr; }
+  nav.toc { grid-template-columns: 1fr; }
+  body { font-size: 16px; }
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Guía de armado · versión 1 · 17 nov 2026</div>
+    <h1>Casa, carrito y robot escritor</h1>
+    <p class="lead">Cómo conectar las tres máquinas del proyecto para que funcionen a la primera: de dónde sale la corriente, qué va en cada pin y los detalles físicos que más fallan.</p>
+    <nav class="toc" aria-label="Contenido">
+      <a href="#casa"><b>01</b><span>Casa domótica</span><small>Una sola fuente, bien repartida</small></a>
+      <a href="#carrito"><b>02</b><span>Carrito 4x4</span><small>Motores TT y dos L298N</small></a>
+      <a href="#robot"><b>03</b><span>Robot escritor</span><small>Dónde va el lápiz y qué driver usar</small></a>
+      <a href="#encender"><b>04</b><span>Antes de encender</span><small>La revisión para no quemar nada</small></a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<!-- ================= 01 CASA ================= -->
+<section id="casa">
+  <div class="wrap">
+    <div class="num">01 · CASA DOMÓTICA</div>
+    <h2>Una sola fuente para toda la casa</h2>
+    <p>Usar una sola fuente para los servos y el ESP32 está bien. Lo que importa es <strong>por dónde viaja la corriente</strong>: los servos la toman directo de la fuente, nunca del ESP32.</p>
+
+    <figure>
+      <svg viewBox="0 0 400 470" role="img" aria-label="Diagrama: la fuente de 5 voltios alimenta una bornera; de ahí salen los servos y el ESP32; todas las tierras están unidas y el ESP32 solo envía la señal a cada servo.">
+        <defs>
+          <marker id="tri" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5aa9ff"/></marker>
+        </defs>
+        <g font-family="Barlow Condensed, Arial Narrow, sans-serif" fill="#f2f4f7">
+          <!-- Fuente -->
+          <rect x="120" y="14" width="160" height="58" fill="#000" stroke="#f2f4f7" stroke-width="1.4"/>
+          <text x="200" y="38" text-anchor="middle" font-size="15" font-weight="600" letter-spacing="1.5">FUENTE 5 V</text>
+          <text x="200" y="58" text-anchor="middle" font-size="12" fill="#8d96a2" letter-spacing="1">3 A o más</text>
+          <!-- bajadas de la fuente -->
+          <path class="wire live" d="M170 72 V110" stroke="#ff5c57" stroke-width="2.4" fill="none"/>
+          <path d="M230 72 V136" stroke="#9aa3ae" stroke-width="2.4" fill="none"/>
+          <!-- buses de la bornera -->
+          <rect x="16" y="98" width="368" height="50" fill="none" stroke="#262c34" stroke-dasharray="3 4"/>
+          <text x="24" y="92" font-size="11" fill="#8d96a2" letter-spacing="1.2">BAQUELITA CON BORNERAS</text>
+          <path class="wire live" d="M30 110 H370" stroke="#ff5c57" stroke-width="2.4" fill="none"/>
+          <path d="M30 136 H370" stroke="#9aa3ae" stroke-width="2.4" fill="none"/>
+          <text x="374" y="114" font-size="11" fill="#ff5c57" text-anchor="end" dy="-6">+5 V</text>
+          <text x="374" y="152" font-size="11" fill="#9aa3ae" text-anchor="end">GND</text>
+          <!-- capacitor -->
+          <path d="M330 110 V118 M320 118 H340 M320 125 H340 M330 125 V136" stroke="#f2f4f7" stroke-width="1.6" fill="none"/>
+          <!-- servos -->
+          <g>
+            <rect x="34" y="196" width="92" height="54" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+            <circle cx="62" cy="223" r="9" fill="none" stroke="#8d96a2"/>
+            <text x="102" y="220" text-anchor="middle" font-size="13" font-weight="600">SERVO</text>
+            <text x="102" y="236" text-anchor="middle" font-size="11" fill="#8d96a2">puertas</text>
+            <rect x="154" y="196" width="92" height="54" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+            <circle cx="182" cy="223" r="9" fill="none" stroke="#8d96a2"/>
+            <text x="222" y="220" text-anchor="middle" font-size="13" font-weight="600">SERVO</text>
+            <text x="222" y="236" text-anchor="middle" font-size="11" fill="#8d96a2">persianas</text>
+            <rect x="274" y="196" width="92" height="54" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+            <circle cx="302" cy="223" r="9" fill="none" stroke="#8d96a2"/>
+            <text x="342" y="220" text-anchor="middle" font-size="13" font-weight="600">SERVO</text>
+            <text x="342" y="236" text-anchor="middle" font-size="11" fill="#8d96a2">… hasta 9</text>
+          </g>
+          <!-- servos: + y GND desde la bornera -->
+          <path class="wire live" d="M50 110 V196" stroke="#ff5c57" stroke-width="2" fill="none"/>
+          <path d="M70 136 V196" stroke="#9aa3ae" stroke-width="2" fill="none"/>
+          <path class="wire live" d="M170 110 V196" stroke="#ff5c57" stroke-width="2" fill="none"/>
+          <path d="M190 136 V196" stroke="#9aa3ae" stroke-width="2" fill="none"/>
+          <path class="wire live" d="M290 110 V196" stroke="#ff5c57" stroke-width="2" fill="none"/>
+          <path d="M310 136 V196" stroke="#9aa3ae" stroke-width="2" fill="none"/>
+          <!-- ESP32 -->
+          <rect x="110" y="352" width="180" height="84" fill="#000" stroke="#f2f4f7" stroke-width="1.4"/>
+          <text x="200" y="392" text-anchor="middle" font-size="18" font-weight="700" letter-spacing="2">ESP32</text>
+          <text x="200" y="412" text-anchor="middle" font-size="11" fill="#8d96a2" letter-spacing="1">solo manda la señal</text>
+          <text x="116" y="370" font-size="11" fill="#ff5c57">VIN</text>
+          <text x="284" y="370" font-size="11" fill="#9aa3ae" text-anchor="end">GND</text>
+          <!-- ESP32 alimentado desde la bornera -->
+          <path class="wire live" d="M24 110 V366 H110" stroke="#ff5c57" stroke-width="2" fill="none"/>
+          <path d="M376 136 V366 H290" stroke="#9aa3ae" stroke-width="2" fill="none"/>
+          <!-- señales -->
+          <path d="M150 352 V300 H96 V250" stroke="#5aa9ff" stroke-width="1.6" fill="none" marker-end="url(#tri)"/>
+          <path d="M200 352 V250" stroke="#5aa9ff" stroke-width="1.6" fill="none" marker-end="url(#tri)"/>
+          <path d="M250 352 V300 H336 V250" stroke="#5aa9ff" stroke-width="1.6" fill="none" marker-end="url(#tri)"/>
+          <path class="flow sig" d="M150 352 V300 H96 V252 M200 352 V252 M250 352 V300 H336 V252" stroke="#5aa9ff"/>
+          <text x="206" y="290" font-size="11" fill="#5aa9ff">señal (GPIO)</text>
+          <!-- marcas numeradas -->
+          <g font-family="JetBrains Mono, monospace" font-size="11" font-weight="600">
+            <circle cx="296" cy="30" r="10" fill="#f2f4f7"/><text x="296" y="34" text-anchor="middle" fill="#000">1</text>
+            <circle cx="140" cy="176" r="10" fill="#f2f4f7"/><text x="140" y="180" text-anchor="middle" fill="#000">2</text>
+            <circle cx="96" cy="336" r="10" fill="#f2f4f7"/><text x="96" y="340" text-anchor="middle" fill="#000">3</text>
+            <circle cx="390" cy="250" r="10" fill="#f2f4f7"/><text x="390" y="254" text-anchor="middle" fill="#000">4</text>
+            <circle cx="352" cy="82" r="10" fill="#f2f4f7"/><text x="352" y="86" text-anchor="middle" fill="#000">5</text>
+          </g>
+        </g>
+      </svg>
+      <div class="legend"><span><i style="background:var(--pwr)"></i>+5 V</span><span><i style="background:var(--gnd)"></i>GND</span><span><i style="background:var(--sig)"></i>señal</span></div>
+      <figcaption>La corriente sale de la fuente hacia la bornera y de ahí a cada servo y al ESP32. El ESP32 no alimenta a nadie: solo dice a cada servo a qué ángulo ir.</figcaption>
+    </figure>
+
+    <ol class="calls">
+      <li><b class="n">1</b><div><strong>Fuente de 5 V, 3 A o más.</strong> No es una por servo: es una para todos. Los 3 A son para los momentos en que varios servos se mueven juntos, como al encender o al decir «buenas noches».</div></li>
+      <li><b class="n">2</b><div><strong>Cada servo toma + y GND de la bornera.</strong> Con cable grueso (AWG 18) para la corriente y delgado (AWG 22) para las señales.</div></li>
+      <li><b class="n">3</b><div><strong>El ESP32 se alimenta por su pin VIN</strong>, desde la misma bornera. Nunca conecten servos a los pines 5V o 3V3 del ESP32.</div></li>
+      <li><b class="n">4</b><div><strong>Todas las tierras unidas:</strong> fuente, servos y ESP32. Sin GND común la señal no llega bien y los servos tiemblan.</div></li>
+      <li><b class="n">5</b><div><strong>Un capacitor de 470 a 1000 µF</strong> (16 V o más) entre + y GND, junto a los servos. Absorbe los picos de corriente. Respeten la patita negativa (la de la franja).</div></li>
+    </ol>
+
+    <div class="cards">
+      <div class="card bad">
+        <h4>Lo que no aguanta</h4>
+        <p>Alimentar todo por el USB del ESP32 desde la compu o un cargador pequeño. El USB de una compu da 0,5 A: al moverse dos servos, el ESP32 se reinicia y se corta el Bluetooth.</p>
+      </div>
+      <div class="card ok">
+        <h4>Si la fuente es más chica</h4>
+        <p>El programa del ESP32 puede mover los servos de uno en uno y soltarlos al llegar. Así el pico de corriente baja mucho. Mándennos una foto de la etiqueta de la fuente (la parte que dice «Output»).</p>
+      </div>
+    </div>
+
+    <h3>Dónde va cada cable</h3>
+    <p class="muted">Igual que en su documento «Conexiones GPIO» y que en Blynk. Si algo quedó distinto, se cambia desde la app manteniendo presionado el control.</p>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>Pieza</th><th>Pin virtual</th><th>GPIO</th></tr></thead>
+        <tbody>
+          <tr><td>Portón · Puerta principal · Salón · Baño · Cuarto</td><td class="pin">V0–V4</td><td class="pin">13 · 14 · 15 · 16 · 17</td></tr>
+          <tr><td>Persiana sala · cuarto · cocina 1 · cocina 2</td><td class="pin">V5–V8</td><td class="pin">18 · 19 · 21 · 22</td></tr>
+          <tr><td>Sirena (buzzer activo)</td><td class="pin">V9</td><td class="pin">27</td></tr>
+          <tr><td>Luces: sala 1 · sala 2 · cocina · baño · cuarto · garaje</td><td class="pin">V10–V15</td><td class="pin">2 · 4 · 5 · 12 · 25 · 26</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cards">
+      <div class="card ask">
+        <h4>Por confirmar · PCA9685</h4>
+        <p>Si conectan los servos a la placa PCA9685, el ESP32 le habla por solo 2 cables (GPIO 21 y 22) y la placa reparte la señal a cada servo. Es más ordenado, pero esos dos pines hoy son las persianas de la cocina: habría que moverlas y ajustar el programa. Avísennos si la van a usar.</p>
+      </div>
+      <div class="card">
+        <h4>Detalles que ahorran horas</h4>
+        <p>Etiqueten cada cable con su número de GPIO. Antes de pegar con silicón, prueben cada servo con la app (menú ⋯ → Probar salidas una por una) para saber hacia dónde gira.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 02 CARRITO ================= -->
+<section id="carrito">
+  <div class="wrap">
+    <div class="num">02 · CARRITO 4X4</div>
+    <h2>Cuatro motores, cada uno en su canal</h2>
+    <p>Los motores TT amarillos (3–6 V) con su rueda, dos puentes H L298N y dos baterías 18650. Gira como un tanque: para doblar, las ruedas de un lado van más lento o hacia atrás.</p>
+
+    <figure id="car">
+      <svg viewBox="0 0 400 560" role="img" aria-label="Diagrama del carrito visto desde arriba: dos baterías 18650 con interruptor alimentan dos L298N; cada L298N mueve los dos motores de su lado; el ESP32 controla los L298N y toma 5 voltios de uno de ellos.">
+        <g class="body" font-family="Barlow Condensed, Arial Narrow, sans-serif" fill="#f2f4f7">
+          <!-- chasis -->
+          <rect x="66" y="30" width="268" height="500" rx="18" fill="#000" stroke="#3a414b" stroke-width="1.4"/>
+          <text x="200" y="22" text-anchor="middle" font-size="11" fill="#8d96a2" letter-spacing="2">FRENTE</text>
+          <!-- ruedas -->
+          <g fill="#14171b" stroke="#f2f4f7" stroke-width="1.2">
+            <rect x="24" y="64" width="38" height="96" rx="6"/>
+            <rect x="338" y="64" width="38" height="96" rx="6"/>
+            <rect x="24" y="398" width="38" height="96" rx="6"/>
+            <rect x="338" y="398" width="38" height="96" rx="6"/>
+          </g>
+          <!-- flechas de giro de cada rueda -->
+          <g fill="#ffc24b">
+            <path class="arrow" id="wFL" d="M43 92 l-9 14 h6 v20 h6 v-20 h6 z"/>
+            <path class="arrow" id="wFR" d="M357 92 l-9 14 h6 v20 h6 v-20 h6 z"/>
+            <path class="arrow" id="wRL" d="M43 426 l-9 14 h6 v20 h6 v-20 h6 z"/>
+            <path class="arrow" id="wRR" d="M357 426 l-9 14 h6 v20 h6 v-20 h6 z"/>
+          </g>
+          <!-- motores TT -->
+          <g fill="#1a1608" stroke="#ffc24b" stroke-width="1.2">
+            <rect x="70" y="88" width="62" height="46"/>
+            <rect x="268" y="88" width="62" height="46"/>
+            <rect x="70" y="422" width="62" height="46"/>
+            <rect x="268" y="422" width="62" height="46"/>
+          </g>
+          <g font-size="11" fill="#ffc24b" text-anchor="middle" letter-spacing="1">
+            <text x="101" y="115">MOTOR TT</text><text x="299" y="115">MOTOR TT</text>
+            <text x="101" y="449">MOTOR TT</text><text x="299" y="449">MOTOR TT</text>
+          </g>
+          <!-- baterías -->
+          <rect x="150" y="58" width="100" height="58" fill="#000" stroke="#ff5c57" stroke-width="1.2"/>
+          <text x="200" y="82" text-anchor="middle" font-size="13" font-weight="600">2 × 18650</text>
+          <text x="200" y="100" text-anchor="middle" font-size="11" fill="#8d96a2">7,4 V · interruptor</text>
+          <!-- L298N -->
+          <rect x="84" y="214" width="100" height="98" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+          <rect x="216" y="214" width="100" height="98" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+          <text x="134" y="252" text-anchor="middle" font-size="15" font-weight="600">L298N A</text>
+          <text x="134" y="270" text-anchor="middle" font-size="11" fill="#8d96a2">lado izquierdo</text>
+          <text x="266" y="252" text-anchor="middle" font-size="15" font-weight="600">L298N B</text>
+          <text x="266" y="270" text-anchor="middle" font-size="11" fill="#8d96a2">lado derecho</text>
+          <!-- ESP32 -->
+          <rect x="150" y="342" width="100" height="58" fill="#000" stroke="#5aa9ff" stroke-width="1.2"/>
+          <text x="200" y="368" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="2">ESP32</text>
+          <text x="200" y="386" text-anchor="middle" font-size="11" fill="#8d96a2">Bluetooth LE</text>
+          <!-- corriente de baterías a los L298N -->
+          <path class="wire live" d="M180 116 V170 H134 V214 M220 116 V170 H266 V214" stroke="#ff5c57" stroke-width="2.2" fill="none"/>
+          <!-- 5 V de L298N A al ESP32 -->
+          <path class="wire live" d="M120 312 V372 H150" stroke="#ff5c57" stroke-width="1.6" fill="none" stroke-dasharray="5 3"/>
+          <text x="76" y="392" font-size="11" fill="#ff5c57">5 V → VIN</text>
+          <!-- motores -->
+          <path class="wire live mot" d="M101 134 V214 M101 312 V422 M299 134 V214 M299 312 V422" stroke="#ffc24b" stroke-width="2" fill="none"/>
+          <!-- señales -->
+          <path d="M170 342 V328 H150 V312 M230 342 V328 H250 V312" stroke="#5aa9ff" stroke-width="1.6" fill="none"/>
+          <path class="flow sig" d="M170 342 V328 H150 V312 M230 342 V328 H250 V312" stroke="#5aa9ff"/>
+          <text x="200" y="334" text-anchor="middle" font-size="11" fill="#5aa9ff">6 + 6 señales</text>
+          <!-- GND común -->
+          <path d="M200 400 V490 M200 490 H120 M200 490 H280" stroke="#9aa3ae" stroke-width="1.6" fill="none"/>
+          <text x="200" y="506" text-anchor="middle" font-size="11" fill="#9aa3ae">GND común: baterías, L298N A, L298N B y ESP32</text>
+        </g>
+      </svg>
+      <div class="mode" id="carMode" aria-live="polite">Adelante: las cuatro ruedas hacia adelante</div>
+      <div class="legend"><span><i style="background:var(--pwr)"></i>+ batería / 5 V</span><span><i style="background:var(--gnd)"></i>GND</span><span><i style="background:var(--sig)"></i>señal</span><span><i style="background:var(--mot)"></i>motor</span></div>
+      <figcaption>Cada L298N mueve los dos motores de su lado, cada motor en su propio canal. Las flechas muestran hacia dónde gira cada rueda en cada maniobra.</figcaption>
+    </figure>
+
+    <h3>Pines propuestos</h3>
+    <p class="muted">El programa del carrito usará estos. Si lo cablean distinto, cada pin se cambia desde la app, sin cargar nada de nuevo.</p>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th>Rueda</th><th>L298N</th><th>Velocidad</th><th>Sentido</th><th>Sentido</th></tr></thead>
+        <tbody>
+          <tr><td>Delantera izquierda</td><td>A · ENA, IN1, IN2</td><td class="pin">32</td><td class="pin">33</td><td class="pin">25</td></tr>
+          <tr><td>Trasera izquierda</td><td>A · ENB, IN3, IN4</td><td class="pin">26</td><td class="pin">27</td><td class="pin">14</td></tr>
+          <tr><td>Delantera derecha</td><td>B · ENA, IN1, IN2</td><td class="pin">13</td><td class="pin">4</td><td class="pin">16</td></tr>
+          <tr><td>Trasera derecha</td><td>B · ENB, IN3, IN4</td><td class="pin">17</td><td class="pin">18</td><td class="pin">19</td></tr>
+          <tr><td>Luces (opcional)</td><td>—</td><td class="pin">23</td><td></td><td></td></tr>
+          <tr><td>Bocina (opcional)</td><td>—</td><td class="pin">5</td><td></td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ul class="tips">
+      <li><strong>Quiten los puentecitos de ENA y ENB</strong> del L298N y conecten ahí los pines de velocidad. Con el puente puesto, el motor va siempre a toda velocidad.</li>
+      <li><strong>Dejen puesto el puente de «5V»</strong> (con baterías de 12 V o menos) y saquen los 5 V de un solo L298N hacia el VIN del ESP32.</li>
+      <li><strong>Un capacitor de 100 nF</strong> (el pequeño marcado «104») soldado entre las dos patitas de cada motor. Quita el ruido que reinicia el ESP32 o corta el Bluetooth.</li>
+      <li><strong>Si una rueda gira al revés</strong>, no recableen: se activa «Invertir» en la app, como en la casa.</li>
+      <li><strong>Pilas:</strong> 2 × 18650 (7,4 V) es lo ideal. Cuatro AA andan, pero lento. Una pila cuadrada de 9 V no da la corriente para cuatro motores.</li>
+      <li>El ESP32 lejos de los motores y las baterías centradas, para que el carrito no se vaya de lado.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================= 03 ROBOT ================= -->
+<section id="robot">
+  <div class="wrap">
+    <div class="num">03 · ROBOT ESCRITOR</div>
+    <h2>El lápiz va en el centro</h2>
+    <p>El robot gira en el sitio sobre el punto medio entre sus dos ruedas. Si el lápiz está ahí, girar no dibuja nada. Si está adelante o atrás, cada giro deja una curva y las letras salen deformes aunque el código esté perfecto.</p>
+
+    <div class="duo">
+      <div class="pane">
+        <canvas id="penOk" width="600" height="600" aria-label="El robot con el lápiz en el centro dibuja un cuadrado limpio."></canvas>
+        <div class="tag ok">Lápiz en el centro</div>
+        <div class="sub">Dibuja el cuadrado tal cual.</div>
+      </div>
+      <div class="pane">
+        <canvas id="penBad" width="600" height="600" aria-label="El robot con el lápiz 1,5 centímetros adelante dibuja curvas en cada esquina."></canvas>
+        <div class="tag bad">Lápiz 1,5 cm adelante</div>
+        <div class="sub">Cada giro dibuja una curva.</div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:14px">Simulación con las mismas órdenes en los dos: avanzar 4 cm y girar 90°, cuatro veces, con el lápiz abajo.</p>
+
+    <h3>Conexiones</h3>
+    <figure>
+      <svg viewBox="0 0 400 420" role="img" aria-label="Diagrama del robot escritor: el ESP32 manda pasos y dirección a dos drivers; cada driver mueve un motor paso a paso con su propia fuente; un servo sube y baja el lápiz.">
+        <g font-family="Barlow Condensed, Arial Narrow, sans-serif" fill="#f2f4f7">
+          <!-- fuente motores -->
+          <rect x="230" y="14" width="156" height="54" fill="#000" stroke="#ff5c57" stroke-width="1.2"/>
+          <text x="308" y="38" text-anchor="middle" font-size="14" font-weight="600">FUENTE MOTORES</text>
+          <text x="308" y="56" text-anchor="middle" font-size="11" fill="#8d96a2">12 V · según el motor</text>
+          <!-- ESP32 -->
+          <rect x="14" y="140" width="110" height="150" fill="#000" stroke="#5aa9ff" stroke-width="1.2"/>
+          <text x="69" y="168" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="2">ESP32</text>
+          <g font-family="JetBrains Mono, monospace" font-size="11" fill="#5aa9ff">
+            <text x="118" y="196" text-anchor="end">STEP 22</text>
+            <text x="118" y="212" text-anchor="end">DIR 23</text>
+            <text x="118" y="236" text-anchor="end">STEP 19</text>
+            <text x="118" y="252" text-anchor="end">DIR 18</text>
+            <text x="118" y="276" text-anchor="end">EN 25 *</text>
+          </g>
+          <!-- drivers -->
+          <rect x="176" y="150" width="96" height="62" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+          <text x="224" y="176" text-anchor="middle" font-size="13" font-weight="600">DRIVER IZQ.</text>
+          <text x="224" y="194" text-anchor="middle" font-size="11" fill="#8d96a2">A4988 / DRV8825</text>
+          <rect x="176" y="228" width="96" height="62" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+          <text x="224" y="254" text-anchor="middle" font-size="13" font-weight="600">DRIVER DER.</text>
+          <text x="224" y="272" text-anchor="middle" font-size="11" fill="#8d96a2">A4988 / DRV8825</text>
+          <!-- motores paso a paso -->
+          <rect x="316" y="152" width="62" height="58" fill="#1a1608" stroke="#ffc24b" stroke-width="1.2"/>
+          <text x="347" y="178" text-anchor="middle" font-size="11" fill="#ffc24b">PASO A PASO</text>
+          <text x="347" y="192" text-anchor="middle" font-size="11" fill="#ffc24b">IZQUIERDO</text>
+          <rect x="316" y="230" width="62" height="58" fill="#1a1608" stroke="#ffc24b" stroke-width="1.2"/>
+          <text x="347" y="256" text-anchor="middle" font-size="11" fill="#ffc24b">PASO A PASO</text>
+          <text x="347" y="270" text-anchor="middle" font-size="11" fill="#ffc24b">DERECHO</text>
+          <!-- señales -->
+          <path d="M124 192 H176 M124 208 H176 M124 232 H150 V244 H176 M124 248 H150 V262 H176" stroke="#5aa9ff" stroke-width="1.4" fill="none"/>
+          <path d="M124 272 H160 V206 H176 M160 272 V284 H176" stroke="#5aa9ff" stroke-width="1.2" stroke-dasharray="3 3" fill="none"/>
+          <path class="flow sig" d="M124 192 H176 M124 232 H150 V244 H176" stroke="#5aa9ff"/>
+          <!-- 4 cables de motor -->
+          <path class="wire live mot" d="M272 170 H316 M272 178 H316 M272 186 H316 M272 194 H316 M272 248 H316 M272 256 H316 M272 264 H316 M272 272 H316" stroke="#ffc24b" stroke-width="1.4" fill="none"/>
+          <!-- alimentación de motores con capacitor -->
+          <path class="wire live" d="M250 68 V150 M250 96 H300 V220 H250 V228" stroke="#ff5c57" stroke-width="2" fill="none"/>
+          <path d="M250 124 H238 M238 117 V131 M232 117 V131 M232 124 H222" stroke="#f2f4f7" stroke-width="1.4" fill="none"/>
+          <text x="218" y="128" font-size="11" fill="#8d96a2" text-anchor="end">100 µF en VMOT</text>
+          <!-- servo lápiz -->
+          <rect x="14" y="330" width="150" height="70" fill="#000" stroke="#f2f4f7" stroke-width="1.2"/>
+          <text x="89" y="358" text-anchor="middle" font-size="14" font-weight="600">SERVO DEL LÁPIZ</text>
+          <text x="89" y="378" text-anchor="middle" font-size="11" fill="#8d96a2">señal GPIO 13 · 5 V</text>
+          <path d="M40 290 V330" stroke="#5aa9ff" stroke-width="1.4" fill="none"/>
+          <text x="210" y="350" font-size="11" fill="#8d96a2">* EN apaga los motores</text>
+          <text x="210" y="366" font-size="11" fill="#8d96a2">cuando no dibujan: no se</text>
+          <text x="210" y="382" font-size="11" fill="#8d96a2">calientan ni gastan batería.</text>
+        </g>
+      </svg>
+      <div class="legend"><span><i style="background:var(--pwr)"></i>fuente motores</span><span><i style="background:var(--sig)"></i>señal</span><span><i style="background:var(--mot)"></i>motor (4 cables)</span></div>
+      <figcaption>Los pines STEP, DIR y del servo son los de su código actual. El pin EN es una sugerencia nuestra. Todas las tierras van unidas, como en la casa.</figcaption>
+    </figure>
+
+    <h3>¿Qué driver tienen?</h3>
+    <p>Del driver dependen cuántos pasos da cada vuelta y cuánta corriente aguanta. Mándennos una foto y lo confirmamos.</p>
+    <div class="cards">
+      <div class="card">
+        <h4>A4988</h4>
+        <p>Plaquita del tamaño de una uña, verde o roja, con un tornillito para la corriente. Hasta 1/16 de paso. Unos 1 A sin disipador.</p>
+      </div>
+      <div class="card">
+        <h4>DRV8825</h4>
+        <p>Igual de pequeña, pero morada y casi siempre con disipador. Hasta 1/32 de paso y más corriente que la A4988.</p>
+      </div>
+      <div class="card">
+        <h4>EasyDriver</h4>
+        <p>Roja y más grande, dice «EasyDriver». Ojo: viene de fábrica en 1/8 de paso, o sea 1600 pasos por vuelta y no 200. Sin ajustar eso, el robot avanza 8 veces menos.</p>
+      </div>
+      <div class="card">
+        <h4>L298N</h4>
+        <p>Grande, disipador negro y dos borneras azules. Es para los motores del carrito. Puede mover un paso a paso, pero calienta mucho y no sirve para dibujar con precisión.</p>
+      </div>
+    </div>
+
+    <h3>Mejoras físicas</h3>
+    <ul class="tips">
+      <li><strong>Lápiz con resorte o con un peso</strong>, para que toque el papel siempre con la misma presión.</li>
+      <li><strong>Una rueda loca de bolita</strong> como tercer apoyo, para que no cabecee.</li>
+      <li><strong>Medir con regla</strong> el diámetro real de las ruedas y la distancia entre ellas, y ponerlos en el código. Cada milímetro de error se nota en las letras.</li>
+      <li><strong>Ajustar la corriente del driver</strong> con su tornillito antes de usarlo. Muy baja, el motor pierde pasos; muy alta, se calienta.</li>
+      <li><strong>Capacitor de 100 µF</strong> en la entrada de la fuente de cada driver (VMOT). Sin él, el driver se puede dañar al conectar.</li>
+      <li><strong>Más lento al arrancar y al frenar.</strong> Los motores paso a paso pierden pasos si arrancan de golpe. Eso se resuelve en el programa.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================= 04 ANTES DE ENCENDER ================= -->
+<section id="encender">
+  <div class="wrap">
+    <div class="num">04 · ANTES DE ENCENDER</div>
+    <h2>La revisión de un minuto</h2>
+    <p>Vale para las tres máquinas. Pueden ir marcando: la lista se recuerda en este teléfono.</p>
+    <div class="check" id="checklist">
+      <label><input type="checkbox" id="c1"><span>Todas las tierras (GND) están unidas.<em>Fuente o baterías, ESP32, L298N y drivers.</em></span></label>
+      <label><input type="checkbox" id="c2"><span>Ningún motor ni servo está conectado a los pines 5V o 3V3 del ESP32.</span></label>
+      <label><input type="checkbox" id="c3"><span>Revisé con el multímetro que + y − de la fuente o las baterías van donde deben.</span></label>
+      <label><input type="checkbox" id="c4"><span>No hay cables pelados tocándose y las borneras están bien apretadas.</span></label>
+      <label><input type="checkbox" id="c5"><span>Carrito: quité los puentes de ENA y ENB del L298N.</span></label>
+      <label><input type="checkbox" id="c6"><span>Robot: ajusté la corriente del driver y puse el capacitor en VMOT.</span></label>
+      <label><input type="checkbox" id="c7"><span>Primero enciendo sin motores y reviso que el ESP32 aparezca en la app.<em>Después conecto los motores.</em></span></label>
+      <label><input type="checkbox" id="c8"><span>La primera vez, con la mano cerca del interruptor por si algo se calienta o huele raro.</span></label>
+    </div>
+
+    <h3>Lo que falta confirmar</h3>
+    <div class="cards">
+      <div class="card ask"><h4>Fuente de la casa</h4><p>Foto de la etiqueta: voltios y amperios de salida.</p></div>
+      <div class="card ask"><h4>PCA9685</h4><p>¿La usarán para los servos de la casa?</p></div>
+      <div class="card ask"><h4>Servos de la casa</h4><p>¿Cuántos son en total? La lista dice 4 y la casa tiene 9.</p></div>
+      <div class="card ask"><h4>Robot escritor</h4><p>Foto del driver, modelo de los motores y medidas de las ruedas.</p></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">Guía hecha para el equipo junto con la app Control Domótica (Alpha 0.7.1). Los diagramas muestran el principio de cada conexión; las piezas reales pueden verse distintas.</div>
+</footer>
+
+<script>
+(function () {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Corriente que avanza: copia cada cable marcado como «live» con un trazo punteado animado encima.
+  if (!reduce) {
+    document.querySelectorAll('path.wire.live').forEach(function (p) {
+      const f = p.cloneNode();
+      f.removeAttribute('stroke-dasharray');
+      f.setAttribute('class', 'flow');
+      f.setAttribute('stroke', p.classList.contains('mot') ? '#fff3d6' : '#ffd0ce');
+      f.setAttribute('stroke-width', '1.6');
+      p.after(f);
+    });
+  }
+
+  // Carrito: maniobras. Cada rueda: 0 = adelante, 180 = atrás.
+  const modes = [
+    { name: 'Adelante: las cuatro ruedas hacia adelante', w: [0, 0, 0, 0], body: 'translate(0,-10px)' },
+    { name: 'Gira a la izquierda: izquierda atrás, derecha adelante', w: [180, 0, 180, 0], body: 'rotate(-14deg)' },
+    { name: 'Gira a la derecha: izquierda adelante, derecha atrás', w: [0, 180, 0, 180], body: 'rotate(14deg)' },
+    { name: 'Atrás: las cuatro ruedas hacia atrás', w: [180, 180, 180, 180], body: 'translate(0,10px)' },
+  ];
+  const wheels = ['wFL', 'wFR', 'wRL', 'wRR'].map(function (id) { return document.getElementById(id); });
+  const body = document.querySelector('#car .body');
+  const label = document.getElementById('carMode');
+  let m = 0;
+  function showMode(i) {
+    const mode = modes[i];
+    wheels.forEach(function (w, k) { w.style.transform = 'rotate(' + mode.w[k] + 'deg)'; });
+    body.style.transform = mode.body;
+    label.textContent = mode.name;
+  }
+  showMode(0);
+  if (!reduce) setInterval(function () { m = (m + 1) % modes.length; showMode(m); }, 2800);
+
+  // Robot escritor: mismas órdenes, lápiz en el centro o 1,5 cm adelante.
+  const program = [];
+  for (let i = 0; i < 4; i++) program.push(['move', 4], ['turn', 90]);
+
+  function simulate(offset) {
+    // Devuelve los «fotogramas»: posición del robot y del lápiz en cada instante.
+    const frames = [];
+    let x = 0, y = 0, h = -90; // h en grados de pantalla: -90 = hacia arriba
+    const push = function () {
+      const r = h * Math.PI / 180;
+      frames.push({ x: x, y: y, h: h, px: x + offset * Math.cos(r), py: y + offset * Math.sin(r) });
+    };
+    push();
+    program.forEach(function (step) {
+      if (step[0] === 'move') {
+        const n = 40, r = h * Math.PI / 180;
+        for (let i = 0; i < n; i++) { x += step[1] / n * Math.cos(r); y += step[1] / n * Math.sin(r); push(); }
+      } else {
+        const n = 30;
+        for (let i = 0; i < n; i++) { h += step[1] / n; push(); }
+      }
+    });
+    return frames;
+  }
+
+  function setupCanvas(id, offset) {
+    const c = document.getElementById(id);
+    const g = c.getContext('2d');
+    const frames = simulate(offset);
+    const W = c.width, S = 62; // píxeles por cm
+    const ox = W / 2 - 2 * S, oy = W / 2 + 2 * S; // el cuadrado de 4 cm queda centrado
+    const P = function (cx, cy) { return [ox + cx * S, oy + cy * S]; };
+
+    function draw(k) {
+      g.clearRect(0, 0, W, W);
+      // cuadrícula de papel: 1 cm
+      g.strokeStyle = '#161a20'; g.lineWidth = 1;
+      for (let i = 0; i <= W; i += S / 2) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, W); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(W, i); g.stroke(); }
+      // lo que esperábamos
+      g.setLineDash([6, 8]); g.strokeStyle = '#39414c'; g.lineWidth = 2;
+      g.strokeRect(ox, oy - 4 * S, 4 * S, 4 * S);
+      g.setLineDash([]);
+      // trazo del lápiz
+      g.strokeStyle = offset ? '#ff5c57' : '#7ee3a9'; g.lineWidth = 7; g.lineCap = 'round'; g.lineJoin = 'round';
+      g.beginPath();
+      for (let i = 0; i <= k; i++) { const p = P(frames[i].px, frames[i].py); i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }
+      g.stroke();
+      // robot
+      const f = frames[k], c0 = P(f.x, f.y);
+      g.save(); g.translate(c0[0], c0[1]); g.rotate((f.h + 90) * Math.PI / 180);
+      g.fillStyle = 'rgba(242,244,247,.10)'; g.strokeStyle = 'rgba(242,244,247,.7)'; g.lineWidth = 2;
+      g.beginPath(); g.rect(-1.1 * S, -0.9 * S, 2.2 * S, 1.8 * S); g.fill(); g.stroke();
+      g.fillStyle = '#f2f4f7';
+      g.fillRect(-1.45 * S, -0.55 * S, 0.3 * S, 1.1 * S);
+      g.fillRect(1.15 * S, -0.55 * S, 0.3 * S, 1.1 * S);
+      g.strokeStyle = '#5aa9ff'; g.setLineDash([4, 5]); g.beginPath(); g.moveTo(-1.3 * S, 0); g.lineTo(1.3 * S, 0); g.stroke(); g.setLineDash([]);
+      g.fillStyle = offset ? '#ff5c57' : '#7ee3a9';
+      g.beginPath(); g.arc(0, -offset * S, 0.22 * S, 0, Math.PI * 2); g.fill();
+      g.restore();
+    }
+
+    // En reposo se ve el dibujo terminado; luego se repite la animación.
+    draw(frames.length - 1);
+    if (reduce) return;
+    let k = 0, hold = 0;
+    setTimeout(function tick() {
+      if (k < frames.length - 1) { k++; draw(k); }
+      else if (++hold > 60) { k = 0; hold = 0; draw(0); }
+      setTimeout(tick, 1000 / 60 * 1.6);
+    }, 1200);
+  }
+  setupCanvas('penOk', 0);
+  setupCanvas('penBad', 1.5);
+
+  // La lista se recuerda solo en este teléfono.
+  document.querySelectorAll('#checklist input').forEach(function (box) {
+    try { box.checked = localStorage.getItem('guia-' + box.id) === '1'; } catch (e) {}
+    box.addEventListener('change', function () {
+      try { localStorage.setItem('guia-' + box.id, box.checked ? '1' : '0'); } catch (e) {}
+    });
+  });
+})();
+</script>
+</body>
+</html>
