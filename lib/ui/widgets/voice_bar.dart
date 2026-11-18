@@ -41,13 +41,14 @@ class _Status extends StatelessWidget {
   Widget build(BuildContext context) {
     final (IconData? icon, Color color, String title, String? detail) = switch (voice.status) {
       VoiceStatus.idle => (null, C.label2, connected ? 'Toca el micrófono y habla' : 'Conecta la casa para usar la voz', connected ? '«Abre la puerta principal»' : null),
-      VoiceStatus.listening => (null, C.red, 'Escuchando…', voice.heard.isEmpty ? null : '«${voice.heard}»'),
+      VoiceStatus.starting => (null, C.label2, 'Abriendo el micrófono…', 'Espera un momento'),
+      VoiceStatus.listening => (null, C.red, 'Escuchando… habla ahora', voice.heard.isEmpty ? '«Abre la puerta principal»' : '«${voice.heard}»'),
       VoiceStatus.working => (null, C.blue, 'Enviando…', '«${voice.heard}»'),
       VoiceStatus.done => (Icons.check_circle_rounded, C.green, voice.message, '«${voice.heard}»'),
       VoiceStatus.failed => (Icons.error_rounded, C.red, voice.message, voice.heard.isEmpty ? null : '«${voice.heard}»'),
       VoiceStatus.unclear => (Icons.help_rounded, C.orange, voice.message, voice.heard.isEmpty ? null : 'Escuché: «${voice.heard}»'),
     };
-    final tinted = voice.status != VoiceStatus.idle && voice.status != VoiceStatus.listening;
+    final tinted = !const [VoiceStatus.idle, VoiceStatus.starting, VoiceStatus.listening].contains(voice.status);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
