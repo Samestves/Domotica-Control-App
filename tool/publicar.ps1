@@ -60,9 +60,12 @@ Write-Host "  $arm64   (teléfonos de 64 bits, casi todos)"
 Write-Host "  $arm   (teléfonos viejos de 32 bits)"
 Write-Host ''
 
-$gh = Get-Command gh -ErrorAction SilentlyContinue
+# La herramienta de GitHub: la del PATH, o la portable que quedó en la carpeta de programas del usuario.
+$gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
+$portable = Join-Path $env:LOCALAPPDATA 'Programs\gh\bin\gh.exe'
+if (-not $gh -and (Test-Path $portable)) { $gh = $portable }
 if ($Publicar -and $gh) {
-  $code = Run-Native { gh release create $tag $arm64 $arm --repo $repo --title "Alpha $version" --notes $Notas | Out-Host }
+  $code = Run-Native { & $gh release create $tag $arm64 $arm --repo $repo --title "Alpha $version" --notes $Notas | Out-Host }
   if ($code -ne 0) { throw 'GitHub no aceptó la Release. Revisa que hayas iniciado sesión con: gh auth login' }
   Write-Host "Publicada: https://github.com/$repo/releases/tag/$tag"
   return
