@@ -1,11 +1,10 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/protocol.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
-import 'glass.dart';
+import 'kit.dart';
 
 /// true mientras el panel debe mostrar la tarjeta de la clave en vez de dejar usar los controles.
 bool showsClaveCard(Session s) => s.needsClave || (s.linked && s.keyed && s.clave == ClaveState.checking);
@@ -41,49 +40,41 @@ class _ClaveCardState extends State<ClaveCard> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final checking = _s.clave == ClaveState.checking;
     final locked = _s.clave == ClaveState.locked;
-    final accent = _create ? C.blue : C.orange;
 
-    return Glass(
-      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+    return Panel(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Center(
-          child: Container(
-            width: 52,
-            height: 52,
-            decoration: ShapeDecoration(shape: squircle(16), color: accent.withValues(alpha: 0.14)),
-            child: Icon(_create ? Icons.lock_open_rounded : Icons.lock_rounded, color: accent, size: 28),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(_create ? 'Crea la clave de la casa' : 'Esta casa tiene clave', style: T.title2, textAlign: TextAlign.center),
+        Icon(_create ? Ic.lockOpen : Ic.lock, size: 40, color: c.text),
+        const SizedBox(height: 16),
+        Eyebrow(_create ? 'Primera vez' : 'Clave de la casa'),
         const SizedBox(height: 6),
+        Text(_create ? 'Crea la clave de la casa' : 'Esta casa tiene clave', style: T.title),
+        const SizedBox(height: 8),
         Text(
           _create
               ? 'Elige de 4 a 8 números. Cada teléfono nuevo la pedirá antes de poder controlar la casa. Anótala.'
               : 'Escríbela para controlar la casa. Este teléfono la recordará.',
-          style: T.subhead.copyWith(color: C.label2),
-          textAlign: TextAlign.center,
+          style: T.small.copyWith(color: c.text2),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         ClaveField(controller: _code, visible: _create, enabled: !checking && !locked, onSubmitted: _submit, onChanged: () => setState(() {})),
         if (_s.claveMessage != null) ...[
-          const SizedBox(height: 8),
-          Text(_s.claveMessage!, style: T.footnote.copyWith(color: locked ? C.orange : C.red), textAlign: TextAlign.center),
+          const SizedBox(height: 10),
+          Text(_s.claveMessage!, style: T.small.copyWith(color: locked ? c.amber : c.red)),
         ],
-        const SizedBox(height: 14),
-        FilledButton(
-          onPressed: checking || locked || !validClave(_code.text.trim()) ? null : _submit,
-          child: checking
-              ? const CupertinoActivityIndicator(color: Colors.white)
-              : Text(_create ? 'Guardar clave' : 'Entrar'),
+        const SizedBox(height: 16),
+        PillButton(
+          checking ? 'Comprobando…' : (_create ? 'Guardar clave' : 'Entrar'),
+          expand: true,
+          onTap: checking || locked || !validClave(_code.text.trim()) ? null : _submit,
         ),
-        const SizedBox(height: 12),
-        const Text(
+        const SizedBox(height: 16),
+        Text(
           '¿La olvidaron? Mantén presionado el botón BOOT del ESP32 por 5 segundos: las luces parpadean y la casa queda sin clave.',
-          style: T.footnote,
-          textAlign: TextAlign.center,
+          style: T.small.copyWith(color: c.text3),
         ),
       ]),
     );
@@ -108,20 +99,20 @@ class ClaveField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: ShapeDecoration(shape: squircle(14), color: const Color(0x14787880)),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(R.control), border: Border.all(color: c.line2)),
       child: TextField(
         controller: controller,
         enabled: enabled,
-        autofocus: false,
         obscureText: !visible,
         obscuringCharacter: '•',
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
         maxLength: 8,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: T.title2.copyWith(letterSpacing: 8, fontFeatures: const [FontFeature.tabularFigures()]),
+        style: T.title.copyWith(letterSpacing: 10, fontFeatures: const [FontFeature.tabularFigures()]),
         decoration: const InputDecoration(counterText: '', hintText: '••••••', border: InputBorder.none),
         onChanged: (_) => onChanged(),
         onSubmitted: (_) => onSubmitted(),
@@ -131,8 +122,7 @@ class ClaveField extends StatelessWidget {
 }
 
 /// Hoja para cambiar la clave de la casa estando conectado.
-Future<void> showChangeClaveSheet(BuildContext context, Session session) =>
-    showGlassSheet<void>(context, (_) => _ChangeClaveSheet(session: session));
+Future<void> showChangeClaveSheet(BuildContext context, Session session) => showAppSheet<void>(context, (_) => _ChangeClaveSheet(session: session));
 
 class _ChangeClaveSheet extends StatefulWidget {
   final Session session;
@@ -160,21 +150,17 @@ class _ChangeClaveSheetState extends State<_ChangeClaveSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 4),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Cambiar la clave', style: T.title2),
-            SizedBox(height: 2),
-            Text('De 4 a 8 números. Los otros teléfonos tendrán que escribir la nueva.', style: T.footnote),
-          ]),
+          child: SheetHeader(eyebrow: 'Seguridad', title: 'Cambiar la clave', detail: 'De 4 a 8 números. Los otros teléfonos tendrán que escribir la nueva.'),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 20),
         ClaveField(controller: _code, visible: true, onSubmitted: _save, onChanged: () => setState(() {})),
-        const SizedBox(height: 18),
-        FilledButton(onPressed: validClave(_code.text.trim()) ? _save : null, child: const Text('Guardar clave nueva')),
+        const SizedBox(height: 20),
+        PillButton('Guardar clave nueva', expand: true, onTap: validClave(_code.text.trim()) ? _save : null),
       ]),
     );
   }

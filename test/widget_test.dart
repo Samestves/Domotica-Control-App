@@ -6,6 +6,10 @@ import 'package:control_domotica/main.dart';
 import 'package:control_domotica/models/controls.dart';
 import 'package:control_domotica/models/device.dart';
 import 'package:control_domotica/state/app_state.dart';
+import 'package:control_domotica/ui/credits_screen.dart';
+import 'package:control_domotica/ui/widgets/carro_ajustes.dart';
+import 'package:control_domotica/ui/widgets/status.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -95,6 +99,55 @@ void main() {
     await Future<void>.delayed(Session.retryDelays.first + const Duration(milliseconds: 300));
     expect(links.length, 2);
     expect(s.connected, isFalse);
+  });
+
+  group('Conexión', () {
+    final d = SavedDevice(id: 'h', name: 'Casa', profile: Profile.casa, transport: Transport.ble);
+
+    testWidgets('si la placa se apaga sin avisar, el latido lo nota y la app reintenta', (t) async {
+      final links = <_FlakyLink>[];
+      final s = Session(d, linkFor: (_) => (links..add(_FlakyLink())).last);
+      await s.connect();
+      await t.pump(const Duration(milliseconds: 100));
+      expect(s.connected, isTrue);
+      expect(connOf(s), Conn.connected);
+
+      // La placa ya no contesta nada (ni al PING): al pasar el límite de silencio, la conexión se da por caída.
+      await t.pump(Session.silenceLimit + Session.heartbeat + const Duration(milliseconds: 100));
+      expect(s.connected, isFalse);
+      expect(connOf(s), Conn.reconnecting);
+      expect(s.attempt, 1);
+
+      // Siempre se puede cancelar: no queda «conectando» para siempre.
+      await s.disconnect();
+      await t.pump(Session.retryDelays.last * 2);
+      expect(links.length, 1, reason: 'cancelado: no vuelve a intentar');
+      expect(connOf(s), Conn.off);
+    });
+
+    testWidgets('si nunca vuelve, después de los reintentos queda «Sin conexión» con Reintentar', (t) async {
+      final s = Session(d, linkFor: (_) => _DeadLink());
+      await s.connect();
+      for (final wait in Session.retryDelays) {
+        expect(connOf(s), anyOf(Conn.reconnecting, Conn.failed));
+        await t.pump(wait + const Duration(milliseconds: 50));
+      }
+      expect(s.retrying, isFalse);
+      expect(connOf(s), Conn.failed);
+      expect(s.error, isNotNull);
+      await s.disconnect();
+    });
+
+    testWidgets('cancelar mientras conecta deja la placa desconectada, sin error', (t) async {
+      final s = Session(d, linkFor: (_) => _SlowLink());
+      final connecting = s.connect();
+      await t.pump(const Duration(milliseconds: 100));
+      expect(connOf(s), Conn.connecting);
+      await s.disconnect();
+      await t.pump(const Duration(seconds: 2));
+      await connecting;
+      expect(connOf(s), Conn.off);
+    });
   });
 
   group('Casa del grupo', () {
@@ -239,6 +292,24 @@ void main() {
     });
   });
 
+  group('Carrito', () {
+    test('responde ERR a la clave como la placa real: queda conectado sin clave', () async {
+      final d = SavedDevice(id: 'c', name: 'Carrito 4x4', profile: Profile.carro, transport: Transport.demo);
+      final s = Session(d, linkFor: (_) => DemoLink('carro'));
+      await s.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(s.connected, isTrue);
+      expect(s.keyed, isFalse);
+      expect(invertedWheels(s), [false, false, false, false], reason: 'SYNC trae las ruedas invertidas');
+
+      s.send(CarPins.invert, '0100');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(s.values[CarPins.invert], '0100');
+      expect(invertedWheels(s), [false, true, false, false]);
+      await s.disconnect();
+    });
+  });
+
   testWidgets('la pantalla de inicio muestra las placas demo', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final state = AppState();
@@ -247,8 +318,54 @@ void main() {
     expect(find.text('Dispositivos'), findsWidgets); // título grande y el de la barra
     expect(find.text('Casa (demo)'), findsOneWidget);
     expect(find.text('Auto Robot (demo)'), findsOneWidget);
-    expect(find.text('Agregar dispositivo'), findsOneWidget);
-    expect(find.text('Control Domótica'), findsOneWidget); // cápsula con la versión
+    expect(find.byTooltip('Agregar dispositivo'), findsOneWidget, reason: 'un solo botón para agregar, arriba');
+    expect(find.byTooltip('Ajustes'), findsOneWidget);
+    expect(find.byTooltip('Abrir'), findsNWidgets(2), reason: 'cada placa tiene su flecha para entrar');
+    expect(find.text('CONECTAR'), findsWidgets, reason: 'cada placa desconectada tiene su botón');
+  });
+
+  testWidgets('tres toques al logo en «Acerca de» abren la firma', (tester) async {
+    // Ancho como el de siempre (la letra de prueba es más ancha que D-DIN), pero alto como un teléfono.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 1400);
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final state = AppState();
+    await state.load();
+    await tester.pumpWidget(ControlApp(state: state));
+    await tester.tap(find.byTooltip('Ajustes'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(find.text('Acerca de'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    final logo = find.byKey(const ValueKey('logo-acerca'));
+    await tester.tap(logo);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(logo);
+    await tester.pump(const Duration(milliseconds: 200));
+    Finder name(String full) {
+      final cut = full.lastIndexOf(' ');
+      return find.text('${full.substring(0, cut).toUpperCase()}  ${full.substring(cut + 1).toUpperCase()}', findRichText: true);
+    }
+
+    expect(name('Samuel Esteves'), findsNothing, reason: 'dos toques no bastan');
+    expect(find.textContaining('Samuel'), findsNothing, reason: 'los nombres solo están en el guiño escondido');
+
+    await tester.tap(logo);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 6));
+    for (final n in Credits.team) {
+      expect(name(n), findsOneWidget);
+    }
+    expect(Credits.team, [...Credits.team]..sort(), reason: 'en orden alfabético: nadie va primero');
+
+    await tester.tapAt(const Offset(200, 300));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(name('Samuel Esteves'), findsNothing, reason: 'un toque cierra los créditos');
+    expect(find.text('Control Domótica'), findsWidgets, reason: 'vuelve a «Acerca de»');
   });
 }
 
@@ -297,7 +414,41 @@ class _SimLink extends DeviceLink {
   }
 }
 
-/// Una placa que nunca contesta, como un módulo HM‑10 con otro programa.
+/// Una placa apagada: cada intento de conectar falla.
+class _DeadLink extends DeviceLink {
+  @override
+  Future<void> connect() async => setState(LinkState.error, 'no responde');
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {}
+}
+
+/// Tarda en conectar, y se puede cancelar mientras tanto (como el Bluetooth).
+class _SlowLink extends DeviceLink {
+  bool _closing = false;
+
+  @override
+  Future<void> connect() async {
+    setState(LinkState.connecting);
+    await Future<void>.delayed(const Duration(seconds: 1));
+    if (_closing) return setState(LinkState.disconnected);
+    setState(LinkState.connected);
+  }
+
+  @override
+  Future<void> disconnect() async {
+    _closing = true;
+    setState(LinkState.disconnected);
+  }
+
+  @override
+  Future<void> sendLine(String line) async {}
+}
+
+/// Una placa que nunca contesta, como un módulo HM-10 con otro programa.
 class _SilentLink extends DeviceLink {
   @override
   Future<void> connect() async => setState(LinkState.connected);

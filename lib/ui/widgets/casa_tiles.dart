@@ -7,85 +7,144 @@ import '../../models/controls.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
 import 'common.dart';
-import 'glass.dart';
+import 'kit.dart';
 
 IconData controlIcon(ControlSpec c, {required bool on}) => switch (c.kind) {
-      ControlKind.light => on ? Icons.lightbulb_rounded : Icons.lightbulb_outline_rounded,
-      ControlKind.door when c.isGarage => on ? Icons.garage_rounded : Icons.garage_outlined,
-      ControlKind.door => on ? Icons.door_front_door_rounded : Icons.door_front_door_outlined,
-      ControlKind.blind => on ? Icons.blinds_rounded : Icons.blinds_closed_rounded,
+      ControlKind.light => on ? Ic.lightOn : Ic.light,
+      ControlKind.door when c.isGarage => on ? Ic.garageOpen : Ic.garage,
+      ControlKind.door => on ? Ic.doorOpen : Ic.door,
+      ControlKind.blind => on ? Ic.blindOpen : Ic.blind,
     };
 
-/// Color del icono cuando el control está activo: amarillo para luces, azul para el resto.
-Color _accent(ControlKind k) => k == ControlKind.light ? const Color(0xFFFFB800) : C.blue;
-Color _accentBg(ControlKind k) => k == ControlKind.light ? const Color(0xFFFFF1C2) : const Color(0xFFDCEBFF);
+bool isOn(Session s, ControlSpec spec) =>
+    spec.kind == ControlKind.blind ? (int.tryParse(s.values[spec.vpin] ?? '') ?? 0) > 0 : s.values[spec.vpin] == '1';
 
-/// Icono en un círculo que se «enciende» con el color del control.
-class _IconDisc extends StatelessWidget {
-  final IconData icon;
-  final bool on;
-  final ControlKind kind;
-  const _IconDisc({required this.icon, required this.on, required this.kind});
+int blindPercent(Session s, ControlSpec spec) => ((double.tryParse(s.values[spec.vpin] ?? '0') ?? 0) / CasaPins.blindMax * 100).round();
+
+String stateWord(Session s, ControlSpec spec) {
+  if (!spec.isEnabledOn(s.device)) return 'Sin conectar';
+  if (s.unconfirmed.contains(spec.vpin)) return 'Sin respuesta';
+  if (s.pending.contains(spec.vpin)) return 'Enviando…';
+  final on = isOn(s, spec);
+  return switch (spec.kind) {
+    ControlKind.light => on ? 'Encendida' : 'Apagada',
+    ControlKind.door => on ? 'Abierta' : 'Cerrada',
+    ControlKind.blind => on ? 'Abierta' : 'Cerrada',
+  };
+}
+
+void _toggle(Session s, ControlSpec spec) {
+  HapticFeedback.selectionClick();
+  s.send(spec.vpin, isOn(s, spec) ? 0 : 1, confirm: true);
+}
+
+void _editPins(BuildContext context, Session s, ControlSpec spec) {
+  HapticFeedback.mediumImpact();
+  showPinSheet(context, s, spec);
+}
+
+/// Cambio de icono con un pequeño salto: se nota que algo pasó.
+Widget _swapIcon(IconData icon, double size, Color color) => AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      transitionBuilder: (child, a) => ScaleTransition(
+        scale: Tween(begin: 0.6, end: 1.0).animate(CurvedAnimation(parent: a, curve: Curves.easeOutBack)),
+        child: FadeTransition(opacity: a, child: child),
+      ),
+      child: Icon(icon, key: ValueKey(icon), size: size, color: color),
+    );
+
+/// Indicador pequeño en la esquina: girando mientras espera a la placa, aviso si no respondió.
+Widget _confirmMark(Session s, int pin, Color color, Palette c, {required bool on}) {
+  final Widget child;
+  if (s.pending.contains(pin)) {
+    child = SizedBox(key: const ValueKey('wait'), width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.5, color: color));
+  } else if (s.unconfirmed.contains(pin)) {
+    child = Icon(Ic.warning, key: const ValueKey('fail'), size: 18, color: c.red);
+  } else if (on) {
+    child = StatusDot(key: const ValueKey('on'), color: color, size: 6);
+  } else {
+    child = const SizedBox(key: ValueKey('off'), width: 14, height: 14);
+  }
+  return AnimatedSwitcher(duration: const Duration(milliseconds: 180), child: child);
+}
+
+/// Cifras de la casa: cuántas luces, puertas y persianas están activas.
+class HouseSummary extends StatelessWidget {
+  final Session session;
+  const HouseSummary({super.key, required this.session});
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 260),
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: on ? _accentBg(kind) : C.fill,
-        boxShadow: on && kind == ControlKind.light ? const [BoxShadow(color: Color(0x80FFD54F), blurRadius: 16)] : null,
-      ),
-      child: Icon(icon, size: 22, color: on ? _accent(kind) : C.label2),
-    );
+    final c = context.c;
+    (String, Color) count(ControlKind k) {
+      final all = casaControls.where((x) => x.kind == k && x.isEnabledOn(session.device)).toList();
+      final n = all.where((x) => isOn(session, x)).length;
+      return ('$n/${all.length}', n > 0 ? c.text : c.text3);
+    }
+
+    final lights = count(ControlKind.light);
+    final doors = count(ControlKind.door);
+    final blinds = count(ControlKind.blind);
+    return StatStrip(items: [
+      (lights.$1, 'Luces', lights.$2),
+      (doors.$1, 'Puertas', doors.$2),
+      (blinds.$1, 'Persianas', blinds.$2),
+    ]);
   }
 }
 
-/// Tarjeta de un accesorio (luz o puerta): vidrio cuando está apagado, blanca cuando está activo.
-class AccessoryTile extends StatelessWidget {
+/// Todas las luces en un solo interruptor: si hay alguna encendida, lo apaga todo; si no, lo enciende todo.
+class AllLightsRow extends StatelessWidget {
   final Session session;
-  final ControlSpec spec;
-  final bool showPins;
-  const AccessoryTile({super.key, required this.session, required this.spec, required this.showPins});
+  const AllLightsRow({super.key, required this.session});
+
+  List<int> get _lights => casaControls.where((x) => x.kind == ControlKind.light && x.isEnabledOn(session.device)).map((x) => x.vpin).toList();
+
+  void _all(int v) {
+    session.expect(_lights);
+    session.send(CasaPins.allLights, v, remember: false);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final enabled = spec.isEnabledOn(session.device);
-    final on = session.values[spec.vpin] == '1';
-    final isLight = spec.kind == ControlKind.light;
-    final status = !enabled ? 'Sin conectar' : (isLight ? (on ? 'Encendida' : 'Apagada') : (on ? 'Abierta' : 'Cerrada'));
-    final usable = enabled && session.connected;
+    final c = context.c;
+    final lights = _lights;
+    final n = lights.where((p) => session.values[p] == '1').length;
+    final anyOn = n > 0;
+    final busy = lights.any(session.pending.contains);
+    final failed = lights.any(session.unconfirmed.contains);
+    final usable = session.connected && !busy;
+    final detail = failed
+        ? 'Alguna luz no respondió'
+        : busy
+            ? 'Enviando…'
+            : (n == 0 ? 'Todas apagadas' : (n == lights.length ? 'Todas encendidas' : '$n de ${lights.length} encendidas'));
 
-    return Pressable(
-      onTap: usable
-          ? () {
-              HapticFeedback.selectionClick();
-              session.send(spec.vpin, on ? 0 : 1);
-            }
-          : null,
-      onLongPress: () {
-        HapticFeedback.mediumImpact();
-        showPinSheet(context, session, spec);
-      },
-      child: Opacity(
-        opacity: enabled ? 1 : 0.45,
-        child: Glass(
-          radius: R.tile,
-          color: on ? C.glassSolid : C.glass,
-          shadow: false,
-          padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+    return Semantics(
+      button: true,
+      toggled: anyOn,
+      label: 'Todas las luces',
+      child: Tap(
+        onTap: usable ? () => _all(anyOn ? 0 : 1) : null,
+        scale: 0.98,
+        child: Panel(
+          border: anyOn ? c.line2 : null,
+          padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
           child: Row(children: [
-            _IconDisc(icon: controlIcon(spec, on: on), on: on, kind: spec.kind),
-            const SizedBox(width: 10),
+            _swapIcon(anyOn ? Ic.lightOn : Ic.light, 26, anyOn ? c.text : c.text2),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(spec.label, style: T.subhead.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(status, style: T.footnote.copyWith(color: on ? _accent(spec.kind) : C.label2, fontWeight: on ? FontWeight.w600 : null)),
-                if (showPins) Text(pinLabel(session.device, spec), style: T.caption.copyWith(fontSize: 11), maxLines: 1),
+                const Text('Todas las luces', style: T.callout),
+                const SizedBox(height: 3),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: Text(detail, key: ValueKey(detail), style: T.small.copyWith(color: failed ? c.red : c.text2)),
+                ),
               ]),
             ),
+            const SizedBox(width: 10),
+            Toggle(value: anyOn, large: true, busy: busy, icon: Ic.lightOn, onChanged: usable ? (v) => _all(v ? 1 : 0) : null),
           ]),
         ),
       ),
@@ -93,18 +152,319 @@ class AccessoryTile extends StatelessWidget {
   }
 }
 
-/// Persiana con un deslizador de 0° a 180°. Mientras se arrastra, envía como mucho un mensaje cada 120 ms.
-class BlindTile extends StatefulWidget {
+/// Seguridad: armar y desarmar, sirena manual y avisos de la placa.
+class SecurityCard extends StatefulWidget {
+  final Session session;
+  const SecurityCard({super.key, required this.session});
+
+  @override
+  State<SecurityCard> createState() => _SecurityCardState();
+}
+
+class _SecurityCardState extends State<SecurityCard> with SingleTickerProviderStateMixin {
+  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  void _send(int pin, int value) {
+    HapticFeedback.mediumImpact();
+    widget.session
+      ..clearAlert()
+      ..send(pin, value, confirm: true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final s = widget.session;
+    final armed = s.values[CasaPins.armed] == '1';
+    final sounding = s.values[CasaPins.siren] == '1';
+    final notice = s.values[CasaPins.notice];
+    if (sounding && !_pulse.isAnimating) _pulse.repeat(reverse: true);
+    if (!sounding && _pulse.isAnimating) _pulse.stop();
+
+    final title = sounding ? 'Alarma sonando' : (armed ? 'Armada' : 'Desarmada');
+    final description = notice ??
+        (armed ? 'Si el garaje o la puerta principal quedan abiertos 20 s, suena la sirena.' : 'Ármala para vigilar el garaje y la puerta principal.');
+    final accent = sounding ? c.red : (armed ? c.green : c.text2);
+    PillState stateOf(int pin) => s.pending.contains(pin) ? PillState.busy : (s.unconfirmed.contains(pin) ? PillState.failed : PillState.idle);
+
+    Widget card(double glow) => Panel(
+          color: sounding ? c.red.withValues(alpha: 0.08 + 0.08 * glow) : null,
+          border: sounding ? c.red.withValues(alpha: 0.5 + 0.5 * glow) : (armed ? c.green.withValues(alpha: 0.6) : null),
+          padding: const EdgeInsets.all(18),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              _swapIcon(sounding ? Ic.sirenOn : (armed ? Ic.shieldOn : Ic.shield), 30, accent),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Eyebrow('Seguridad', color: sounding ? c.red : null),
+                  const SizedBox(height: 4),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: Text(title, key: ValueKey(title), style: T.heading.copyWith(color: sounding ? c.red : c.text)),
+                  ),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            Text(description, style: T.small.copyWith(color: c.text2)),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(
+                child: PillButton(
+                  sounding ? 'Apagar alarma' : (armed ? 'Desarmar' : 'Armar'),
+                  kind: sounding ? PillKind.dangerFilled : (armed ? PillKind.secondary : PillKind.primary),
+                  expand: true,
+                  state: stateOf(CasaPins.armed),
+                  onTap: s.connected ? () => _send(CasaPins.armed, armed || sounding ? 0 : 1) : null,
+                ),
+              ),
+              if (!sounding) ...[
+                const SizedBox(width: 10),
+                PillButton('Sirena',
+                    icon: Ic.siren, kind: PillKind.danger, state: stateOf(CasaPins.siren), onTap: s.connected ? () => _send(CasaPins.siren, 1) : null),
+              ],
+            ]),
+          ]),
+        );
+
+    if (!sounding) return card(0);
+    return AnimatedBuilder(animation: _pulse, builder: (_, _) => card(_pulse.value));
+  }
+}
+
+/// Una habitación que se abre y se cierra. Cerrada, ya deja prender luces y abrir puertas con un toque.
+class RoomCard extends StatelessWidget {
+  final Session session;
+  final String room;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final bool showPins;
+  const RoomCard({super.key, required this.session, required this.room, required this.expanded, required this.onToggle, required this.showPins});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final controls = casaControls.where((x) => x.room == room).toList();
+    final quick = controls.where((x) => x.kind != ControlKind.blind).toList();
+    final blinds = controls.where((x) => x.kind == ControlKind.blind).toList();
+    final anyOn = controls.any((x) => isOn(session, x));
+
+    return Panel(
+      padding: EdgeInsets.zero,
+      border: anyOn ? c.line2 : null,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Semantics(
+          button: true,
+          expanded: expanded,
+          label: room,
+          child: Tap(
+            onTap: onToggle,
+            scale: 1,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+              child: Row(children: [
+                Icon(Ic.room(room), size: 26, color: anyOn ? c.text : c.text2),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(room, style: T.heading.copyWith(fontSize: 17)),
+                    const SizedBox(height: 3),
+                    Text(_summary(), style: T.small.copyWith(color: anyOn ? c.text2 : c.text3)),
+                  ]),
+                ),
+                if (!expanded)
+                  for (final x in quick) ...[const SizedBox(width: 8), _QuickToggle(session: session, spec: x)],
+                const SizedBox(width: 10),
+                AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Ic.chevronDown, size: 18, color: c.text3),
+                ),
+              ]),
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: !expanded
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    if (quick.isNotEmpty)
+                      LayoutBuilder(builder: (context, box) {
+                        final half = (box.maxWidth - 10) / 2;
+                        return Wrap(spacing: 10, runSpacing: 10, children: [
+                          for (final (i, x) in quick.indexed)
+                            SizedBox(
+                              width: quick.length.isOdd && i == quick.length - 1 ? box.maxWidth : half,
+                              child: ControlTile(session: session, spec: x, showPins: showPins),
+                            ),
+                        ]);
+                      }),
+                    for (final b in blinds) ...[
+                      if (quick.isNotEmpty || b != blinds.first) const SizedBox(height: 10),
+                      BlindControl(session: session, spec: b, showPins: showPins),
+                    ],
+                  ]),
+                ),
+        ),
+      ]),
+    );
+  }
+
+  /// «Luz encendida · puerta cerrada», o «Todo apagado».
+  String _summary() {
+    final controls = casaControls.where((x) => x.room == room && x.isEnabledOn(session.device)).toList();
+    final parts = <String>[];
+    final lights = controls.where((x) => x.kind == ControlKind.light).toList();
+    final lightsOn = lights.where((x) => isOn(session, x)).length;
+    if (lightsOn > 0) parts.add(lights.length == 1 ? 'Luz encendida' : '$lightsOn de ${lights.length} luces');
+    for (final d in controls.where((x) => x.kind == ControlKind.door && isOn(session, x))) {
+      parts.add(d.isGarage ? 'Portón abierto' : '${d.label} abierta');
+    }
+    for (final b in controls.where((x) => x.kind == ControlKind.blind && isOn(session, x))) {
+      parts.add('${b.label} ${blindPercent(session, b)} %');
+    }
+    if (parts.isEmpty) return controls.isEmpty ? 'Sin piezas conectadas' : 'Todo apagado';
+    return parts.join(' · ');
+  }
+}
+
+/// Cómo se ve un control: encendido va relleno del color del texto (blanco en oscuro, negro en claro).
+({Color bg, Color fg, Color border, Color? glow}) _look(Palette c, ControlKind k, {required bool on, required bool connected}) {
+  if (on) return (bg: c.inverse, fg: c.onInverse, border: c.inverse, glow: k == ControlKind.light && c.isDark ? c.inverse.withValues(alpha: 0.28) : null);
+  return (bg: c.surface2, fg: connected ? c.text2 : c.text3, border: c.line2, glow: null);
+}
+
+/// Botón redondo para prender o abrir sin desplegar la habitación.
+class _QuickToggle extends StatelessWidget {
+  final Session session;
+  final ControlSpec spec;
+  const _QuickToggle({required this.session, required this.spec});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    if (!spec.isEnabledOn(session.device)) return const SizedBox.shrink();
+    final on = isOn(session, spec);
+    final look = _look(c, spec.kind, on: on, connected: session.connected);
+    final waiting = session.pending.contains(spec.vpin);
+    final failed = session.unconfirmed.contains(spec.vpin);
+    return Semantics(
+      button: true,
+      toggled: on,
+      label: '${spec.label} de ${spec.room}',
+      child: Tap(
+        onTap: session.connected ? () => _toggle(session, spec) : null,
+        onLongPress: () => _editPins(context, session, spec),
+        scale: 0.88,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: Stack(alignment: Alignment.center, children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: look.bg,
+                border: Border.all(color: failed ? c.red : look.border),
+                boxShadow: [BoxShadow(color: look.glow ?? Colors.transparent, blurRadius: 18)],
+              ),
+              child: Center(child: _swapIcon(controlIcon(spec, on: on), 20, look.fg)),
+            ),
+            if (waiting) SizedBox(width: 42, height: 42, child: CircularProgressIndicator(strokeWidth: 1.5, color: on ? c.text2 : c.text)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tarjeta de una luz o una puerta dentro de la habitación desplegada.
+class ControlTile extends StatelessWidget {
   final Session session;
   final ControlSpec spec;
   final bool showPins;
-  const BlindTile({super.key, required this.session, required this.spec, required this.showPins});
+  const ControlTile({super.key, required this.session, required this.spec, required this.showPins});
 
   @override
-  State<BlindTile> createState() => _BlindTileState();
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final enabled = spec.isEnabledOn(session.device);
+    final on = isOn(session, spec);
+    final usable = enabled && session.connected;
+    final look = _look(c, spec.kind, on: on, connected: session.connected);
+    final failed = session.unconfirmed.contains(spec.vpin);
+
+    return Semantics(
+      button: true,
+      toggled: on,
+      label: '${spec.label} de ${spec.room}',
+      child: Tap(
+        onTap: usable ? () => _toggle(session, spec) : null,
+        onLongPress: () => _editPins(context, session, spec),
+        scale: 0.95,
+        child: Opacity(
+          opacity: enabled ? 1 : 0.4,
+          child: Panel(
+            radius: R.tile,
+            color: on ? look.bg : c.surface2,
+            border: failed ? c.red : (on ? look.border : c.line),
+            glow: look.glow,
+            padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                _swapIcon(controlIcon(spec, on: on), 26, on ? look.fg : c.text2),
+                const Spacer(),
+                Toggle(
+                  value: on,
+                  busy: session.pending.contains(spec.vpin),
+                  onFilled: on,
+                  onChanged: usable ? (_) => _toggle(session, spec) : null,
+                ),
+              ]),
+              const SizedBox(height: 16),
+              Text(spec.label, style: T.callout.copyWith(color: on ? look.fg : c.text)),
+              const SizedBox(height: 4),
+              Eyebrow(stateWord(session, spec), color: failed ? c.red : (on ? look.fg.withValues(alpha: 0.7) : c.text3)),
+              if (showPins) ...[
+                const SizedBox(height: 6),
+                Text(pinLabel(session.device, spec), style: T.small.copyWith(fontSize: 11.5, color: on ? look.fg.withValues(alpha: 0.6) : c.text3)),
+              ],
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _BlindTileState extends State<BlindTile> {
+/// Persiana: deslizador de 0 a 100 % y atajos para cerrar, dejar a la mitad o abrir.
+/// Mientras se arrastra, envía como mucho un mensaje cada 120 ms.
+class BlindControl extends StatefulWidget {
+  final Session session;
+  final ControlSpec spec;
+  final bool showPins;
+  const BlindControl({super.key, required this.session, required this.spec, required this.showPins});
+
+  @override
+  State<BlindControl> createState() => _BlindControlState();
+}
+
+class _BlindControlState extends State<BlindControl> {
   double? _dragging;
   Timer? _throttle;
 
@@ -125,294 +485,67 @@ class _BlindTileState extends State<BlindTile> {
 
   void _onChangeEnd(double v) {
     _throttle?.cancel();
-    _s.send(_spec.vpin, v.round());
+    _s.send(_spec.vpin, v.round(), confirm: true);
     setState(() => _dragging = null);
   }
 
+  void _set(double fraction) => _s.send(_spec.vpin, (CasaPins.blindMax * fraction).round(), confirm: true);
+
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final enabled = _spec.isEnabledOn(_s.device);
+    final usable = enabled && _s.connected;
     final value = _dragging ?? (double.tryParse(_s.values[_spec.vpin] ?? '0') ?? 0);
     final percent = (value / CasaPins.blindMax * 100).round();
     final open = percent > 0;
+    final failed = _s.unconfirmed.contains(_spec.vpin);
 
     return GestureDetector(
-      onLongPress: () {
-        HapticFeedback.mediumImpact();
-        showPinSheet(context, _s, _spec);
-      },
+      onLongPress: () => _editPins(context, _s, _spec),
       child: Opacity(
-        opacity: enabled ? 1 : 0.45,
-        child: Glass(
+        opacity: enabled ? 1 : 0.4,
+        child: Panel(
           radius: R.tile,
-          color: open ? C.glassSolid : C.glass,
-          shadow: false,
-          padding: const EdgeInsets.fromLTRB(12, 12, 16, 6),
-          child: Column(children: [
+          color: c.surface2,
+          border: failed ? c.red : (open ? c.text.withValues(alpha: 0.55) : c.line),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Row(children: [
-              _IconDisc(icon: controlIcon(_spec, on: open), on: open, kind: _spec.kind),
-              const SizedBox(width: 10),
+              _swapIcon(controlIcon(_spec, on: open), 26, open ? c.text : c.text2),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(_spec.label, style: T.subhead.copyWith(fontWeight: FontWeight.w600)),
-                  Text(!enabled ? 'Sin conectar' : (open ? 'Abierta' : 'Cerrada'), style: T.footnote.copyWith(color: open ? C.blue : C.label2, fontWeight: open ? FontWeight.w600 : null)),
-                  if (widget.showPins) Text(pinLabel(_s.device, _spec), style: T.caption.copyWith(fontSize: 11)),
+                  Text(_spec.label, style: T.callout),
+                  const SizedBox(height: 3),
+                  Eyebrow(stateWord(_s, _spec), color: failed ? c.red : (open ? c.text2 : c.text3)),
+                  if (widget.showPins) ...[const SizedBox(height: 4), Text(pinLabel(_s.device, _spec), style: T.small.copyWith(fontSize: 11.5, color: c.text3))],
                 ]),
               ),
-              if (open) Text('$percent %', style: T.title3.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
+              _confirmMark(_s, _spec.vpin, c.text, c, on: false),
+              const SizedBox(width: 8),
+              Text('$percent %', style: T.stat.copyWith(fontSize: 24, color: open ? c.text : c.text3)),
             ]),
-            SizedBox(
-              height: 40,
-              child: Slider(
-                value: value.clamp(0, CasaPins.blindMax.toDouble()),
-                max: CasaPins.blindMax.toDouble(),
-                onChanged: _s.connected && enabled ? _onChanged : null,
-                onChangeEnd: _onChangeEnd,
+            const SizedBox(height: 6),
+            Semantics(
+              label: 'Apertura de ${_spec.label} de ${_spec.room}',
+              child: SizedBox(
+                height: 36,
+                child: Slider(
+                  value: value.clamp(0, CasaPins.blindMax.toDouble()),
+                  max: CasaPins.blindMax.toDouble(),
+                  onChanged: usable ? _onChanged : null,
+                  onChangeEnd: _onChangeEnd,
+                ),
               ),
             ),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-/// Seguridad: armar y desarmar, sirena manual y avisos de la placa.
-/// Cambia de aspecto según el estado: vidrio (desarmada), oscuro (armada) o rojo latiendo (sonando).
-class SecurityCard extends StatefulWidget {
-  final Session session;
-  const SecurityCard({super.key, required this.session});
-
-  @override
-  State<SecurityCard> createState() => _SecurityCardState();
-}
-
-class _SecurityCardState extends State<SecurityCard> with SingleTickerProviderStateMixin {
-  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  void _send(int pin, int value) {
-    HapticFeedback.mediumImpact();
-    widget.session
-      ..clearAlert()
-      ..send(pin, value);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.session;
-    final armed = s.values[CasaPins.armed] == '1';
-    final sounding = s.values[CasaPins.siren] == '1';
-    final notice = s.values[CasaPins.notice];
-    if (sounding && !_pulse.isAnimating) _pulse.repeat(reverse: true);
-    if (!sounding && _pulse.isAnimating) _pulse.stop();
-
-    final dark = armed || sounding;
-    final fg = dark ? Colors.white : C.label;
-    final fg2 = dark ? const Color(0xB3FFFFFF) : C.label2;
-    final title = sounding ? 'Alarma sonando' : (armed ? 'Armada' : 'Desarmada');
-    final description = notice ??
-        (armed
-            ? 'Si el garaje o la puerta principal quedan abiertos 20 s, suena la sirena.'
-            : 'Ármala para vigilar el garaje y la puerta principal.');
-
-    final card = Glass(
-      radius: R.card,
-      color: armed && !sounding ? const Color(0xEB1C1C1E) : null,
-      gradient: sounding ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFFF5147), Color(0xFFD70F3A)]) : null,
-      padding: const EdgeInsets.all(18),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: sounding ? const Color(0x33FFFFFF) : (armed ? C.green : C.fill),
-            ),
-            child: Icon(
-              sounding ? Icons.notifications_active_rounded : (armed ? Icons.shield_rounded : Icons.shield_outlined),
-              color: dark ? Colors.white : C.label2,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Seguridad', style: T.footnote.copyWith(color: fg2, fontWeight: FontWeight.w500)),
-              Text(title, style: T.title3.copyWith(color: fg)),
+            Row(children: [
+              Expanded(child: PillButton('Cerrar', small: true, kind: percent == 0 ? PillKind.primary : PillKind.secondary, expand: true, onTap: usable ? () => _set(0) : null)),
+              const SizedBox(width: 8),
+              Expanded(child: PillButton('50 %', small: true, kind: percent == 50 ? PillKind.primary : PillKind.secondary, expand: true, onTap: usable ? () => _set(0.5) : null)),
+              const SizedBox(width: 8),
+              Expanded(child: PillButton('Abrir', small: true, kind: percent == 100 ? PillKind.primary : PillKind.secondary, expand: true, onTap: usable ? () => _set(1) : null)),
             ]),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        Text(description, style: T.subhead.copyWith(color: fg2)),
-        const SizedBox(height: 14),
-        Row(children: [
-          Expanded(
-            child: _CardButton(
-              label: sounding ? 'Apagar alarma' : (armed ? 'Desarmar' : 'Armar'),
-              background: dark ? Colors.white : C.blue,
-              foreground: sounding ? C.red : (dark ? C.label : Colors.white),
-              onTap: s.connected ? () => _send(CasaPins.armed, armed || sounding ? 0 : 1) : null,
-            ),
-          ),
-          if (!sounding) ...[
-            const SizedBox(width: 10),
-            _CardButton(
-              label: 'Sirena',
-              icon: Icons.campaign_rounded,
-              background: dark ? const Color(0x26FFFFFF) : const Color(0x1AFF3B30),
-              foreground: dark ? Colors.white : C.red,
-              onTap: s.connected ? () => _send(CasaPins.siren, 1) : null,
-            ),
-          ],
-        ]),
-      ]),
-    );
-
-    if (!sounding) return card;
-    // Halo rojo que late mientras suena la alarma.
-    return AnimatedBuilder(
-      animation: _pulse,
-      builder: (_, child) => DecoratedBox(
-        decoration: ShapeDecoration(
-          shape: squircle(R.card),
-          shadows: [BoxShadow(color: C.red.withValues(alpha: 0.25 + 0.3 * _pulse.value), blurRadius: 18 + 18 * _pulse.value)],
-        ),
-        child: child,
-      ),
-      child: card,
-    );
-  }
-}
-
-class _CardButton extends StatelessWidget {
-  final String label;
-  final IconData? icon;
-  final Color background, foreground;
-  final VoidCallback? onTap;
-  const _CardButton({required this.label, required this.background, required this.foreground, this.icon, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      scale: 0.95,
-      child: Opacity(
-        opacity: onTap == null ? 0.5 : 1,
-        child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: ShapeDecoration(shape: squircle(R.control), color: background),
-          child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (icon != null) ...[Icon(icon, size: 19, color: foreground), const SizedBox(width: 6)],
-            Text(label, style: T.headline.copyWith(color: foreground, fontSize: 16)),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-/// Resumen de la casa en cápsulas, como el de la app Casa de Apple.
-class SummaryStrip extends StatelessWidget {
-  final Session session;
-  const SummaryStrip({super.key, required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    final v = session.values;
-    final d = session.device;
-    /// «2 de 6» activos de un tipo, o «Todas» si no hay ninguno. El icono dice de qué tipo es.
-    (String, String) count(ControlKind k, bool Function(String?) isOn, String onWord, String offWord) {
-      final all = casaControls.where((c) => c.kind == k && c.isEnabledOn(d)).toList();
-      final n = all.where((c) => isOn(v[c.vpin])).length;
-      return n == 0 ? ('Todas', offWord) : ('$n de ${all.length}', onWord);
-    }
-
-    final lights = count(ControlKind.light, (x) => x == '1', 'encendidas', 'apagadas');
-    final doors = count(ControlKind.door, (x) => x == '1', 'abiertas', 'cerradas');
-    final blinds = count(ControlKind.blind, (x) => (int.tryParse(x ?? '') ?? 0) > 0, 'abiertas', 'cerradas');
-
-    return Row(children: [
-      Expanded(child: _SummaryChip(icon: Icons.lightbulb_rounded, color: const Color(0xFFFFB800), value: lights.$1, label: lights.$2)),
-      const SizedBox(width: 8),
-      Expanded(child: _SummaryChip(icon: Icons.door_front_door_rounded, color: C.blue, value: doors.$1, label: doors.$2)),
-      const SizedBox(width: 8),
-      Expanded(child: _SummaryChip(icon: Icons.blinds_rounded, color: C.teal, value: blinds.$1, label: blinds.$2)),
-    ]);
-  }
-}
-
-class _SummaryChip extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String label, value;
-  const _SummaryChip({required this.icon, required this.color, required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Glass(
-      radius: 20,
-      shadow: false,
-      padding: const EdgeInsets.fromLTRB(12, 11, 8, 11),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, color: color, size: 22),
-        const SizedBox(height: 8),
-        Text(value, style: T.headline, maxLines: 1, overflow: TextOverflow.ellipsis),
-        Text(label, style: T.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ]),
-    );
-  }
-}
-
-/// Encender o apagar todas las luces de una vez.
-class AllLightsRow extends StatelessWidget {
-  final Session session;
-  const AllLightsRow({super.key, required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    final usable = session.connected;
-    void all(int v) {
-      HapticFeedback.selectionClick();
-      session.send(CasaPins.allLights, v, remember: false);
-    }
-
-    return Row(children: [
-      Expanded(child: _QuickAction(icon: Icons.lightbulb_rounded, iconColor: const Color(0xFFFFB800), label: 'Encender todas', onTap: usable ? () => all(1) : null)),
-      const SizedBox(width: 10),
-      Expanded(child: _QuickAction(icon: Icons.lightbulb_outline_rounded, iconColor: C.label2, label: 'Apagar todas', onTap: usable ? () => all(0) : null)),
-    ]);
-  }
-}
-
-class _QuickAction extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final VoidCallback? onTap;
-  const _QuickAction({required this.icon, required this.iconColor, required this.label, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      child: Opacity(
-        opacity: onTap == null ? 0.5 : 1,
-        child: Glass(
-          radius: R.tile,
-          shadow: false,
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, color: iconColor, size: 20),
-            const SizedBox(width: 8),
-            Flexible(child: Text(label, style: T.subhead.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ]),
         ),
       ),

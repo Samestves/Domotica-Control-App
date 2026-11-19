@@ -4,6 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Para usar la red propia del ESP32 aunque no tenga internet (ver MainActivity) -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Ver las redes Wi‑Fi cercanas y unirse a la red propia del ESP32 desde la app -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- Android 13 o más nuevo: permiso para redes cercanas, sin usar la ubicación -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <!-- Órdenes por voz -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Bluetooth LE (Android 12 o más nuevo) -->
@@ -12,7 +18,10 @@
     <!-- Bluetooth LE (Android 11 o más viejo) -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- Ubicación: Android la exige para Bluetooth LE (hasta Android 11) y para ver la lista de redes Wi‑Fi
+         (todas las versiones). La app no usa ni guarda la ubicación. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <application
         android:label="Control Domótica"

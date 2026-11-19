@@ -1,9 +1,9 @@
 name: control_domotica
-description: "App para controlar la maqueta domótica y el carro robot por Bluetooth o Wi-Fi."
+description: "App para controlar la maqueta domÃ³tica y el carro robot por Bluetooth o Wi-Fi."
 publish_to: 'none'
 
-# version: nombre+número de compilación. Mantener igual a lib/version.dart.
-version: 0.7.1+8
+# version: nombre+nÃºmero de compilaciÃ³n. Mantener igual a lib/version.dart.
+version: 0.8.8+18
 
 environment:
   sdk: ^3.13.4
@@ -25,22 +25,21 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # Inter (licencia OFL, ver assets/fonts/OFL-Inter.txt): la letra libre más cercana a la de Apple.
+  # D-DIN (licencia OFL, ver assets/fonts/OFL-D-DIN.txt): la familia DIN que usa SpaceX en Starlink.
   fonts:
-    - family: Inter
+    - family: DDIN
       fonts:
-        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/D-DIN.otf
           weight: 400
-        - asset: assets/fonts/Inter-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Inter-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/Inter-Bold.ttf
+        - asset: assets/fonts/D-DIN-Bold.otf
           weight: 700
-    # Variante para títulos grandes: más ajustada, como los títulos de iOS.
-    - family: InterDisplay
+    # Iconos Phosphor (licencia MIT, ver assets/fonts/LICENSE-Phosphor.txt): lÃ­nea fina y rellenos.
+    - family: PhosphorLight
       fonts:
-        - asset: assets/fonts/InterDisplay-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/InterDisplay-Bold.ttf
-          weight: 700
+        - asset: assets/fonts/Phosphor-Light.ttf
+    - family: PhosphorFill
+      fonts:
+        - asset: assets/fonts/Phosphor-Fill.ttf
+    - family: PhosphorBold
+      fonts:
+        - asset: assets/fonts/Phosphor-Bold.ttf

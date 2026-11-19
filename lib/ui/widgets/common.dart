@@ -1,73 +1,35 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/link.dart';
 import '../../core/protocol.dart';
 import '../../main.dart';
 import '../../models/controls.dart';
 import '../../models/device.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
-import 'glass.dart';
-import 'status.dart';
+import 'kit.dart';
 
-/// Estado de la conexión bajo el título grande, con «Reintentar» si se cayó.
-class ConnectionSubtitle extends StatelessWidget {
-  final Session session;
-  const ConnectionSubtitle({super.key, required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    final st = session.state;
-    final failed = st == LinkState.error && !session.retrying;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Flexible(
-          child: ConnectionLine(state: st, transport: session.device.transport, retrying: session.retrying, needsClave: session.needsClave),
-        ),
-        if (failed || st == LinkState.disconnected) ...[
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: session.connect,
-            child: Text(failed ? 'Reintentar' : 'Conectar', style: T.footnote.copyWith(color: C.blue, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ]),
-      if (failed && session.error != null) ...[
-        const SizedBox(height: 4),
-        Text(session.error!, style: T.footnote.copyWith(color: C.red)),
-      ],
-    ]);
-  }
-}
-
-/// Registro de los últimos mensajes enviados (→) y recibidos (←).
+/// Registro de los últimos mensajes enviados (→) y recibidos (←), en letra de máquina.
 class MessageConsole extends StatelessWidget {
   final Session session;
   final int lines;
-  const MessageConsole({super.key, required this.session, this.lines = 5});
+  const MessageConsole({super.key, required this.session, this.lines = 6});
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final items = session.log.take(lines).toList();
-    return Glass(
-      color: const Color(0xE61C1C1E),
-      radius: R.tile,
+    return Panel(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.terminal_rounded, size: 16, color: Color(0x99EBEBF5)),
-          const SizedBox(width: 6),
-          Text('Mensajes', style: T.footnote.copyWith(color: const Color(0x99EBEBF5), fontWeight: FontWeight.w600)),
-        ]),
-        const SizedBox(height: 8),
-        if (items.isEmpty) Text('Sin mensajes todavía', style: T.mono.copyWith(color: const Color(0x66EBEBF5))),
+        if (items.isEmpty) Text('Sin mensajes todavía', style: T.mono.copyWith(color: c.text3)),
         for (final l in items)
-          Text(
-            '${l.incoming ? '←' : '→'} ${l.text}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: T.mono.copyWith(color: l.incoming ? const Color(0xFFFFD60A) : const Color(0xFF7CE0A3)),
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(text: l.incoming ? '← ' : '→ ', style: TextStyle(color: l.incoming ? c.amber : c.green)),
+              TextSpan(text: l.text, style: TextStyle(color: l.incoming ? c.text : c.text2)),
+            ]),
+            maxLines: 3,
+            style: T.mono,
           ),
       ]),
     );
@@ -77,7 +39,7 @@ class MessageConsole extends StatelessWidget {
 /// Abre la hoja para cambiar a qué GPIO va un control, si está invertido y si existe en la maqueta.
 Future<void> showPinSheet(BuildContext context, Session session, ControlSpec spec) {
   final app = AppScope.read(context);
-  return showGlassSheet<void>(context, (_) => _PinSheet(session: session, spec: spec, onSaved: app.saveChanges));
+  return showAppSheet<void>(context, (_) => _PinSheet(session: session, spec: spec, onSaved: app.saveChanges));
 }
 
 class _PinSheet extends StatefulWidget {
@@ -139,23 +101,24 @@ class _PinSheetState extends State<_PinSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final connected = _session.connected;
     final custom = _session.device.pins.containsKey(_spec.vpin);
     final isLight = _spec.kind == ControlKind.light;
 
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${_spec.room} · ${_spec.label}', style: T.title2),
-            const SizedBox(height: 2),
-            Text('Pin virtual V${_spec.vpin}  ·  de fábrica en el GPIO ${_spec.gpio}', style: T.footnote),
-          ]),
+          child: SheetHeader(
+            eyebrow: '${_spec.room} · pin virtual V${_spec.vpin}',
+            title: _spec.label,
+            detail: 'De fábrica va en el GPIO ${_spec.gpio}.',
+          ),
         ),
-        const SizedBox(height: 18),
-        GlassGroup(children: [
+        const SizedBox(height: 20),
+        RowGroup(children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(children: [
@@ -166,52 +129,37 @@ class _PinSheetState extends State<_PinSheet> {
                   controller: _gpio,
                   textAlign: TextAlign.right,
                   keyboardType: TextInputType.number,
-                  style: T.body.copyWith(color: C.blue, fontWeight: FontWeight.w600),
+                  style: T.heading.copyWith(color: c.text),
                   onChanged: (_) => setState(() => _error = null),
                 ),
               ),
             ]),
           ),
-          _SwitchRow(label: 'Invertir', value: _inverted, onChanged: (v) => setState(() => _inverted = v)),
-          _SwitchRow(label: 'Conectado en la maqueta', value: _enabled, onChanged: (v) => setState(() => _enabled = v)),
+          ListRow(title: 'Invertir', trailing: Toggle(value: _inverted, onChanged: (v) => setState(() => _inverted = v))),
+          ListRow(title: 'Conectado en la maqueta', trailing: Toggle(value: _enabled, onChanged: (v) => setState(() => _enabled = v))),
         ]),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
           child: Text(
             _error ??
                 (isLight
                     ? 'Invertir: si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'
                     : 'Invertir: si el servo gira hacia el lado contrario, por cómo quedó montado.'),
-            style: T.footnote.copyWith(color: _error == null ? C.label2 : C.red),
+            style: T.small.copyWith(color: _error == null ? c.text2 : c.red),
           ),
         ),
-        const SizedBox(height: 18),
-        FilledButton(onPressed: _save, child: Text(connected ? 'Guardar y enviar a la placa' : 'Guardar')),
-        if (custom) TextButton(onPressed: _reset, child: Text('Volver al GPIO ${_spec.gpio}')),
+        const SizedBox(height: 20),
+        PillButton(connected ? 'Guardar y enviar' : 'Guardar', expand: true, onTap: _save),
+        if (custom) ...[
+          const SizedBox(height: 10),
+          PillButton('Volver al GPIO ${_spec.gpio}', kind: PillKind.secondary, expand: true, onTap: _reset),
+        ],
         if (!connected)
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
             child: Text('La placa no está conectada. El ajuste se guarda y se envía solo al conectar.',
-                style: T.footnote, textAlign: TextAlign.center),
+                style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
           ),
-      ]),
-    );
-  }
-}
-
-class _SwitchRow extends StatelessWidget {
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  const _SwitchRow({required this.label, required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
-      child: Row(children: [
-        Expanded(child: Text(label, style: T.body)),
-        CupertinoSwitch(value: value, activeTrackColor: C.green, onChanged: onChanged),
       ]),
     );
   }

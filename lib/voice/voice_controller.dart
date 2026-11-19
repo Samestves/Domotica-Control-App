@@ -44,6 +44,9 @@ class VoiceController extends ChangeNotifier {
   /// Lo que va entendiendo mientras hablas.
   String heard = '';
 
+  /// Volumen del micrófono de 0 a 1, para que las barritas se muevan con la voz.
+  double level = 0;
+
   /// Resultado para mostrar: «Puerta principal abierta», «La casa no respondió»...
   String message = '';
 
@@ -56,7 +59,22 @@ class VoiceController extends ChangeNotifier {
   bool _retried = false;
 
   /// Cuánto esperar el resultado final después de que el reconocedor deja de escuchar.
-  static const _finalWait = Duration(milliseconds: 1500);
+  static const _finalWait = Duration(milliseconds: 700);
+
+  // El fin de la frase lo decide Android (deja de escuchar ~1 s después de que te callas).
+  // No se usa «pauseFor»: el plugin lo cuenta desde que se abre el micrófono, y si tardabas
+  // en empezar a hablar, cerraba el micrófono sin haberte escuchado.
+
+  /// Si lo escuchado ya es una orden completa y no cambia en este tiempo, se ejecuta sin esperar el silencio.
+  static const _stableFor = Duration(milliseconds: 850);
+  Timer? _stable;
+
+  /// Último error del reconocedor en este turno (para explicar bien por qué no entendió).
+  String? _lastError;
+
+  /// Cronómetro de cada orden, para medir dónde se va el tiempo (sale en el registro del teléfono).
+  final _clock = Stopwatch();
+  void _mark(String what) => debugPrint('[voz] +${_clock.elapsedMilliseconds} ms  $what');
 
   bool get listening => status == VoiceStatus.listening || status == VoiceStatus.starting;
 
@@ -69,8 +87,18 @@ class VoiceController extends ChangeNotifier {
     final system = await _stt.systemLocale();
     _locale = (system != null && system.localeId.toLowerCase().startsWith('es')) ? system.localeId : (spanish.isEmpty ? null : spanish.first);
     await _tts.setLanguage('es-ES');
-    await _tts.setSpeechRate(0.5);
+    await _tts.setSpeechRate(0.56);
+    await _tts.awaitSpeakCompletion(false);
     return true;
+  }
+
+  /// Prepara el reconocimiento y la voz antes del primer toque, para que la primera orden no espere.
+  Future<void> warmUp() async {
+    try {
+      await _init();
+    } catch (_) {
+      // Si falla aquí, se vuelve a intentar al tocar el micrófono y ahí se explica el problema.
+    }
   }
 
   /// Toca el micrófono: empieza a escuchar. Si ya escuchaba, termina y procesa lo que oyó.
@@ -78,6 +106,10 @@ class VoiceController extends ChangeNotifier {
     if (listening) return _stop();
     _session = s;
     _clear?.cancel();
+    _stable?.cancel();
+    _clock
+      ..reset()
+      ..start();
     await _tts.stop(); // que el micrófono no escuche a la propia app
     if (!await _init()) {
       _show(VoiceStatus.failed, 'No puedo usar el micrófono. Revisa el permiso en Ajustes.');
@@ -87,17 +119,35 @@ class VoiceController extends ChangeNotifier {
     _retried = false;
     heard = '';
     message = '';
+    level = 0;
+    _lastError = null;
     _handled = false;
     status = VoiceStatus.starting;
     notifyListeners();
-    // Por si el teléfono no avisa que abrió el micrófono.
+    // «Escuchando» aparece cuando llega sonido del micrófono (ahí sí está listo).
+    // Por si el teléfono no informa el volumen, se pasa igual a «Escuchando» a los 1,2 s.
     final turn = _turn;
-    Timer(const Duration(seconds: 2), () {
+    Timer(const Duration(milliseconds: 1200), () {
       if (turn != _turn || status != VoiceStatus.starting) return;
+      _mark('sin datos de volumen: paso a «Escuchando»');
       status = VoiceStatus.listening;
       notifyListeners();
     });
     await _listen();
+  }
+
+  /// Volumen del micrófono (dB que da Android, más o menos de −2 a 10).
+  void _onLevel(int turn, double db) {
+    if (turn != _turn) return;
+    if (status == VoiceStatus.starting) {
+      _mark('micrófono listo (llegó sonido)');
+      status = VoiceStatus.listening;
+      HapticFeedback.lightImpact();
+    }
+    final v = ((db + 2) / 12).clamp(0.0, 1.0);
+    if ((v - level).abs() < 0.04 && status == VoiceStatus.listening) return;
+    level = v;
+    notifyListeners();
   }
 
   Future<void> _listen() async {
@@ -106,35 +156,64 @@ class VoiceController extends ChangeNotifier {
       onResult: (r) {
         if (turn != _turn) return;
         if (status == VoiceStatus.starting) status = VoiceStatus.listening;
-        if (r.recognizedWords.isNotEmpty) heard = r.recognizedWords;
+        if (r.recognizedWords.isNotEmpty) {
+          if (heard.isEmpty) _mark('primeras palabras');
+          heard = r.recognizedWords;
+        }
         notifyListeners();
-        if (r.finalResult) _finish(turn);
+        if (r.finalResult) {
+          _mark('resultado final: «$heard»');
+          _finish(turn);
+        } else {
+          _maybeRunEarly(turn);
+        }
       },
       listenOptions: SpeechListenOptions(
         localeId: _locale,
-        listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 15),
         partialResults: true,
         cancelOnError: true,
         listenMode: ListenMode.dictation, // frases largas con varias órdenes
       ),
+      onSoundLevelChange: (db) => _onLevel(turn, db),
     );
+    _mark('listen() pedido');
   }
 
   Future<void> _stop() async {
     final turn = _turn;
+    _stable?.cancel();
     await _stt.stop();
     Timer(_finalWait, () => _finish(turn));
   }
 
+  /// Palabras con las que una frase todavía no puede haber terminado («enciende la luz de…»).
+  static const _dangling = {
+    'de', 'del', 'la', 'el', 'los', 'las', 'y', 'e', 'al', 'a', 'en', 'con', 'por', 'para', 'que', 'un', 'una', 'mi',
+    'luego', 'después', 'despues', 'también', 'tambien', 'además', 'ademas', 'todas', 'todos',
+  };
+
+  /// Si lo que va escuchando ya es una orden completa y deja de cambiar, la ejecuta sin esperar el silencio final.
+  void _maybeRunEarly(int turn) {
+    _stable?.cancel();
+    final s = _session;
+    final text = heard.trim();
+    if (s == null || text.isEmpty) return;
+    final words = text.toLowerCase().split(RegExp(r'\s+'));
+    if (_dangling.contains(words.last)) return;
+    if (parseCasaCommand(text, isEnabled: (c) => c.isEnabledOn(s.device)).command == null) return;
+    _stable = Timer(_stableFor, () {
+      if (turn != _turn || heard.trim() != text || _handled || !listening) return;
+      _mark('frase completa: no espero el silencio');
+      _stt.stop();
+      _finish(turn);
+    });
+  }
+
   void _onStatus(String s) {
     final turn = _turn;
-    if (s == 'listening' && status == VoiceStatus.starting) {
-      // Ahora sí: el micrófono está abierto.
-      status = VoiceStatus.listening;
-      HapticFeedback.lightImpact();
-      notifyListeners();
-    }
+    _mark('estado: $s');
+    // Ojo: Android dice «listening» apenas se pide, antes de estar listo. Por eso no se usa aquí.
     // Dejó de escuchar: se espera un poco el resultado final antes de decidir.
     if ((s == 'done' || s == 'notListening') && status == VoiceStatus.listening) {
       Timer(_finalWait, () => _finish(turn));
@@ -143,6 +222,8 @@ class VoiceController extends ChangeNotifier {
 
   void _onError(SpeechRecognitionError e) {
     final turn = _turn;
+    _mark('error: ${e.errorMsg}');
+    _lastError = e.errorMsg;
     // El reconocedor seguía ocupado con el turno anterior: se reintenta una vez.
     if ((e.errorMsg == 'error_busy' || e.errorMsg == 'error_client') && !_retried && heard.isEmpty) {
       _retried = true;
@@ -164,9 +245,15 @@ class VoiceController extends ChangeNotifier {
   void _finish(int turn) {
     if (turn != _turn || _handled || !listening) return;
     _handled = true;
+    _stable?.cancel();
     final s = _session;
     if (heard.trim().isEmpty) {
-      _show(VoiceStatus.unclear, 'No te escuché. Toca el micrófono y habla cuando diga «Escuchando».', speak: false);
+      final noMatch = _lastError == 'error_no_match';
+      _show(
+        VoiceStatus.unclear,
+        noMatch ? 'Te escuché, pero no entendí las palabras. Habla un poco más cerca del teléfono.' : 'No te escuché. Toca el micrófono y habla cuando diga «Escuchando».',
+        speak: false,
+      );
     } else if (s != null) {
       handle(s, heard);
     }
@@ -184,7 +271,9 @@ class VoiceController extends ChangeNotifier {
     status = VoiceStatus.working;
     message = cmd.done;
     notifyListeners();
+    _mark('orden enviada');
     final problem = await runVoiceCommand(s, cmd);
+    _mark(problem == null ? 'la placa confirmó' : 'sin confirmar: $problem');
     problem == null ? _show(VoiceStatus.done, cmd.done) : _show(VoiceStatus.failed, problem);
   }
 
@@ -205,6 +294,7 @@ class VoiceController extends ChangeNotifier {
   void dispose() {
     _turn++;
     _clear?.cancel();
+    _stable?.cancel();
     _stt.cancel();
     _tts.stop();
     super.dispose();

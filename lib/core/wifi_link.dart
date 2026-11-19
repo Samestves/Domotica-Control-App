@@ -6,8 +6,9 @@ import 'package:flutter/services.dart';
 
 import 'link.dart';
 import 'protocol.dart';
+import 'wifi_net.dart';
 
-/// Conexión Wi‑Fi por TCP. El ESP32 escucha en un puerto (3333 por defecto), en su propia red o en la de la casa.
+/// Conexión Wi-Fi por TCP. El ESP32 escucha en un puerto (3333 por defecto), en su propia red o en la de la casa.
 class WifiLink extends DeviceLink {
   final String host;
   final int port;
@@ -15,12 +16,28 @@ class WifiLink extends DeviceLink {
   StreamSubscription? _sub;
   final _buf = LineBuffer();
 
-  WifiLink(this.host, this.port);
+  bool _closing = false;
+
+  /// Red propia de la placa: si se conoce, la app se une a ella antes de conectar.
+  final String? ssid;
+  final String? password;
+
+  WifiLink(this.host, this.port, {this.ssid, this.password});
 
   @override
   Future<void> connect() async {
     if (state == LinkState.connected || state == LinkState.connecting) return;
+    _closing = false;
     setState(LinkState.connecting);
+    final net = ssid;
+    if (net != null && await WifiNet.joined() != net) {
+      try {
+        await WifiNet.connect(net, password ?? '');
+      } on WifiProblem catch (e) {
+        if (_closing) return setState(LinkState.disconnected);
+        return setState(LinkState.error, e.message);
+      }
+    }
     final onWifi = await _useWifi();
     try {
       final s = await Socket.connect(host, port, timeout: const Duration(seconds: 6));
@@ -33,25 +50,26 @@ class WifiLink extends DeviceLink {
           }
         },
         onError: (e) => _drop('Se perdió la conexión: $e'),
-        onDone: () => _drop(),
+        onDone: () => _drop(_closing ? null : 'La placa cerró la conexión.'),
         cancelOnError: true,
       );
       setState(LinkState.connected);
       await sendLine('PING');
     } catch (e) {
+      if (_closing) return setState(LinkState.disconnected); // el usuario canceló
       setState(
         LinkState.error,
         onWifi == false
-            ? 'El teléfono no está conectado a ningún Wi‑Fi. Conéctate a la red «Casa Domotica» en Ajustes.'
-            : 'No se pudo conectar a $host:$port. Revisa que el teléfono esté en la red Wi‑Fi de la placa.',
+            ? 'El teléfono no está conectado a ningún Wi-Fi. Conéctate a la red «Casa Domotica» en Ajustes.'
+            : 'No se pudo conectar a $host:$port. Revisa que el teléfono esté en la red Wi-Fi de la placa.',
       );
     }
   }
 
   static const _red = MethodChannel('control_domotica/red');
 
-  /// Pide a Android que la app salga por el Wi‑Fi aunque esa red no tenga internet (la red propia del ESP32).
-  /// true/false: si hay Wi‑Fi. null: no se pudo preguntar (por ejemplo, en las pruebas).
+  /// Pide a Android que la app salga por el Wi-Fi aunque esa red no tenga internet (la red propia del ESP32).
+  /// true/false: si hay Wi-Fi. null: no se pudo preguntar (por ejemplo, en las pruebas).
   static Future<bool?> _useWifi() async {
     try {
       return await _red.invokeMethod<bool>('usarWifi');
@@ -69,7 +87,10 @@ class WifiLink extends DeviceLink {
   }
 
   @override
-  Future<void> disconnect() async => _drop();
+  Future<void> disconnect() async {
+    _closing = true;
+    _drop();
+  }
 
   @override
   Future<void> sendLine(String line) async {

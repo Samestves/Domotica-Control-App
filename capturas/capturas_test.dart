@@ -1,20 +1,20 @@
 // ignore_for_file: invalid_use_of_visible_for_testing_member
-// Dibuja las pantallas principales de la app en imágenes PNG, con la letra real.
-// Sirve para revisar el diseño en la PC sin instalar nada en el teléfono.
+// Dibuja las pantallas principales de la app en imágenes PNG, con la letra y los iconos reales,
+// en modo oscuro y en modo claro. Sirve para revisar el diseño en la PC sin instalar nada en el teléfono.
 //
 //   flutter test capturas --update-goldens
 //
 // Las imágenes quedan en capturas/salida/.
-import 'dart:io';
-
 import 'package:control_domotica/core/demo_link.dart';
 import 'package:control_domotica/core/link.dart';
 import 'package:control_domotica/main.dart';
 import 'package:control_domotica/models/device.dart';
+import 'package:control_domotica/models/pins.dart';
 import 'package:control_domotica/state/app_state.dart';
 import 'package:control_domotica/ui/add_device_screen.dart';
 import 'package:control_domotica/ui/carro_panel.dart';
 import 'package:control_domotica/ui/casa_panel.dart';
+import 'package:control_domotica/ui/credits_screen.dart';
 import 'package:control_domotica/ui/home_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -25,21 +25,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _portrait = Size(393, 852);
 const _landscape = Size(852, 393);
 
-Future<void> _loadFonts() async {
-  Future<ByteData> asset(String path) => rootBundle.load(path);
-  Future<ByteData> file(String path) async => ByteData.sublistView(File(path).readAsBytesSync());
+const _themes = {'oscuro': ThemeMode.dark, 'claro': ThemeMode.light};
 
-  final inter = FontLoader('Inter');
-  for (final w in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
-    inter.addFont(asset('assets/fonts/Inter-$w.ttf'));
+Future<void> _loadFonts() async {
+  final ddin = FontLoader('DDIN')
+    ..addFont(rootBundle.load('assets/fonts/D-DIN.otf'))
+    ..addFont(rootBundle.load('assets/fonts/D-DIN-Bold.otf'));
+  final loaders = [ddin];
+  for (final style in const ['Light', 'Fill', 'Bold']) {
+    loaders.add(FontLoader('Phosphor$style')..addFont(rootBundle.load('assets/fonts/Phosphor-$style.ttf')));
   }
-  final display = FontLoader('InterDisplay')
-    ..addFont(asset('assets/fonts/InterDisplay-SemiBold.ttf'))
-    ..addFont(asset('assets/fonts/InterDisplay-Bold.ttf'));
-  final flutterRoot = Platform.environment['FLUTTER_ROOT'] ?? '${Platform.environment['USERPROFILE']}/develop/flutter';
-  final icons = FontLoader('MaterialIcons')
-    ..addFont(file('$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf'));
-  await Future.wait([inter.load(), display.load(), icons.load()]);
+  await Future.wait(loaders.map((l) => l.load()));
 }
 
 void _setSize(WidgetTester t, Size logical) {
@@ -53,112 +49,164 @@ Future<AppState> _state() async {
   SharedPreferences.setMockInitialValues({});
   final app = AppState();
   await app.load();
-  await app.add(SavedDevice(
-    id: 'esp32',
-    name: 'Casa Domotica',
-    profile: Profile.casa,
-    transport: Transport.ble,
-    address: '3C:71:BF:19:A7:1A',
-  ));
+  await app.add(SavedDevice(id: 'esp32', name: 'Casa Domótica', profile: Profile.casa, transport: Transport.ble, address: '3C:71:BF:19:A7:1A'));
   return app;
 }
 
-Future<void> _shoot(WidgetTester t, AppState app, Widget screen, String name, {Size size = _portrait}) async {
+Future<void> _show(WidgetTester t, AppState app, Widget screen, ThemeMode mode, {Size size = _portrait}) async {
   _setSize(t, size);
-  await t.pumpWidget(ControlApp(state: app, home: screen));
+  await t.pumpWidget(ControlApp(state: app, home: screen, forceTheme: mode));
   await t.pump(const Duration(seconds: 1));
-  await expectLater(find.byType(MaterialApp), matchesGoldenFile('salida/$name.png'));
 }
+
+Future<void> _shot(String name) => expectLater(find.byType(MaterialApp), matchesGoldenFile('salida/$name.png'));
 
 void main() {
   setUpAll(_loadFonts);
 
-  testWidgets('inicio', (t) async {
-    final app = await _state();
-    await t.runAsync(() async {
-      await app.session(app.devices.first).connect();
+  for (final MapEntry(key: tema, value: mode) in _themes.entries) {
+    group(tema, () {
+      testWidgets('inicio', (t) async {
+        final app = await _state();
+        await t.runAsync(() async {
+          await app.session(app.devices.first).connect();
+          app.session(app.devices.first)
+            ..send(10, 1)
+            ..send(12, 1);
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+        });
+        await _show(t, app, const HomeScreen(), mode);
+        await _shot('01_inicio_$tema');
+        await t.tap(find.byTooltip('Ajustes'));
+        await t.pump();
+        await t.pump(const Duration(seconds: 1));
+        await _shot('07_ajustes_$tema');
+        await t.runAsync(app.session(app.devices.first).disconnect);
+      });
+
+      // La firma siempre es oscura: basta una captura.
+      testWidgets('firma escondida', skip: mode != ThemeMode.dark, (t) async {
+        final app = await _state();
+        await _show(t, app, const CreditsScreen(), mode);
+        // Cuadro a cuadro, como en el teléfono, para que terminen las animaciones.
+        for (var i = 0; i < 60; i++) {
+          await t.pump(const Duration(milliseconds: 100));
+        }
+        await _shot('12_firma');
+      });
+
+      testWidgets('agregar dispositivo', (t) async {
+        final app = await _state();
+        await _show(t, app, const AddDeviceScreen(), mode);
+        await _shot('02_agregar_$tema');
+
+        // Wi-Fi: redes de ejemplo, como las que vería el teléfono cerca de la maqueta.
+        t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('control_domotica/red'), (call) async {
+          return switch (call.method) {
+            'permisoWifi' => true,
+            'redPlaca' => null,
+            'redesWifi' => [
+                {'ssid': 'Casa Domotica', 'nivel': -48, 'segura': true, 'ghz': 2},
+                {'ssid': 'MiCasa_5G', 'nivel': -55, 'segura': true, 'ghz': 5},
+                {'ssid': 'Vecino', 'nivel': -80, 'segura': true, 'ghz': 2},
+              ],
+            _ => null,
+          };
+        });
+        await t.tap(find.text('WI-FI'));
+        await t.pump();
+        await t.pump(const Duration(seconds: 1));
+        await _shot('02b_agregar_wifi_$tema');
+        t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('control_domotica/red'), null);
+      });
+
+      testWidgets('casa conectada', (t) async {
+        final app = await _state();
+        final casa = app.devices.firstWhere((d) => d.id == 'demo-casa');
+        final s = app.session(casa);
+        await t.runAsync(() async {
+          await s.connect();
+          s
+            ..send(10, 1)
+            ..send(12, 1)
+            ..send(1, 1)
+            ..send(5, 120);
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+        });
+        await _show(t, app, CasaPanel(device: casa, initiallyOpen: const {'Sala'}), mode);
+        await _shot('03_casa_$tema');
+        await t.drag(find.byType(Scrollable).first, const Offset(0, -560));
+        await t.pump(const Duration(milliseconds: 500));
+        await _shot('04_casa_salas_$tema');
+        await t.longPress(find.text('Luz 1'));
+        await t.pump();
+        await t.pump(const Duration(seconds: 1));
+        await _shot('08_hoja_pines_$tema');
+        await t.runAsync(s.disconnect);
+      });
+
+      testWidgets('casa con alarma', (t) async {
+        final app = await _state();
+        final casa = app.devices.firstWhere((d) => d.id == 'demo-casa');
+        final s = Session(casa, linkFor: (_) => DemoLink('casa', casaGrace: const Duration(milliseconds: 50)));
+        await t.runAsync(() async {
+          await s.connect();
+          s
+            ..send(17, 1)
+            ..send(0, 1);
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        });
+        await _show(t, app, CasaPanel(device: casa, session: s), mode);
+        await _shot('05_casa_alarma_$tema');
+        await t.runAsync(s.disconnect);
+      });
+
+      testWidgets('casa reconectando', (t) async {
+        final app = await _state();
+        final casa = app.devices.firstWhere((d) => d.id == 'esp32');
+        final s = Session(casa, linkFor: (_) => _DeadLink());
+        await t.runAsync(() async {
+          await s.connect();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        });
+        await _show(t, app, CasaPanel(device: casa, session: s), mode);
+        await _shot('11_reconectando_$tema');
+        await t.runAsync(s.disconnect);
+      });
+
+      testWidgets('casa pide crear la clave', (t) async {
+        final app = await _state();
+        final casa = app.devices.firstWhere((d) => d.id == 'esp32');
+        final s = Session(casa, linkFor: (_) => _NewHouseLink());
+        await t.runAsync(() async {
+          await s.connect();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        });
+        await _show(t, app, CasaPanel(device: casa, session: s), mode);
+        await _shot('09_crear_clave_$tema');
+        await t.runAsync(s.disconnect);
+      });
+
+      testWidgets('carro', (t) async {
+        final app = await _state();
+        final carro = app.devices.firstWhere((d) => d.id == 'demo-carro');
+        final s = app.session(carro);
+        await t.runAsync(() async {
+          await s.connect();
+          await Future<void>.delayed(const Duration(milliseconds: 900));
+          s.send(CarPins.invert, '0100');
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        });
+        await _show(t, app, CarroPanel(device: carro), mode, size: _landscape);
+        await _shot('06_carro_$tema');
+        await t.tap(find.byTooltip('Ruedas'));
+        await t.pump();
+        await t.pump(const Duration(seconds: 1));
+        await _shot('10_carro_ruedas_$tema');
+        await t.runAsync(s.disconnect);
+      });
     });
-    await _shoot(t, app, const HomeScreen(), '01_inicio');
-    await t.tap(find.text('Control Domótica'));
-    await t.pump();
-    await t.pump(const Duration(seconds: 1));
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('salida/07_acerca_de.png'));
-    await t.runAsync(app.session(app.devices.first).disconnect);
-  });
-
-  testWidgets('agregar dispositivo', (t) async {
-    final app = await _state();
-    await _shoot(t, app, const AddDeviceScreen(), '02_agregar');
-    await t.tap(find.text('Wi‑Fi'));
-    await t.pump(const Duration(seconds: 1));
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('salida/02b_agregar_wifi.png'));
-  });
-
-  testWidgets('casa pide crear la clave', (t) async {
-    final app = await _state();
-    final casa = app.devices.firstWhere((d) => d.id == 'esp32');
-    final s = Session(casa, linkFor: (_) => _NewHouseLink());
-    await t.runAsync(() async {
-      await s.connect();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
-    await _shoot(t, app, _SessionPanel(session: s), '09_crear_clave');
-    await t.runAsync(s.disconnect);
-  });
-
-  testWidgets('casa conectada', (t) async {
-    final app = await _state();
-    final casa = app.devices.firstWhere((d) => d.id == 'demo-casa');
-    final s = app.session(casa);
-    await t.runAsync(() async {
-      await s.connect();
-      s
-        ..send(10, 1)
-        ..send(12, 1)
-        ..send(1, 1)
-        ..send(5, 120);
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-    });
-    await _shoot(t, app, CasaPanel(device: casa), '03_casa');
-    await t.drag(find.byType(Scrollable).first, const Offset(0, -900));
-    await t.pump(const Duration(milliseconds: 500));
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('salida/04_casa_abajo.png'));
-    await t.longPress(find.text('Persiana 1'));
-    await t.pump();
-    await t.pump(const Duration(seconds: 1));
-    await expectLater(find.byType(MaterialApp), matchesGoldenFile('salida/08_hoja_pines.png'));
-    await t.runAsync(s.disconnect);
-  });
-
-  testWidgets('casa con alarma', (t) async {
-    final app = await _state();
-    final casa = app.devices.firstWhere((d) => d.id == 'demo-casa');
-    final s = Session(casa, linkFor: (_) => DemoLink('casa', casaGrace: const Duration(milliseconds: 50)));
-    await t.runAsync(() async {
-      await s.connect();
-      s
-        ..send(17, 1)
-        ..send(0, 1);
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-    });
-    await _shoot(t, app, _SessionPanel(session: s), '05_casa_alarma');
-    await t.runAsync(s.disconnect);
-  });
-
-  testWidgets('carro', (t) async {
-    final app = await _state();
-    final carro = app.devices.firstWhere((d) => d.id == 'demo-carro');
-    await _shoot(t, app, CarroPanel(device: carro), '06_carro', size: _landscape);
-  });
-}
-
-/// Muestra el panel de la casa con una sesión creada a mano (para simular la alarma rápido).
-class _SessionPanel extends StatelessWidget {
-  final Session session;
-  const _SessionPanel({required this.session});
-
-  @override
-  Widget build(BuildContext context) => CasaPanel(device: session.device, session: session);
+  }
 }
 
 /// Una casa recién cargada: todavía no tiene clave.
@@ -173,4 +221,16 @@ class _NewHouseLink extends DeviceLink {
   Future<void> sendLine(String line) async {
     if (line.startsWith('AUTH')) emitLine('AUTH:NUEVA');
   }
+}
+
+/// Una placa apagada: cada intento falla, y la app queda reintentando.
+class _DeadLink extends DeviceLink {
+  @override
+  Future<void> connect() async => setState(LinkState.error, 'La placa dejó de responder. ¿Se apagó o está lejos?');
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {}
 }

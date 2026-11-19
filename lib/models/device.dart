@@ -5,7 +5,7 @@ enum Profile { casa, carro }
 extension TransportLabel on Transport {
   String get label => switch (this) {
         Transport.ble => 'Bluetooth',
-        Transport.wifi => 'Wi‑Fi',
+        Transport.wifi => 'Wi-Fi',
         Transport.demo => 'Demo',
       };
 }
@@ -36,7 +36,7 @@ class SavedDevice {
   Profile profile;
   Transport transport;
 
-  /// Bluetooth: identificador de la placa. Wi‑Fi: IP. Demo: vacío.
+  /// Bluetooth: identificador de la placa. Wi-Fi: IP. Demo: vacío.
   String address;
   int port;
   String board;
@@ -44,6 +44,10 @@ class SavedDevice {
 
   /// Clave de la casa que aceptó la placa, para entregarla sola al conectar. null = no se conoce.
   String? clave;
+
+  /// Wi-Fi propio de la placa: la app se une sola a esta red antes de conectar. null = la red que tenga el teléfono.
+  String? ssid;
+  String? wifiPass;
 
   SavedDevice({
     required this.id,
@@ -55,11 +59,13 @@ class SavedDevice {
     this.board = 'ESP32',
     Map<int, PinConfig>? pins,
     this.clave,
+    this.ssid,
+    this.wifiPass,
   }) : pins = pins ?? {};
 
   String get subtitle => switch (transport) {
         Transport.ble => '$board · Bluetooth',
-        Transport.wifi => '$board · $address',
+        Transport.wifi => ssid == null ? '$board · $address' : '$board · red «$ssid»',
         Transport.demo => 'Placa simulada',
       };
 
@@ -73,6 +79,8 @@ class SavedDevice {
         'board': board,
         'pins': pins.map((k, v) => MapEntry('$k', v.toJson())),
         if (clave != null) 'clave': clave,
+        if (ssid != null) 'ssid': ssid,
+        if (wifiPass != null) 'wifiPass': wifiPass,
       };
 
   factory SavedDevice.fromJson(Map<String, dynamic> j) => SavedDevice(
@@ -86,5 +94,7 @@ class SavedDevice {
         pins: ((j['pins'] as Map<String, dynamic>?) ?? {})
             .map((k, v) => MapEntry(int.parse(k), PinConfig.fromJson(v as Map<String, dynamic>))),
         clave: j['clave'] as String?,
+        ssid: j['ssid'] as String?,
+        wifiPass: j['wifiPass'] as String?,
       );
 }

@@ -7,7 +7,7 @@ import 'ui/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent));
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   final state = AppState();
   await state.load();
   runApp(ControlApp(state: state));
@@ -27,17 +27,28 @@ class ControlApp extends StatelessWidget {
   /// Pantalla inicial. Por defecto, la lista de dispositivos; las capturas de diseño usan otras.
   final Widget home;
 
-  const ControlApp({super.key, required this.state, this.home = const HomeScreen()});
+  /// Para las capturas: obliga un tema sin tocar el ajuste guardado.
+  final ThemeMode? forceTheme;
+
+  const ControlApp({super.key, required this.state, this.home = const HomeScreen(), this.forceTheme});
+
+  static final _light = buildTheme(Brightness.light);
+  static final _dark = buildTheme(Brightness.dark);
 
   @override
   Widget build(BuildContext context) {
     return AppScope(
       state: state,
-      child: MaterialApp(
-        title: 'Control Domótica',
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(),
-        home: home,
+      child: ValueListenableBuilder(
+        valueListenable: state.theme,
+        builder: (context, _, _) => MaterialApp(
+          title: 'Control Domótica',
+          debugShowCheckedModeBanner: false,
+          theme: _light,
+          darkTheme: _dark,
+          themeMode: forceTheme ?? state.themeMode,
+          home: home,
+        ),
       ),
     );
   }

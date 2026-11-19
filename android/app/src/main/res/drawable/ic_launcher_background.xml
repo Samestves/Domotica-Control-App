@@ -1,5 +1,3 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Fondo del icono adaptable: el mismo degradado azul del icono completo. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient android:angle="315" android:startColor="#3AA0FF" android:endColor="#0060E0" />
-</shape>
+<!-- Fondo del icono adaptable: blanco, como el icono completo. -->
+<color xmlns:android="http://schemas.android.com/apk/res/android" android:color="#FFFFFF" />

@@ -1,17 +1,18 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-import '../core/link.dart';
 import '../main.dart';
+import '../models/controls.dart';
 import '../models/device.dart';
 import '../state/app_state.dart';
 import '../version.dart';
 import 'add_device_screen.dart';
 import 'carro_panel.dart';
 import 'casa_panel.dart';
+import 'credits_screen.dart';
 import 'theme.dart';
-import 'widgets/glass.dart';
-import 'widgets/large_title_scaffold.dart';
+import 'widgets/app_scaffold.dart';
+import 'widgets/kit.dart';
 import 'widgets/status.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -19,42 +20,50 @@ class HomeScreen extends StatelessWidget {
 
   static Future<void> open(BuildContext context, SavedDevice d) async {
     final s = AppScope.read(context).session(d);
-    if (!s.linked) s.connect();
+    if (!s.linked && !s.busy) s.connect();
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => d.profile == Profile.casa ? CasaPanel(device: d) : CarroPanel(device: d),
     ));
   }
 
-  static void _add(BuildContext context) =>
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddDeviceScreen()));
+  static void _add(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddDeviceScreen()));
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
+    final c = context.c;
     final alerts = app.devices.map(app.session).where((s) => s.lastAlert != null).toList();
     final connected = app.connectedCount;
 
-    return LargeTitleScaffold(
+    return AppScaffold(
+      brand: const Brand(),
       title: 'Dispositivos',
       subtitle: Row(children: [
-        StatusDot(connected > 0 ? LinkState.connected : LinkState.disconnected, size: 7),
-        const SizedBox(width: 8),
-        Text(
-          connected == 0 ? 'Ninguno conectado' : '$connected de ${app.devices.length} conectados',
-          style: T.subhead.copyWith(color: C.label2),
-        ),
+        StatusDot(color: connected > 0 ? c.green : c.text3),
+        const SizedBox(width: 9),
+        Eyebrow(connected == 0 ? 'Ninguno conectado' : '$connected de ${app.devices.length} conectados', color: connected > 0 ? c.green : c.text2),
       ]),
-      actions: [GlassIconButton(icon: Icons.add_rounded, tooltip: 'Agregar dispositivo', onTap: () => _add(context))],
+      actions: [
+        RoundButton(icon: Ic.plus, tooltip: 'Agregar dispositivo', size: 40, onTap: () => _add(context)),
+        RoundButton(icon: Ic.settings, tooltip: 'Ajustes', size: 40, onTap: () => showSettingsSheet(context)),
+      ],
       slivers: [
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
           sliver: SliverList.list(children: [
             for (final s in alerts) ...[_AlertBanner(session: s), const SizedBox(height: 12)],
-            if (app.devices.isEmpty) const _EmptyState(),
+            if (app.devices.isEmpty) _EmptyState(onAdd: () => _add(context)),
             for (final d in app.devices) ...[_DeviceCard(device: d), const SizedBox(height: 12)],
-            _AddRow(onTap: () => _add(context)),
             const SizedBox(height: 28),
-            const Center(child: _VersionBadge()),
+            Center(
+              child: Tap(
+                onTap: () => showAppSheet<void>(context, (_) => const _AboutSheet()),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Eyebrow('Control Domótica · $appVersion', color: c.text3),
+                ),
+              ),
+            ),
           ]),
         ),
       ],
@@ -62,6 +71,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
+/// Tarjeta de una placa: qué es, cómo está y el botón para conectar, cancelar o desconectar.
 class _DeviceCard extends StatelessWidget {
   final SavedDevice device;
   const _DeviceCard({required this.device});
@@ -69,77 +79,79 @@ class _DeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context).session(device);
-    return Pressable(
+    final c = context.c;
+    final k = connOf(s);
+    final detail = connDetail(s) ?? (k == Conn.connected ? _summary(s) : null);
+
+    return Tap(
       onTap: () => HomeScreen.open(context, device),
       onLongPress: () => _showDeviceOptions(context, s),
-      child: Glass(
-        padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
-        child: Row(children: [
-          ProfileBadge(device.profile),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(device.name, style: T.headline, maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 2),
-              Text.rich(
-                TextSpan(children: [
-                  WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(transportIcon(device.transport), size: 14, color: C.label2)),
-                  TextSpan(text: device.transport == Transport.demo ? ' Placa simulada' : ' ${device.board} · ${device.transport.label}'),
+      child: Panel(
+        padding: EdgeInsets.zero,
+        border: k == Conn.connected ? c.line2 : null,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // Arriba: qué es y la flecha para entrar. Toda esta parte abre el panel.
+          Semantics(
+            button: true,
+            label: 'Abrir ${device.name}',
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Icon(profileIcon(device.profile), size: 16, color: c.text2),
+                      const SizedBox(width: 8),
+                      Flexible(child: Eyebrow('${device.profile.label} · ${device.transport == Transport.demo ? 'Demo' : device.transport.label}')),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text(device.name, style: T.title.copyWith(fontSize: 24)),
+                  ]),
+                ),
+                const SizedBox(width: 12),
+                RoundButton(icon: Ic.chevronRight, tooltip: 'Abrir', size: 40, filled: k == Conn.connected, onTap: () => HomeScreen.open(context, device)),
+              ]),
+            ),
+          ),
+          const Hairline(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 12, 12, 12),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  ConnectionTag(session: s),
+                  if (detail != null) ...[
+                    const SizedBox(height: 4),
+                    Text(detail, style: T.small.copyWith(color: k == Conn.failed ? c.red : c.text2)),
+                  ],
                 ]),
-                style: T.footnote,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 8),
-              _StateLine(session: s),
+              const SizedBox(width: 10),
+              ConnectionAction(session: s),
             ]),
           ),
-          _ConnectButton(session: s),
+          // Mientras conecta, una línea fina corre por debajo.
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: s.busy ? ThinProgress(color: c.amber) : const SizedBox(height: 2),
+          ),
         ]),
       ),
     );
   }
-}
 
-/// Estado de la conexión con su punto de color.
-class _StateLine extends StatelessWidget {
-  final Session session;
-  const _StateLine({required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    final st = session.retrying ? LinkState.connecting : session.state;
-    final needsClave = session.needsClave;
-    final color = needsClave ? C.orange : stateColor(st);
-    final label = session.retrying ? 'Reconectando…' : (needsClave ? 'Falta la clave' : stateLabel(st));
-    return Row(children: [
-      StatusDot(st, size: 7, color: color),
-      const SizedBox(width: 7),
-      Text(label, style: T.footnote.copyWith(color: color, fontWeight: FontWeight.w600)),
-    ]);
-  }
-}
-
-/// «Conectar» cuando está desconectada; una flecha cuando ya está lista para abrir.
-class _ConnectButton extends StatelessWidget {
-  final Session session;
-  const _ConnectButton({required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    if (session.connected || session.needsClave) return const Icon(Icons.chevron_right_rounded, color: C.label3, size: 28);
-    if (session.state == LinkState.connecting || session.retrying) {
-      return const Padding(padding: EdgeInsets.all(8), child: CupertinoActivityIndicator());
-    }
-    return Pressable(
-      onTap: session.connect,
-      scale: 0.92,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: const ShapeDecoration(shape: StadiumBorder(), color: Color(0x1A007AFF)),
-        child: Text('Conectar', style: T.subhead.copyWith(color: C.blue, fontWeight: FontWeight.w600)),
-      ),
-    );
+  /// «2 luces encendidas · 1 puerta abierta» para la casa conectada.
+  static String? _summary(Session s) {
+    if (s.device.profile != Profile.casa) return 'Listo para manejar';
+    final v = s.values;
+    final lights = casaControls.where((x) => x.kind == ControlKind.light && v[x.vpin] == '1').length;
+    final doors = casaControls.where((x) => x.kind == ControlKind.door && v[x.vpin] == '1').length;
+    final parts = [
+      if (lights > 0) lights == 1 ? '1 luz encendida' : '$lights luces encendidas',
+      if (doors > 0) '$doors puerta${doors == 1 ? '' : 's'} abierta${doors == 1 ? '' : 's'}',
+      if (s.values[CasaPins.armed] == '1') 'alarma armada',
+    ];
+    return parts.isEmpty ? 'Todo apagado y cerrado' : parts.join(' · ');
   }
 }
 
@@ -149,41 +161,24 @@ class _AlertBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
+    final c = context.c;
+    return Tap(
       onTap: () => HomeScreen.open(context, session.device),
-      child: Glass(
-        gradient: const LinearGradient(colors: [Color(0xFFFF5147), Color(0xFFE5243B)]),
-        padding: const EdgeInsets.fromLTRB(16, 14, 6, 14),
+      child: Panel(
+        color: c.red.withValues(alpha: 0.12),
+        border: c.red,
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
         child: Row(children: [
-          const Icon(Icons.notifications_active_rounded, color: Colors.white),
+          Icon(Ic.sirenOn, color: c.red, size: 24),
           const SizedBox(width: 12),
-          Expanded(child: Text(session.lastAlert!, style: T.headline.copyWith(color: Colors.white))),
-          IconButton(
-            onPressed: session.clearAlert,
-            icon: const Icon(Icons.close_rounded, color: Colors.white),
-            tooltip: 'Descartar aviso',
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Eyebrow('Alarma', color: c.red),
+              const SizedBox(height: 2),
+              Text(session.lastAlert!, style: T.callout),
+            ]),
           ),
-        ]),
-      ),
-    );
-  }
-}
-
-class _AddRow extends StatelessWidget {
-  final VoidCallback onTap;
-  const _AddRow({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      child: Glass(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        shadow: false,
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.add_circle_rounded, color: C.blue, size: 22),
-          const SizedBox(width: 8),
-          Text('Agregar dispositivo', style: T.headline.copyWith(color: C.blue)),
+          IconButton(onPressed: session.clearAlert, icon: Icon(Ic.close, color: c.text2), tooltip: 'Descartar aviso'),
         ]),
       ),
     );
@@ -191,97 +186,133 @@ class _AddRow extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  final VoidCallback onAdd;
+  const _EmptyState({required this.onAdd});
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40),
+      padding: const EdgeInsets.symmetric(vertical: 48),
       child: Column(children: [
-        const Icon(Icons.sensors_rounded, size: 44, color: C.label3),
-        const SizedBox(height: 12),
-        const Text('Todavía no hay placas', style: T.title3),
+        Icon(Ic.board, size: 44, color: c.text3),
+        const SizedBox(height: 14),
+        const Text('Todavía no hay placas', style: T.heading),
         const SizedBox(height: 6),
-        Text('Agrega tu ESP32 o Arduino para controlarlo desde aquí.', style: T.subhead.copyWith(color: C.label2), textAlign: TextAlign.center),
+        Text('Agrega tu ESP32 o Arduino para controlarlo desde aquí.', style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
+        const SizedBox(height: 22),
+        PillButton('Agregar dispositivo', icon: Ic.plus, onTap: onAdd),
       ]),
     );
   }
 }
 
-/// Versión de la app en una cápsula; al tocarla muestra «Acerca de».
-class _VersionBadge extends StatelessWidget {
-  const _VersionBadge();
+/// Ajustes de la app: apariencia y modo técnico.
+Future<void> showSettingsSheet(BuildContext context) => showAppSheet<void>(context, (_) => const _SettingsSheet());
+
+class _SettingsSheet extends StatelessWidget {
+  const _SettingsSheet();
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      onTap: () => showGlassSheet<void>(context, (_) => const _AboutSheet()),
-      scale: 0.94,
-      child: Glass(
-        radius: 99,
-        shadow: false,
-        padding: const EdgeInsets.fromLTRB(8, 6, 14, 6),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const AppGlyph(size: 22),
-          const SizedBox(width: 8),
-          Text('Control Domótica', style: T.footnote.copyWith(color: C.label, fontWeight: FontWeight.w600)),
-          Text('  ·  $appVersion', style: T.footnote),
+    final app = AppScope.of(context);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: SheetHeader(eyebrow: 'Control Domótica', title: 'Ajustes')),
+        const SectionHeader('Apariencia', padding: EdgeInsets.fromLTRB(4, 24, 4, 10)),
+        Segmented<ThemeMode>(
+          value: app.themeMode,
+          items: const {ThemeMode.system: 'Sistema', ThemeMode.light: 'Claro', ThemeMode.dark: 'Oscuro'},
+          icons: const {ThemeMode.system: Ic.system, ThemeMode.light: Ic.sun, ThemeMode.dark: Ic.moon},
+          onChanged: app.setThemeMode,
+        ),
+        const SectionHeader('Modo técnico', padding: EdgeInsets.fromLTRB(4, 24, 4, 10)),
+        RowGroup(
+          footer: 'Muestra en cada control su pin virtual y el GPIO del ESP32.',
+          children: [
+            ListRow(
+              icon: Ic.pins,
+              title: 'Mostrar pines',
+              trailing: Toggle(value: app.showPins, onChanged: app.setShowPins),
+              onTap: () => app.setShowPins(!app.showPins),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        RowGroup(children: [
+          ListRow(
+            icon: Ic.info,
+            title: 'Acerca de',
+            detail: '$appVersion · compilación $appBuild',
+            trailing: Icon(Ic.chevronRight, size: 18, color: context.c.text3),
+            onTap: () {
+              Navigator.pop(context);
+              showAppSheet<void>(context, (_) => const _AboutSheet());
+            },
+          ),
         ]),
-      ),
+      ]),
     );
   }
 }
 
-class _AboutSheet extends StatelessWidget {
+class _AboutSheet extends StatefulWidget {
   const _AboutSheet();
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const AppGlyph(size: 76),
-        const SizedBox(height: 14),
-        const Text('Control Domótica', style: T.title2),
-        const SizedBox(height: 4),
-        Text('Versión $appVersion  ·  compilación $appBuild', style: T.footnote),
-        const SizedBox(height: 22),
-        const GlassGroup(children: [
-          _AboutRow(icon: Icons.home_rounded, color: Color(0xFF16A37A), title: 'Casa domótica', detail: 'Luces, puertas, persianas y alarma de la maqueta'),
-          _AboutRow(icon: Icons.directions_car_filled_rounded, color: C.blue, title: 'Auto Robot', detail: 'Conducción en horizontal, como un control remoto'),
-          _AboutRow(icon: Icons.bluetooth_rounded, color: C.teal, title: 'Conexión', detail: 'Bluetooth LE o Wi‑Fi, varias placas a la vez'),
-        ]),
-        const SizedBox(height: 14),
-        const Text('Mantén presionado un dispositivo para ver sus opciones.', style: T.footnote, textAlign: TextAlign.center),
-      ]),
-    );
-  }
+  State<_AboutSheet> createState() => _AboutSheetState();
 }
 
-class _AboutRow extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title, detail;
-  const _AboutRow({required this.icon, required this.color, required this.title, required this.detail});
+class _AboutSheetState extends State<_AboutSheet> {
+  // Guiño escondido: 3 toques seguidos al logo abren la firma de la app.
+  int _taps = 0;
+  DateTime _lastTap = DateTime(0);
+  bool _bump = false;
+
+  void _tapLogo() {
+    final now = DateTime.now();
+    _taps = now.difference(_lastTap) < const Duration(milliseconds: 700) ? _taps + 1 : 1;
+    _lastTap = now;
+    HapticFeedback.selectionClick();
+    setState(() => _bump = true);
+    Future.delayed(const Duration(milliseconds: 110), () {
+      if (mounted) setState(() => _bump = false);
+    });
+    if (_taps >= 3) {
+      _taps = 0;
+      showCredits(context);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: ShapeDecoration(shape: squircle(9), color: color),
-          child: Icon(icon, color: Colors.white, size: 19),
+    final c = context.c;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+      child: Column(children: [
+        GestureDetector(
+          key: const ValueKey('logo-acerca'),
+          onTap: _tapLogo,
+          child: AnimatedScale(
+            scale: _bump ? 0.9 : 1,
+            duration: const Duration(milliseconds: 110),
+            curve: Curves.easeOut,
+            child: const AppGlyph(size: 68),
+          ),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: T.subhead.copyWith(fontWeight: FontWeight.w600)),
-            Text(detail, style: T.footnote),
-          ]),
-        ),
+        const SizedBox(height: 16),
+        const Text('Control Domótica', style: T.title),
+        const SizedBox(height: 6),
+        Eyebrow('Versión $appVersion · compilación $appBuild'),
+        const SizedBox(height: 22),
+        RowGroup(children: [
+          ListRow(icon: Ic.house, title: 'Casa domótica', detail: 'Luces, puertas, persianas, alarma y voz'),
+          ListRow(icon: Ic.car, title: 'Auto Robot', detail: 'Manejo en horizontal, como un control remoto'),
+          ListRow(icon: Ic.bluetooth, title: 'Conexión', detail: 'Bluetooth LE o Wi-Fi, varias placas a la vez'),
+        ]),
+        const SizedBox(height: 14),
+        Text('Mantén presionado un dispositivo para ver sus opciones.', style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
       ]),
     );
   }
@@ -290,34 +321,29 @@ class _AboutRow extends StatelessWidget {
 /// Opciones de un dispositivo: conectar o desconectar, y eliminar con confirmación.
 void _showDeviceOptions(BuildContext context, Session s) {
   final d = s.device;
-  showGlassSheet<void>(context, (sheet) {
+  showAppSheet<void>(context, (sheet) {
+    final c = sheet.c;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
-          ProfileBadge(d.profile, size: 44),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(d.name, style: T.headline),
-              Text('${d.profile.label} · ${d.subtitle}', style: T.footnote, maxLines: 1, overflow: TextOverflow.ellipsis),
-            ]),
-          ),
-        ]),
-        const SizedBox(height: 16),
-        GlassGroup(children: [
-          _SheetAction(
-            icon: s.linked ? Icons.link_off_rounded : Icons.link_rounded,
-            label: s.linked ? 'Desconectar' : 'Conectar',
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: SheetHeader(eyebrow: '${d.profile.label} · ${d.subtitle}', title: d.name),
+        ),
+        const SizedBox(height: 20),
+        RowGroup(children: [
+          ListRow(
+            icon: s.linked || s.busy ? Ic.unlink : Ic.link,
+            title: s.linked ? 'Desconectar' : (s.busy ? 'Cancelar la conexión' : 'Conectar'),
             onTap: () {
               Navigator.pop(sheet);
-              s.linked ? s.disconnect() : s.connect();
+              s.linked || s.busy ? s.disconnect() : s.connect();
             },
           ),
-          _SheetAction(
-            icon: Icons.delete_outline_rounded,
-            label: 'Eliminar dispositivo',
-            color: C.red,
+          ListRow(
+            icon: Ic.trash,
+            title: 'Eliminar dispositivo',
+            titleColor: c.red,
             onTap: () async {
               Navigator.pop(sheet);
               final ok = await _confirmDelete(context, d);
@@ -331,39 +357,17 @@ void _showDeviceOptions(BuildContext context, Session s) {
 }
 
 Future<bool> _confirmDelete(BuildContext context, SavedDevice d) async {
-  final ok = await showCupertinoDialog<bool>(
-    context: context,
-    builder: (ctx) => CupertinoAlertDialog(
-      title: Text('¿Eliminar «${d.name}»?'),
-      content: const Text('Se borra de la app con sus ajustes de pines. La placa no cambia.'),
-      actions: [
-        CupertinoDialogAction(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-        CupertinoDialogAction(isDestructiveAction: true, onPressed: () => Navigator.pop(ctx, true), child: const Text('Eliminar')),
-      ],
-    ),
-  );
-  return ok ?? false;
-}
-
-class _SheetAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-  const _SheetAction({required this.icon, required this.label, required this.onTap, this.color = C.blue});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-        child: Row(children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(width: 12),
-          Text(label, style: T.body.copyWith(color: color)),
-        ]),
-      ),
+  final ok = await showAppSheet<bool>(context, (sheet) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SheetHeader(title: '¿Eliminar «${d.name}»?', detail: 'Se borra de la app con sus ajustes de pines. La placa no cambia.'),
+        const SizedBox(height: 22),
+        PillButton('Eliminar', kind: PillKind.dangerFilled, expand: true, onTap: () => Navigator.pop(sheet, true)),
+        const SizedBox(height: 10),
+        PillButton('Cancelar', kind: PillKind.secondary, expand: true, onTap: () => Navigator.pop(sheet, false)),
+      ]),
     );
-  }
+  });
+  return ok ?? false;
 }

@@ -22,6 +22,10 @@ void main() {
       expect(cmd('cierra el portón').done, 'Portón del garaje cerrado');
       expect(cmd('abre la puerta del baño').sends, {3: 1});
       expect(cmd('abrir puerta cuarto').sends, {4: 1});
+      // Google a veces entiende «cierro» o «abro» en vez de «cierra» o «abre».
+      expect(cmd('Cierro la puerta del garaje').sends, {0: 0});
+      expect(cmd('abro la puerta de la entrada').sends, {1: 1});
+      expect(cmd('prendo la luz de la cocina').sends, {12: 1});
     });
 
     test('luces, con o sin tildes y con sinónimos', () {

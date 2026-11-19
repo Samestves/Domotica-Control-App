@@ -49,3 +49,6 @@ app.*.map.json
 
 # APK para compartir (pesan mucho para git)
 /entregas/
+
+# Diferencias que genera flutter test cuando una captura no coincide
+/capturas/failures/

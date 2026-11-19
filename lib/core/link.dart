@@ -2,7 +2,7 @@ import 'dart:async';
 
 enum LinkState { disconnected, connecting, connected, error }
 
-/// Una conexión con una placa. Puede ser Bluetooth, Wi‑Fi o simulada.
+/// Una conexión con una placa. Puede ser Bluetooth, Wi-Fi o simulada.
 abstract class DeviceLink {
   final _lines = StreamController<String>.broadcast();
   final _state = StreamController<LinkState>.broadcast();
@@ -26,6 +26,12 @@ abstract class DeviceLink {
     _current = s;
     if (error != null) lastError = error;
     if (!_state.isClosed) _state.add(s);
+  }
+
+  /// Corta la conexión y la marca como caída (por ejemplo, porque la placa dejó de responder).
+  Future<void> fail(String why) async {
+    await disconnect();
+    setState(LinkState.error, why);
   }
 
   Future<void> dispose() async {

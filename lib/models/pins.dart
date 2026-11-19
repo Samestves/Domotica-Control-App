@@ -15,4 +15,11 @@ class CasaPins {
 /// Pines virtuales del carro.
 class CarPins {
   static const joystick = 20, turret = 21, distance = 22, lights = 23, throttle = 24, reverse = 25, horn = 26;
+
+  /// Ruedas invertidas: cuatro 0/1 en orden DI, TI, DD, TD (ej.: «0100»). La placa lo guarda.
+  static const invert = 27;
+
+  /// Mientras el carro anda, la app repite la orden con esta frecuencia.
+  /// Si la placa deja de recibirla por 1 s (Bluetooth cortado, app cerrada), frena sola.
+  static const keepAlive = Duration(milliseconds: 200);
 }

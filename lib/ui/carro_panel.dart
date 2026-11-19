@@ -1,17 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../core/link.dart';
 import '../main.dart';
 import '../models/controls.dart';
 import '../models/device.dart';
 import '../state/app_state.dart';
 import 'theme.dart';
+import 'widgets/carro_ajustes.dart';
 import 'widgets/drive_controls.dart';
-import 'widgets/glass.dart';
+import 'widgets/kit.dart';
 import 'widgets/status.dart';
 
-/// Panel de conducción en horizontal, como un control remoto. Va en modo oscuro, tipo cabina.
+/// Panel de manejo en horizontal, como un control remoto.
 class CarroPanel extends StatefulWidget {
   final SavedDevice device;
   const CarroPanel({super.key, required this.device});
@@ -25,6 +27,7 @@ class _CarroPanelState extends State<CarroPanel> {
   bool _reverse = false, _lights = false;
   final _lastSent = <int, DateTime>{};
   Session? _session;
+  Timer? _keepAlive;
 
   @override
   void didChangeDependencies() {
@@ -37,10 +40,21 @@ class _CarroPanelState extends State<CarroPanel> {
     super.initState();
     SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _keepAlive = Timer.periodic(CarPins.keepAlive, (_) => _repeat());
+  }
+
+  /// Mientras el carro anda, repite la orden actual: la placa frena sola si deja de recibirla.
+  /// También corrige el último movimiento del joystick si se lo saltó el límite de 90 ms.
+  void _repeat() {
+    final s = _session;
+    if (s == null || !s.connected) return;
+    if (_jx != 0 || _jy != 0) s.send(CarPins.joystick, '$_jx,$_jy', quiet: true);
+    if (_throttle != 0) s.send(CarPins.throttle, _throttle, quiet: true);
   }
 
   @override
   void dispose() {
+    _keepAlive?.cancel();
     // Al salir: detener el carro y volver a la orientación normal.
     final s = _session;
     if (s != null && s.connected) {
@@ -70,74 +84,76 @@ class _CarroPanelState extends State<CarroPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final s = AppScope.of(context).session(widget.device);
     final on = s.connected;
     final dist = int.tryParse(s.values[CarPins.distance] ?? '');
     final near = dist != null && dist < 20;
     final speed = [_jy.abs(), _throttle].reduce((a, b) => a > b ? a : b);
+    final overlay = (c.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark).copyWith(statusBarColor: Colors.transparent);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: overlay,
       child: Scaffold(
-        backgroundColor: C.night,
-        body: Stack(children: [
-          const Positioned.fill(child: Wallpaper(dark: true)),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 18, 12),
-              child: Row(children: [
-                // Izquierda: volver, nombre y joystick
-                SizedBox(
-                  width: 200,
-                  child: Column(children: [
-                    Row(children: [
-                      GlassIconButton(icon: Icons.arrow_back_ios_new_rounded, tooltip: 'Volver', dark: true, onTap: () => Navigator.pop(context)),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(widget.device.name, style: T.headline.copyWith(color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    ]),
+        backgroundColor: c.bg,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 18, 12),
+            child: Row(children: [
+              // Izquierda: volver, nombre y joystick
+              SizedBox(
+                width: 206,
+                child: Column(children: [
+                  Row(children: [
+                    RoundButton(icon: Ic.back, tooltip: 'Volver', size: 40, onTap: () => Navigator.pop(context)),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Center(
-                        child: Joystick(
-                          enabled: on,
-                          onChanged: (x, y) {
-                            setState(() {
-                              _jx = x;
-                              _jy = y;
-                            });
-                            _sendThrottled(s, CarPins.joystick, '$x,$y', force: x == 0 && y == 0);
-                          },
-                        ),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Eyebrow('Auto Robot'),
+                        const SizedBox(height: 2),
+                        Text(widget.device.name, style: T.callout, maxLines: 2),
+                      ]),
+                    ),
+                    RoundButton(icon: Ic.wheels, tooltip: 'Ruedas', size: 40, onTap: () => showCarroAjustes(context, s)),
+                  ]),
+                  Expanded(
+                    child: Center(
+                      child: Joystick(
+                        enabled: on,
+                        onChanged: (x, y) {
+                          setState(() {
+                            _jx = x;
+                            _jy = y;
+                          });
+                          _sendThrottled(s, CarPins.joystick, '$x,$y', force: x == 0 && y == 0);
+                        },
                       ),
                     ),
-                  ]),
-                ),
-                const SizedBox(width: 14),
-                // Centro: estado, telemetría, dial y mensajes
-                Expanded(
-                  child: Column(children: [
-                    _StatusBar(session: s),
-                    const SizedBox(height: 10),
-                    Row(children: [
-                      Expanded(child: _Telemetry(icon: Icons.speed_rounded, label: 'Velocidad', value: '${_reverse ? '−' : ''}$speed %')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _Telemetry(icon: Icons.sensors_rounded, label: 'Obstáculo', value: dist == null ? '—' : '$dist cm', alert: near)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _Telemetry(
-                          icon: Icons.turn_right_rounded,
-                          label: 'Dirección',
-                          value: _jx == 0 ? 'Recto' : (_jx < 0 ? 'Izq. ${-_jx}' : 'Der. $_jx'),
-                        ),
-                      ),
-                    ]),
-                    const SizedBox(height: 10),
+                  ),
+                ]),
+              ),
+              const SizedBox(width: 14),
+              // Centro: estado, telemetría, torreta y mensajes
+              Expanded(
+                child: Column(children: [
+                  Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(child: _Telemetry(icon: Ic.speed, label: 'Velocidad', value: '${_reverse ? '-' : ''}$speed %')),
+                    const SizedBox(width: 8),
+                    Expanded(child: _Telemetry(icon: Ic.distance, label: 'Obstáculo', value: dist == null ? '—' : '$dist cm', alert: near)),
+                    const SizedBox(width: 8),
                     Expanded(
-                      child: Row(children: [
-                        Glass(
-                          dark: true,
-                          radius: R.tile,
-                          shadow: false,
-                          padding: const EdgeInsets.fromLTRB(8, 6, 14, 6),
+                      child: _Telemetry(icon: Ic.steering, label: 'Dirección', value: _jx == 0 ? 'Recto' : (_jx < 0 ? 'Izq. ${-_jx}' : 'Der. $_jx')),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: Row(children: [
+                      // La torreta aparece solo si la placa dice que tiene una (envía V21 al conectar).
+                      if (s.values.containsKey(CarPins.turret)) ...[
+                        Panel(
+                          padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
                           child: Row(children: [
                             Dial360(
                               value: _turret,
@@ -147,111 +163,82 @@ class _CarroPanelState extends State<CarroPanel> {
                                 _sendThrottled(s, CarPins.turret, v);
                               },
                             ),
-                            const SizedBox(width: 6),
-                            Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text('Torreta', style: T.subhead.copyWith(color: Colors.white, fontWeight: FontWeight.w600)),
-                              Text('Giro 360°', style: T.footnote.copyWith(color: C.nightLabel2)),
+                            const SizedBox(width: 8),
+                            const Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Eyebrow('Torreta'),
+                              SizedBox(height: 4),
+                              Text('Giro 360°', style: T.callout),
                             ]),
                           ]),
                         ),
                         const SizedBox(width: 10),
-                        Expanded(child: _MiniLog(session: s)),
-                      ]),
-                    ),
-                  ]),
-                ),
-                const SizedBox(width: 14),
-                // Derecha: acelerador y botones
-                SizedBox(
-                  width: 200,
-                  child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Throttle(
-                      value: _throttle,
-                      enabled: on,
-                      onChanged: (v) {
-                        setState(() => _throttle = v);
-                        _sendThrottled(s, CarPins.throttle, v, force: v == 0);
-                      },
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        _DriveButton(
-                          label: 'Reversa',
-                          icon: Icons.u_turn_left_rounded,
-                          active: _reverse,
-                          activeColor: C.orange,
-                          onTap: on
-                              ? () {
-                                  setState(() => _reverse = !_reverse);
-                                  s.send(CarPins.reverse, _reverse ? 1 : 0);
-                                }
-                              : null,
-                        ),
-                        const SizedBox(height: 8),
-                        _DriveButton(
-                          label: 'Luces',
-                          icon: Icons.highlight_rounded,
-                          active: _lights,
-                          activeColor: C.blue,
-                          onTap: on
-                              ? () {
-                                  setState(() => _lights = !_lights);
-                                  s.send(CarPins.lights, _lights ? 1 : 0);
-                                }
-                              : null,
-                        ),
-                        const SizedBox(height: 8),
-                        _DriveButton(
-                          label: 'Bocina',
-                          icon: Icons.campaign_rounded,
-                          onTap: on
-                              ? () {
-                                  HapticFeedback.mediumImpact();
-                                  s.send(CarPins.horn, 1, remember: false);
-                                }
-                              : null,
-                        ),
-                        const SizedBox(height: 8),
-                        _DriveButton(label: 'Freno', icon: Icons.front_hand_rounded, active: true, activeColor: C.red, onTap: on ? () => _brake(s) : null),
-                      ]),
-                    ),
-                  ]),
-                ),
-              ]),
-            ),
+                      ],
+                      Expanded(child: _MiniLog(session: s)),
+                    ]),
+                  ),
+                ]),
+              ),
+              const SizedBox(width: 14),
+              // Derecha: acelerador y botones
+              SizedBox(
+                width: 206,
+                child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Throttle(
+                    value: _throttle,
+                    enabled: on,
+                    onChanged: (v) {
+                      setState(() => _throttle = v);
+                      _sendThrottled(s, CarPins.throttle, v, force: v == 0);
+                    },
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      _DriveButton(
+                        label: 'Reversa',
+                        icon: Ic.reverse,
+                        active: _reverse,
+                        activeColor: c.amber,
+                        onTap: on
+                            ? () {
+                                setState(() => _reverse = !_reverse);
+                                s.send(CarPins.reverse, _reverse ? 1 : 0);
+                              }
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      _DriveButton(
+                        label: 'Luces',
+                        icon: Ic.headlights,
+                        active: _lights,
+                        onTap: on
+                            ? () {
+                                setState(() => _lights = !_lights);
+                                s.send(CarPins.lights, _lights ? 1 : 0);
+                              }
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      _DriveButton(
+                        label: 'Bocina',
+                        icon: Ic.horn,
+                        onTap: on
+                            ? () {
+                                HapticFeedback.mediumImpact();
+                                s.send(CarPins.horn, 1, remember: false);
+                              }
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      _DriveButton(label: 'Freno', icon: Ic.brake, active: true, activeColor: c.red, onTap: on ? () => _brake(s) : null),
+                    ]),
+                  ),
+                ]),
+              ),
+            ]),
           ),
-        ]),
-      ),
-    );
-  }
-}
-
-class _StatusBar extends StatelessWidget {
-  final Session session;
-  const _StatusBar({required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    final st = session.state;
-    return Glass(
-      dark: true,
-      radius: 18,
-      shadow: false,
-      padding: const EdgeInsets.fromLTRB(14, 9, 8, 9),
-      child: Row(children: [
-        Expanded(
-          child: ConnectionLine(state: st, transport: session.device.transport, retrying: session.retrying, textColor: C.nightLabel2),
         ),
-        if (st != LinkState.connected && st != LinkState.connecting && !session.retrying)
-          GestureDetector(
-            onTap: session.connect,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text('Conectar', style: T.footnote.copyWith(color: const Color(0xFF4AA8FF), fontWeight: FontWeight.w600)),
-            ),
-          ),
-      ]),
+      ),
     );
   }
 }
@@ -264,25 +251,19 @@ class _Telemetry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Glass(
-      dark: true,
-      radius: 18,
-      shadow: false,
-      color: alert ? const Color(0xCCFF3B30) : null,
-      padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+    final c = context.c;
+    return Panel(
+      color: alert ? c.red.withValues(alpha: 0.14) : null,
+      border: alert ? c.red : null,
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Icon(icon, size: 13, color: alert ? Colors.white : C.nightLabel2),
-          const SizedBox(width: 4),
-          Flexible(child: Text(label, style: T.caption.copyWith(color: alert ? Colors.white : C.nightLabel2), maxLines: 1)),
+          Icon(icon, size: 14, color: alert ? c.red : c.text2),
+          const SizedBox(width: 6),
+          Flexible(child: Eyebrow(label, color: alert ? c.red : null)),
         ]),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: T.title3.copyWith(color: Colors.white, fontFeatures: const [FontFeature.tabularFigures()]),
-        ),
+        const SizedBox(height: 6),
+        FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, maxLines: 1, style: T.stat.copyWith(fontSize: 22))),
       ]),
     );
   }
@@ -292,31 +273,45 @@ class _DriveButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool active;
-  final Color activeColor;
+  final Color? activeColor;
   final VoidCallback? onTap;
-  const _DriveButton({required this.label, required this.icon, this.active = false, this.activeColor = C.blue, this.onTap});
+  const _DriveButton({required this.label, required this.icon, this.active = false, this.activeColor, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      onTap: onTap,
-      scale: 0.94,
-      child: Opacity(
-        opacity: onTap == null ? 0.45 : 1,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          height: 46,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: ShapeDecoration(
-            shape: squircle(R.control, side: BorderSide(color: active ? Colors.transparent : C.nightEdge)),
-            color: active ? activeColor : C.nightGlass,
-            shadows: active ? [BoxShadow(color: activeColor.withValues(alpha: 0.4), blurRadius: 16, offset: const Offset(0, 4))] : null,
+    final c = context.c;
+    final accent = activeColor ?? c.text;
+    return Semantics(
+      button: true,
+      toggled: active,
+      label: label,
+      excludeSemantics: true,
+      child: Tap(
+        onTap: onTap,
+        scale: 0.95,
+        child: Opacity(
+          opacity: onTap == null ? 0.4 : 1,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            height: 46,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: active ? accent.withValues(alpha: 0.14) : c.surface,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: active ? accent : c.line2),
+            ),
+            child: Row(children: [
+              Icon(icon, size: 19, color: active ? accent : c.text),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(label.toUpperCase(), style: T.button.copyWith(color: active ? accent : c.text), maxLines: 1),
+                ),
+              ),
+            ]),
           ),
-          child: Row(children: [
-            Icon(icon, size: 19, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(child: Text(label, style: T.subhead.copyWith(color: Colors.white, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ]),
         ),
       ),
     );
@@ -329,20 +324,21 @@ class _MiniLog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final items = session.log.take(4).toList();
-    return Glass(
-      dark: true,
-      radius: R.tile,
-      shadow: false,
-      color: const Color(0x66000000),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+    return Panel(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
         for (final l in items)
-          Text('${l.incoming ? '←' : '→'} ${l.text}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: T.mono.copyWith(fontSize: 11, color: l.incoming ? const Color(0xFFFFD60A) : const Color(0xFF7CE0A3))),
-        if (items.isEmpty) Text('Sin mensajes', style: T.mono.copyWith(fontSize: 11, color: const Color(0x66EBEBF5))),
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(text: l.incoming ? '← ' : '→ ', style: TextStyle(color: l.incoming ? c.amber : c.green)),
+              TextSpan(text: l.text, style: TextStyle(color: l.incoming ? c.text : c.text2)),
+            ]),
+            maxLines: 2,
+            style: T.mono.copyWith(fontSize: 11),
+          ),
+        if (items.isEmpty) Text('Sin mensajes', style: T.mono.copyWith(fontSize: 11, color: c.text3)),
       ]),
     );
   }

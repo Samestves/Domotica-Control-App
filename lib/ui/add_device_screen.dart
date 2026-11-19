@@ -1,15 +1,17 @@
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../core/ble_link.dart';
+import '../core/link.dart';
+import '../core/wifi_link.dart';
+import '../core/wifi_net.dart';
 import '../main.dart';
 import '../models/device.dart';
 import 'theme.dart';
-import 'widgets/glass.dart';
-import 'widgets/large_title_scaffold.dart';
+import 'widgets/app_scaffold.dart';
+import 'widgets/kit.dart';
 
 class AddDeviceScreen extends StatefulWidget {
   const AddDeviceScreen({super.key});
@@ -19,10 +21,10 @@ class AddDeviceScreen extends StatefulWidget {
 }
 
 class _AddDeviceScreenState extends State<AddDeviceScreen> {
-  static const _esp32 = 'ESP32', _hm10 = 'Arduino + HM‑10';
+  static const _esp32 = 'ESP32', _hm10 = 'Arduino + HM-10';
 
-  /// IP del ESP32 cuando crea su propia red Wi‑Fi.
-  static const _ownIp = '192.168.4.1';
+  /// IP del ESP32 cuando crea su propia red Wi-Fi.
+  static const _ownIp = WifiNet.boardIp;
 
   final _name = TextEditingController();
   final _ip = TextEditingController(text: _ownIp);
@@ -38,6 +40,14 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
   bool _scanning = false;
   String? _scanError;
   StreamSubscription? _resSub, _scanSub;
+
+  // Wi-Fi: redes cercanas de verdad y la red de la placa a la que se unió la app.
+  List<WifiNetwork> _nets = [];
+  bool _netScanning = false, _showOtherNets = false, _showManual = false;
+  WifiProblem? _netProblem;
+  String? _joined, _joinedPass, _joining;
+  PillState _test = PillState.idle;
+  String? _testMsg;
 
   @override
   void dispose() {
@@ -82,13 +92,11 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
     }
   }
 
-  String _nameOf(ScanResult r) =>
-      r.advertisementData.advName.isNotEmpty ? r.advertisementData.advName : r.device.platformName;
+  String _nameOf(ScanResult r) => r.advertisementData.advName.isNotEmpty ? r.advertisementData.advName : r.device.platformName;
 
-  /// Anuncia el servicio de mensajes de nuestro programa (ESP32) o el de un módulo HM‑10.
-  static bool _isBoard(ScanResult r) => r.advertisementData.serviceUuids
-      .map((u) => u.str128.toLowerCase())
-      .any((u) => u == BleUuids.nus || u == BleUuids.hm10);
+  /// Anuncia el servicio de mensajes de nuestro programa (ESP32) o el de un módulo HM-10.
+  static bool _isBoard(ScanResult r) =>
+      r.advertisementData.serviceUuids.map((u) => u.str128.toLowerCase()).any((u) => u == BleUuids.nus || u == BleUuids.hm10);
 
   bool get _valid {
     if (_name.text.trim().isEmpty) return false;
@@ -112,6 +120,8 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
         Transport.demo => '',
       },
       port: int.tryParse(_port.text) ?? 3333,
+      ssid: _transport == Transport.wifi && _ip.text.trim() == _ownIp ? _joined : null,
+      wifiPass: _transport == Transport.wifi && _ip.text.trim() == _ownIp ? _joinedPass : null,
     );
     await AppScope.read(context).add(d);
     if (mounted) Navigator.pop(context);
@@ -119,59 +129,65 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return LargeTitleScaffold(
+    final c = context.c;
+    return AppScaffold(
+      eyebrow: 'Agregar',
       title: 'Nuevo dispositivo',
-      bottomBar: FilledButton(onPressed: _valid ? _save : null, child: const Text('Guardar dispositivo')),
+      bottomBar: PillButton('Guardar dispositivo', expand: true, onTap: _valid ? _save : null),
       slivers: [
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           sliver: SliverList.list(children: [
-            const SectionTitle('Nombre', small: true),
-            GlassGroup(children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TextField(
-                  controller: _name,
-                  style: T.body,
-                  decoration: const InputDecoration(hintText: 'Ej.: Casa de la feria'),
-                  textCapitalization: TextCapitalization.sentences,
-                  onChanged: (_) => setState(() {}),
-                ),
+            const SectionHeader('Nombre'),
+            Panel(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: _name,
+                style: T.body,
+                decoration: const InputDecoration(hintText: 'Ej.: Casa de la feria'),
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: (_) => setState(() {}),
               ),
-            ]),
-            const SectionTitle('Panel', small: true),
-            _segmented<Profile>(
-              value: _profile,
-              items: const {Profile.casa: 'Casa domótica', Profile.carro: 'Auto Robot'},
-              onChanged: (v) => _profile = v,
             ),
-            const SectionTitle('Placa', small: true),
-            _segmented<String>(
+            const SectionHeader('Panel'),
+            Segmented<Profile>(
+              value: _profile,
+              items: const {Profile.casa: 'Casa', Profile.carro: 'Auto Robot'},
+              icons: const {Profile.casa: Ic.house, Profile.carro: Ic.car},
+              onChanged: (v) => setState(() => _profile = v),
+            ),
+            const SectionHeader('Placa'),
+            Segmented<String>(
               value: _board,
               items: const {_esp32: _esp32, _hm10: _hm10},
-              onChanged: (v) {
+              onChanged: (v) => setState(() {
                 _board = v;
                 if (v != _esp32 && _transport == Transport.wifi) _transport = Transport.ble;
-              },
+              }),
             ),
-            const SectionTitle('Conexión', small: true),
-            _segmented<Transport>(
+            const SectionHeader('Conexión'),
+            Segmented<Transport>(
               value: _transport,
               items: {
                 Transport.ble: 'Bluetooth',
-                if (_board == _esp32) Transport.wifi: 'Wi‑Fi',
+                if (_board == _esp32) Transport.wifi: 'Wi-Fi',
                 Transport.demo: 'Demo',
               },
-              onChanged: (v) => _transport = v,
+              icons: const {Transport.ble: Ic.bluetooth, Transport.wifi: Ic.wifi, Transport.demo: Ic.demo},
+              onChanged: (v) {
+                setState(() => _transport = v);
+                if (v == Transport.wifi && _nets.isEmpty && !_netScanning) _scanWifi();
+              },
             ),
             ...switch (_transport) {
-              Transport.ble => _bleSection(),
-              Transport.wifi => _wifiSection(),
-              Transport.demo => const [
-                  SizedBox(height: 10),
+              Transport.ble => _bleSection(c),
+              Transport.wifi => _wifiSection(c),
+              Transport.demo => [
+                  const SizedBox(height: 12),
                   Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Text('Una placa simulada dentro del teléfono. Sirve para probar y mostrar los paneles sin hardware.', style: T.footnote),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('Una placa simulada dentro del teléfono. Sirve para probar y mostrar los paneles sin hardware.',
+                        style: T.small.copyWith(color: c.text2)),
                   ),
                 ],
             },
@@ -181,48 +197,31 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
     );
   }
 
-  /// Selector segmentado de iOS sobre vidrio.
-  Widget _segmented<V extends Object>({required V value, required Map<V, String> items, required ValueChanged<V> onChanged}) {
-    return CupertinoSlidingSegmentedControl<V>(
-      groupValue: value,
-      backgroundColor: const Color(0x24787880),
-      thumbColor: Colors.white,
-      padding: const EdgeInsets.all(3),
-      children: {
-        for (final e in items.entries)
-          e.key: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 9),
-            child: Text(e.value, style: T.subhead.copyWith(fontWeight: FontWeight.w600)),
-          ),
-      },
-      onValueChanged: (v) {
-        if (v != null) setState(() => onChanged(v));
-      },
-    );
-  }
-
-  List<Widget> _bleSection() => [
-        SectionTitle(
+  List<Widget> _bleSection(Palette c) => [
+        SectionHeader(
           'Placas cercanas',
-          small: true,
-          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (_scanning) const Padding(padding: EdgeInsets.only(right: 8), child: CupertinoActivityIndicator(radius: 8)),
-            GestureDetector(
-              onTap: _scanning ? FlutterBluePlus.stopScan : _scan,
-              child: Text(_scanning ? 'Detener' : 'Buscar', style: T.subhead.copyWith(color: C.blue, fontWeight: FontWeight.w600)),
-            ),
-          ]),
+          trailing: Tap(
+            onTap: _scanning ? FlutterBluePlus.stopScan : _scan,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (_scanning)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.4, color: c.text)),
+                ),
+              Eyebrow(_scanning ? 'Detener' : 'Buscar', color: c.text),
+            ]),
+          ),
         ),
-        GlassGroup(
+        RowGroup(
           footer: _scanError ?? _bleHint,
           children: [
             if (_boards.isEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 22),
+                padding: const EdgeInsets.symmetric(vertical: 26),
                 child: Column(children: [
-                  Icon(_scanning ? Icons.bluetooth_searching_rounded : Icons.bluetooth_rounded, color: C.label3, size: 30),
-                  const SizedBox(height: 6),
-                  Text(_scanning ? 'Buscando…' : 'Ninguna placa todavía', style: T.subhead.copyWith(color: C.label2)),
+                  Icon(Ic.bluetooth, color: c.text3, size: 30),
+                  const SizedBox(height: 8),
+                  Eyebrow(_scanning ? 'Buscando…' : 'Ninguna placa todavía', color: c.text3),
                 ]),
               ),
             for (final r in _boards) _row(r, board: true),
@@ -230,19 +229,14 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
         ),
         if (_others.isNotEmpty) ...[
           const SizedBox(height: 14),
-          GlassGroup(children: [
-            InkWell(
+          RowGroup(children: [
+            ListRow(
+              title: 'Otros dispositivos (${_others.length})',
               onTap: () => setState(() => _showOthers = !_showOthers),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 13, 14, 13),
-                child: Row(children: [
-                  Expanded(child: Text('Otros dispositivos (${_others.length})', style: T.body)),
-                  AnimatedRotation(
-                    turns: _showOthers ? 0.25 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.chevron_right_rounded, color: C.label3),
-                  ),
-                ]),
+              trailing: AnimatedRotation(
+                turns: _showOthers ? 0.5 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: Icon(Ic.chevronDown, size: 18, color: c.text3),
               ),
             ),
             if (_showOthers) for (final r in _others) _row(r, board: false),
@@ -266,58 +260,288 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
         onTap: () => setState(() {
           _picked = r;
           if (_name.text.trim().isEmpty) _name.text = _niceName(_nameOf(r));
+          // El programa del carrito se anuncia como «Carrito 4x4»: se abre con el panel de manejo.
+          if (_nameOf(r).toLowerCase().contains('carrito')) _profile = Profile.carro;
         }),
       );
 
   /// «Casa Domotica» → «Casa Domótica»: la placa no lleva tildes en su nombre Bluetooth.
   static String _niceName(String n) => n == 'Casa Domotica' ? 'Casa Domótica' : n;
 
-  List<Widget> _wifiSection() => [
-        const SectionTitle('Red propia de la casa', small: true),
-        GlassGroup(
-          footer: 'Antes, en Ajustes → Wi‑Fi del teléfono, conéctate a la red «Casa Domotica» (contraseña: casadomotica). '
-              'No necesita internet ni datos móviles.',
-          children: [
+  // ---------- Wi-Fi ----------
+
+  Future<void> _scanWifi() async {
+    setState(() {
+      _netScanning = true;
+      _netProblem = null;
+    });
+    try {
+      final nets = await WifiNet.scan();
+      final joined = await WifiNet.joined();
+      if (!mounted) return;
+      setState(() {
+        _nets = nets;
+        _joined = joined ?? _joined;
+      });
+    } on WifiProblem catch (e) {
+      if (mounted) setState(() => _netProblem = e);
+    } finally {
+      if (mounted) setState(() => _netScanning = false);
+    }
+  }
+
+  /// Une el teléfono a la red de la placa, con su contraseña.
+  Future<void> _join(WifiNetwork n) async {
+    final pass = n.secure ? await _askPassword(n.ssid) : '';
+    if (pass == null || !mounted) return;
+    setState(() {
+      _joining = n.ssid;
+      _netProblem = null;
+      _test = PillState.idle;
+      _testMsg = null;
+    });
+    try {
+      await WifiNet.connect(n.ssid, pass);
+      if (!mounted) return;
+      setState(() {
+        _joined = n.ssid;
+        _joinedPass = pass;
+        _ip.text = _ownIp;
+        _port.text = '${WifiNet.boardPort}';
+        if (_name.text.trim().isEmpty) _name.text = _niceName(n.ssid);
+        if (n.ssid.toLowerCase().contains('carrito')) _profile = Profile.carro;
+      });
+      _testBoard();
+    } on WifiProblem catch (e) {
+      if (mounted) setState(() => _netProblem = e);
+    } finally {
+      if (mounted) setState(() => _joining = null);
+    }
+  }
+
+  Future<void> _leave() async {
+    await WifiNet.release();
+    if (!mounted) return;
+    setState(() {
+      _joined = null;
+      _test = PillState.idle;
+      _testMsg = null;
+    });
+  }
+
+  Future<String?> _askPassword(String ssid) {
+    final ctrl = TextEditingController(text: WifiNet.isBoardSsid(ssid) ? WifiNet.defaultPass(ssid) : '');
+    return showAppSheet<String>(context, (sheet) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: SheetHeader(
+              eyebrow: 'Red Wi-Fi',
+              title: ssid,
+              detail: WifiNet.isBoardSsid(ssid)
+                  ? 'Es la red que crea el ESP32. Su contraseña de fábrica ya está escrita.'
+                  : 'Escribe la contraseña de esta red.',
+            ),
+          ),
+          const SizedBox(height: 18),
+          Panel(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: ctrl,
+              autofocus: !WifiNet.isBoardSsid(ssid),
+              style: T.body,
+              decoration: const InputDecoration(hintText: 'Contraseña'),
+              onSubmitted: (v) => Navigator.pop(sheet, v),
+            ),
+          ),
+          const SizedBox(height: 18),
+          PillButton('Unirse', expand: true, onTap: () => Navigator.pop(sheet, ctrl.text)),
+        ]),
+      );
+    });
+  }
+
+  /// Prueba que la placa conteste en la IP y el puerto escritos.
+  Future<void> _testBoard() async {
+    setState(() {
+      _test = PillState.busy;
+      _testMsg = null;
+    });
+    final link = WifiLink(_ip.text.trim(), int.tryParse(_port.text) ?? WifiNet.boardPort, ssid: _joined, password: _joinedPass);
+    final heard = Completer<bool>();
+    final sub = link.lines.listen((_) {
+      if (!heard.isCompleted) heard.complete(true);
+    });
+    await link.connect();
+    var ok = false;
+    String? why = link.lastError;
+    if (link.state == LinkState.connected) {
+      ok = await heard.future.timeout(const Duration(seconds: 3), onTimeout: () => false);
+      if (!ok) why = 'Se abrió la conexión, pero la placa no contestó. ¿Tiene cargado nuestro programa?';
+    }
+    await sub.cancel();
+    await link.dispose();
+    if (!mounted) return;
+    setState(() {
+      _test = ok ? PillState.done : PillState.failed;
+      _testMsg = ok ? 'La placa respondió. Ya puedes guardarla.' : (why ?? 'La placa no respondió.');
+    });
+  }
+
+  List<Widget> _wifiSection(Palette c) {
+    final boards = _nets.where((n) => n.isBoard).toList();
+    final others = _nets.where((n) => !n.isBoard).toList();
+    final p = _netProblem;
+    return [
+      SectionHeader(
+        'Redes cercanas',
+        trailing: Tap(
+          onTap: _netScanning ? null : _scanWifi,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (_netScanning)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.4, color: c.text)),
+              ),
+            Eyebrow(_netScanning ? 'Buscando' : 'Buscar', color: c.text),
+          ]),
+        ),
+      ),
+      if (p != null) ...[
+        Panel(
+          border: c.amber.withValues(alpha: 0.6),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Ic.warning, color: c.amber, size: 22),
+              const SizedBox(width: 10),
+              Expanded(child: Text(p.message, style: T.small)),
+            ]),
+            if (p.wifiOff || p.noPermission || p.locationOff) ...[
+              const SizedBox(height: 12),
+              PillButton(
+                p.wifiOff ? 'Activar el Wi-Fi' : (p.locationOff ? 'Activar ubicación' : 'Dar permiso'),
+                small: true,
+                kind: PillKind.secondary,
+                onTap: p.wifiOff ? WifiNet.openSettings : (p.locationOff ? WifiNet.openLocationSettings : _scanWifi),
+              ),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 12),
+      ],
+      RowGroup(
+        footer: boards.isEmpty && !_netScanning && p == null
+            ? 'No aparece la red de la placa. Enciende el ESP32: su red se llama «${WifiNet.boardSsid}».'
+            : null,
+        children: [
+          if (boards.isEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Row(children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: ShapeDecoration(shape: squircle(10), color: const Color(0x1A007AFF)),
-                  child: const Icon(Icons.wifi_rounded, size: 19, color: C.blue),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Casa Domotica', style: T.body),
-                    Text('IP 192.168.4.1 · puerto 3333', style: T.caption),
-                  ]),
-                ),
-                if (_ip.text.trim() == _ownIp && _port.text.trim() == '3333')
-                  const Icon(Icons.check_rounded, color: C.blue)
-                else
-                  GestureDetector(
-                    onTap: () => setState(() {
-                      _ip.text = _ownIp;
-                      _port.text = '3333';
-                    }),
-                    child: Text('Usar', style: T.subhead.copyWith(color: C.blue, fontWeight: FontWeight.w600)),
-                  ),
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(children: [
+                Icon(Ic.wifi, color: c.text3, size: 30),
+                const SizedBox(height: 8),
+                Eyebrow(_netScanning ? 'Buscando redes…' : 'Ninguna placa a la vista', color: c.text3),
               ]),
             ),
-          ],
+          for (final n in boards) _netRow(c, n, board: true),
+        ],
+      ),
+      if (_joined != null) ...[
+        const SizedBox(height: 12),
+        Panel(
+          border: _test == PillState.failed ? c.red.withValues(alpha: 0.6) : c.green.withValues(alpha: 0.6),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Icon(Ic.checkCircle, color: c.green, size: 22),
+              const SizedBox(width: 10),
+              Expanded(child: Text('Unido a «$_joined». La app habla con la placa por esta red.', style: T.small)),
+            ]),
+            if (_testMsg != null) ...[
+              const SizedBox(height: 10),
+              Text(_testMsg!, style: T.small.copyWith(color: _test == PillState.done ? c.green : c.red)),
+            ],
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: PillButton(
+                  _test == PillState.busy ? 'Probando' : 'Probar conexión',
+                  small: true,
+                  kind: PillKind.secondary,
+                  expand: true,
+                  state: _test,
+                  onTap: _test == PillState.busy ? null : _testBoard,
+                ),
+              ),
+              const SizedBox(width: 8),
+              PillButton('Salir de la red', small: true, kind: PillKind.secondary, onTap: _leave),
+            ]),
+          ]),
         ),
-        const SectionTitle('Dirección', small: true),
-        GlassGroup(
-          footer: 'Si el ESP32 se une a otra red (la de la casa o del colegio), escribe la IP que muestra en el Monitor Serie. '
-              'El teléfono debe estar en esa misma red.',
-          children: [
+      ],
+      if (others.isNotEmpty) ...[
+        const SizedBox(height: 14),
+        RowGroup(children: [
+          ListRow(
+            title: 'Otras redes (${others.length})',
+            onTap: () => setState(() => _showOtherNets = !_showOtherNets),
+            trailing: AnimatedRotation(
+              turns: _showOtherNets ? 0.5 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: Icon(Ic.chevronDown, size: 18, color: c.text3),
+            ),
+          ),
+          if (_showOtherNets) for (final n in others) _netRow(c, n, board: false),
+        ]),
+      ],
+      const SizedBox(height: 14),
+      RowGroup(
+        footer: _showManual
+            ? 'Si el ESP32 se unió a otra red (la de la casa o del colegio), escribe la IP que muestra en el Monitor Serie. '
+                'El teléfono debe estar en esa misma red.'
+            : null,
+        children: [
+          ListRow(
+            title: 'Dirección manual',
+            detail: _showManual ? null : 'IP ${_ip.text} · puerto ${_port.text}',
+            onTap: () => setState(() => _showManual = !_showManual),
+            trailing: AnimatedRotation(
+              turns: _showManual ? 0.5 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: Icon(Ic.chevronDown, size: 18, color: c.text3),
+            ),
+          ),
+          if (_showManual) ...[
             _FieldRow(label: 'IP', controller: _ip, onChanged: () => setState(() {})),
             _FieldRow(label: 'Puerto', controller: _port, onChanged: () => setState(() {})),
           ],
-        ),
-      ];
+        ],
+      ),
+    ];
+  }
+
+  Widget _netRow(Palette c, WifiNetwork n, {required bool board}) {
+    final joined = _joined == n.ssid;
+    final joining = _joining == n.ssid;
+    return ListRow(
+      icon: Ic.wifi,
+      iconColor: board ? c.text : c.text3,
+      title: n.ssid,
+      detail: board ? 'Red de la placa' : [n.secure ? 'Con contraseña' : 'Abierta', '${n.ghz} GHz'].join(' · '),
+      onTap: board && !joined && _joining == null ? () => _join(n) : null,
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        _SignalBars(n.bars),
+        if (board) ...[
+          const SizedBox(width: 12),
+          joined
+              ? Icon(Ic.checkCircle, color: c.green, size: 22)
+              : PillButton(joining ? 'Uniendo' : 'Unirse',
+                  small: true, state: joining ? PillState.busy : PillState.idle, onTap: _joining == null ? () => _join(n) : null),
+        ],
+      ]),
+    );
+  }
 }
 
 /// Un dispositivo encontrado por Bluetooth, con su señal. [board]: tiene nuestro programa.
@@ -331,37 +555,19 @@ class _BoardRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final bars = rssi > -60 ? 3 : (rssi > -75 ? 2 : 1);
-    return InkWell(
+    return ListRow(
+      icon: board ? Ic.board : Ic.bluetooth,
+      iconColor: board ? c.text : c.text3,
+      title: name,
+      detail: id,
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 11, 16, 11),
-        child: Row(children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: ShapeDecoration(
-              shape: squircle(10),
-              color: selected ? C.blue : (board ? const Color(0x1A007AFF) : const Color(0x14787880)),
-            ),
-            child: Icon(
-              board ? Icons.developer_board_rounded : Icons.bluetooth_rounded,
-              size: 19,
-              color: selected ? Colors.white : (board ? C.blue : C.label2),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name, style: T.body.copyWith(fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-              Text(id, style: T.caption),
-            ]),
-          ),
-          _SignalBars(bars),
-          const SizedBox(width: 12),
-          SizedBox(width: 22, child: selected ? const Icon(Icons.check_rounded, color: C.blue) : null),
-        ]),
-      ),
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        _SignalBars(bars),
+        const SizedBox(width: 12),
+        SizedBox(width: 22, child: selected ? Icon(Ic.checkCircle, color: c.green, size: 22) : null),
+      ]),
     );
   }
 }
@@ -372,13 +578,14 @@ class _SignalBars extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
       for (var i = 1; i <= 3; i++)
         Container(
           margin: const EdgeInsets.only(left: 2),
-          width: 4,
+          width: 3,
           height: 5.0 + i * 4,
-          decoration: ShapeDecoration(shape: const StadiumBorder(), color: i <= level ? C.label : C.label3),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(1.5), color: i <= level ? c.text : c.line2),
         ),
     ]);
   }
@@ -400,7 +607,7 @@ class _FieldRow extends StatelessWidget {
           child: TextField(
             controller: controller,
             textAlign: TextAlign.right,
-            style: T.body.copyWith(color: C.label2),
+            style: T.body.copyWith(color: context.c.text2),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             onChanged: (_) => onChanged(),
           ),

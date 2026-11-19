@@ -73,6 +73,38 @@ Usa el reconocimiento de voz de Google del teléfono: normalmente necesita inter
 
 Los ajustes que hagas desde la app quedan guardados en la placa y en el teléfono.
 
+## Carrito 4x4
+
+El carrito usa **la misma app**. Lo que cambia es el programa de su ESP32: `firmware/carro_esp32`, ya cargado en el DevKitC v4 (versión guardada: `carro-0.1`).
+
+1. En la app: **Agregar dispositivo → Bluetooth** y elige **Carrito 4x4**. El panel **Auto Robot** se elige solo. El carrito no usa clave.
+2. Panel en horizontal: **joystick** para manejar (como un tanque), **acelerador** para ir a velocidad fija, **Reversa** cambia el sentido del acelerador, **Freno** detiene todo.
+3. **Con las ruedas en el aire**, botón de ajustes (arriba, junto al nombre) → **Probar ruedas**. Cada rueda gira hacia adelante, una por una: delantera izquierda, trasera izquierda, delantera derecha, trasera derecha. La que gire hacia atrás se **invierte** ahí mismo, sin recablear.
+
+Seguridad incluida:
+
+- Si se corta el Bluetooth, o la app deja de enviar señal por 1 segundo, **el carrito se detiene solo**. Hace falta la app **0.7.2** o más nueva: las anteriores no repiten la orden y el carrito se detendría al mantener el joystick quieto.
+- Arranque y frenado suaves, para que no salte ni reinicie el ESP32.
+
+Pines (los mismos de la guía de armado):
+
+| Rueda | L298N | Velocidad (EN) | Sentido (IN) | Sentido (IN) |
+|---|---|---|---|---|
+| Delantera izquierda | A · ENA, IN1, IN2 | 32 | 33 | 25 |
+| Trasera izquierda | A · ENB, IN3, IN4 | 26 | 27 | 14 |
+| Delantera derecha | B · ENA, IN1, IN2 | 13 | 4 | 16 |
+| Trasera derecha | B · ENB, IN3, IN4 | 17 | 18 | 19 |
+| Luces | — | 23 | | |
+| Bocina (buzzer activo) | — | 5 | | |
+
+Si lo cablean distinto, los pines se cambian por el monitor serie sin cargar nada de nuevo, por ejemplo `RUEDA:DI:32,33,25`, `CFG:V23:23:0:1` o `SENSOR:21,34` para un sensor de distancia HC‑SR04 (su ECHO necesita un divisor de voltaje a 3,3 V). `PINES` muestra lo que está usando y `FABRICA` vuelve a los de la tabla. Todo está explicado al inicio de `carro_esp32.ino`.
+
+Para cargarlo de nuevo, esta placa **no entra sola en modo carga**: mantén presionado **BOOT** mientras dice «Connecting…».
+
+```powershell
+.\tool\cargar_esp32.ps1 -Version carro-0.1 -Puerto COM3
+```
+
 ## Cargar un programa nuevo en el ESP32
 
 Conecta el ESP32 por USB. En el Administrador de dispositivos aparece como **Silicon Labs CP210x (COM3)**.
@@ -127,7 +159,7 @@ El respaldo de Blynk no está en el proyecto porque contiene sus claves de Wi‑
 - El panel está hecho para esta maqueta. Si agregan piezas, hay que sumarlas al programa y a la app.
 - Los pines se cambian desde la app, pero **el tipo de cada control no**: una luz no se puede convertir en servo.
 - La fotorresistencia (LDR) y las luces exteriores están en la maqueta, pero no tienen pin asignado todavía.
-- El perfil Auto Robot funciona solo en modo demo. El carrito va después de la casa.
+- El carrito todavía no se ha probado con sus motores: primero con las ruedas en el aire.
 - Por Bluetooth se conecta un teléfono a la vez, y por Wi‑Fi otro. Pueden controlar la casa los dos a la vez.
 - La app usa Bluetooth LE. Un módulo **HC‑05** (Bluetooth clásico) todavía no es compatible.
 - Solo Android.

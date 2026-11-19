@@ -1,72 +1,148 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
-/// Colores con nombre de iOS: así la app se siente de la misma familia que el sistema de Apple.
-class C {
-  // Texto
-  static const label = Color(0xFF1C1C1E);
-  static const label2 = Color(0x993C3C43); // secundario (60 %)
-  static const label3 = Color(0x4D3C3C43); // terciario (30 %)
-  static const separator = Color(0x1F3C3C43);
+/// Colores de la app, en claro y en oscuro, al estilo Starlink:
+/// fondo negro (o casi blanco), superficies planas con un borde fino y un solo color fuerte: el texto.
+@immutable
+class Palette extends ThemeExtension<Palette> {
+  final Brightness brightness;
 
-  // Acentos del sistema
-  static const blue = Color(0xFF007AFF);
-  static const green = Color(0xFF34C759);
-  static const orange = Color(0xFFFF9500);
-  static const red = Color(0xFFFF3B30);
-  static const yellow = Color(0xFFFFCC00);
-  static const teal = Color(0xFF30B0C7);
+  /// Fondo de la pantalla.
+  final Color bg;
 
-  // Rellenos y vidrio sobre el fondo claro
-  static const fill = Color(0x1F787880);
-  static const glass = Color(0x73FFFFFF); // tarjeta apagada: deja ver el fondo
-  static const glassSolid = Color(0xEBFFFFFF); // tarjeta encendida o barra
-  static const glassEdge = Color(0xB3FFFFFF); // borde con brillo
+  /// Tarjetas.
+  final Color surface;
 
-  // Fondo «de pantalla»
-  static const skyTop = Color(0xFFE6EEF7);
-  static const sandBottom = Color(0xFFF3EEE9);
+  /// Controles y tarjetas dentro de tarjetas.
+  final Color surface2;
 
-  // Modo cabina (carro)
-  static const night = Color(0xFF0B1220);
-  static const nightGlass = Color(0x1AFFFFFF);
-  static const nightEdge = Color(0x24FFFFFF);
-  static const nightLabel2 = Color(0x99EBEBF5);
+  /// Borde fino de las tarjetas.
+  final Color line;
+
+  /// Borde de botones y separadores marcados.
+  final Color line2;
+
+  /// Texto principal, secundario y terciario.
+  final Color text, text2, text3;
+
+  /// Botón principal: blanco sobre negro (oscuro) o negro sobre blanco (claro).
+  final Color inverse, onInverse;
+
+  /// Estados.
+  final Color green, amber, red, blue;
+
+  /// Luz encendida: tono cálido.
+  final Color glow;
+
+  const Palette({
+    required this.brightness,
+    required this.bg,
+    required this.surface,
+    required this.surface2,
+    required this.line,
+    required this.line2,
+    required this.text,
+    required this.text2,
+    required this.text3,
+    required this.inverse,
+    required this.onInverse,
+    required this.green,
+    required this.amber,
+    required this.red,
+    required this.blue,
+    required this.glow,
+  });
+
+  bool get isDark => brightness == Brightness.dark;
+
+  static const dark = Palette(
+    brightness: Brightness.dark,
+    bg: Color(0xFF000000),
+    surface: Color(0xFF0C0D0F),
+    surface2: Color(0xFF15171A),
+    line: Color(0xFF1F2125),
+    line2: Color(0xFF30333A),
+    text: Color(0xFFF0F0FA),
+    text2: Color(0xFF9AA0A9),
+    text3: Color(0xFF5A5F67),
+    inverse: Color(0xFFF0F0FA),
+    onInverse: Color(0xFF000000),
+    green: Color(0xFF3DDC97),
+    amber: Color(0xFFF5B841),
+    red: Color(0xFFFF5A5F),
+    blue: Color(0xFF5AA2FF),
+    glow: Color(0xFFFFCF70),
+  );
+
+  static const light = Palette(
+    brightness: Brightness.light,
+    bg: Color(0xFFF3F3F4),
+    surface: Color(0xFFFFFFFF),
+    surface2: Color(0xFFF4F5F7),
+    line: Color(0xFFE3E4E8),
+    line2: Color(0xFFCDD0D6),
+    text: Color(0xFF0A0B0D),
+    text2: Color(0xFF5F646C),
+    text3: Color(0xFFA3A7AE),
+    inverse: Color(0xFF0A0B0D),
+    onInverse: Color(0xFFFFFFFF),
+    green: Color(0xFF119A4F),
+    amber: Color(0xFFB97F00),
+    red: Color(0xFFDB3439),
+    blue: Color(0xFF1F6FEB),
+    glow: Color(0xFFDB9600),
+  );
+
+  @override
+  Palette copyWith() => this;
+
+  @override
+  Palette lerp(Palette? other, double t) => t < 0.5 || other == null ? this : other;
 }
 
-/// Escala tipográfica de iOS con Inter. Los títulos grandes usan InterDisplay, más ajustada.
+extension PaletteOf on BuildContext {
+  /// Los colores del tema actual: `context.c.text`, `context.c.surface`...
+  Palette get c => Theme.of(this).extension<Palette>() ?? Palette.dark;
+}
+
+/// Letra D-DIN, de la familia DIN que usa SpaceX. Solo dos pesos: normal y negrita.
+/// Las etiquetas (eyebrow) y los botones van en MAYÚSCULAS espaciadas; los textos largos, normales.
 class T {
-  static const _display = 'InterDisplay';
+  static const family = 'DDIN';
+  static const _tab = [FontFeature.tabularFigures()];
 
-  static const largeTitle = TextStyle(fontFamily: _display, fontSize: 34, fontWeight: FontWeight.w700, letterSpacing: -0.9, height: 1.12, color: C.label);
-  static const title1 = TextStyle(fontFamily: _display, fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: -0.6, color: C.label);
-  static const title2 = TextStyle(fontFamily: _display, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -0.4, color: C.label);
-  static const title3 = TextStyle(fontSize: 20, fontWeight: FontWeight.w600, letterSpacing: -0.4, color: C.label);
-  static const headline = TextStyle(fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.4, color: C.label);
-  static const body = TextStyle(fontSize: 17, fontWeight: FontWeight.w400, letterSpacing: -0.4, color: C.label);
-  static const callout = TextStyle(fontSize: 16, fontWeight: FontWeight.w400, letterSpacing: -0.3, color: C.label);
-  static const subhead = TextStyle(fontSize: 15, fontWeight: FontWeight.w400, letterSpacing: -0.2, color: C.label);
-  static const footnote = TextStyle(fontSize: 13, fontWeight: FontWeight.w400, letterSpacing: -0.1, color: C.label2);
-  static const caption = TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: C.label2);
-  static const sectionHeader = TextStyle(fontSize: 13, fontWeight: FontWeight.w500, letterSpacing: 0.2, color: C.label2);
-  static const mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.45);
+  static const display = TextStyle(fontFamily: family, fontSize: 34, fontWeight: FontWeight.w700, letterSpacing: 0.3, height: 1.05);
+  static const title = TextStyle(fontFamily: family, fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: 0.3, height: 1.1);
+  static const heading = TextStyle(fontFamily: family, fontSize: 19, fontWeight: FontWeight.w700, letterSpacing: 0.3, height: 1.15);
+  static const body = TextStyle(fontFamily: family, fontSize: 16, fontWeight: FontWeight.w400, letterSpacing: 0.2, height: 1.35);
+  static const callout = TextStyle(fontFamily: family, fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.3, height: 1.2);
+  static const small = TextStyle(fontFamily: family, fontSize: 13.5, fontWeight: FontWeight.w400, letterSpacing: 0.2, height: 1.35);
+
+  /// Etiqueta pequeña en mayúsculas: «CONEXIÓN», «SALA», «2 DE 6».
+  static const eyebrow = TextStyle(fontFamily: family, fontSize: 11.5, fontWeight: FontWeight.w700, letterSpacing: 1.8, height: 1.2);
+
+  /// Texto de los botones, en mayúsculas.
+  static const button = TextStyle(fontFamily: family, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5, height: 1);
+
+  /// Números grandes de los resúmenes.
+  static const stat = TextStyle(fontFamily: family, fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: 0.2, height: 1, fontFeatures: _tab);
+
+  static const mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.5);
 }
 
-/// Radios de las esquinas continuas (squircle), como en iOS.
+/// Radios de las esquinas.
 class R {
-  static const tile = 22.0;
-  static const card = 26.0;
-  static const control = 14.0;
-  static const sheet = 30.0;
+  static const card = 16.0;
+  static const tile = 14.0;
+  static const control = 12.0;
+  static const sheet = 22.0;
 }
 
-ShapeBorder squircle(double radius, {BorderSide side = BorderSide.none}) =>
-    RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(radius), side: side);
-
-/// Perilla del deslizador como la de iOS: círculo blanco con borde fino y sombra suave.
-class IosThumbShape extends SliderComponentShape {
-  const IosThumbShape();
-  static const _r = 13.0;
+/// Perilla del deslizador: un círculo pequeño del color del texto.
+class _Thumb extends SliderComponentShape {
+  final Color color, ring;
+  const _Thumb(this.color, this.ring);
+  static const _r = 9.0;
 
   @override
   Size getPreferredSize(bool isEnabled, bool isDiscrete) => const Size.fromRadius(_r);
@@ -84,86 +160,76 @@ class IosThumbShape extends SliderComponentShape {
       required double textScaleFactor,
       required Size sizeWithOverflow}) {
     final canvas = context.canvas;
-    canvas.drawCircle(center + const Offset(0, 1.5), _r, Paint()
-      ..color = const Color(0x24000000)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
-    canvas.drawCircle(center, _r, Paint()..color = Colors.white);
-    canvas.drawCircle(center, _r, Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5
-      ..color = const Color(0x1F000000));
+    final grow = 1 + 0.25 * activationAnimation.value;
+    canvas.drawCircle(center, _r * grow + 3, Paint()..color = ring);
+    canvas.drawCircle(center, _r * grow, Paint()..color = enableAnimation.value < 1 ? ring : color);
   }
 }
 
-ThemeData buildTheme() {
+ThemeData buildTheme(Brightness brightness) {
+  final p = brightness == Brightness.dark ? Palette.dark : Palette.light;
   final base = ThemeData(
     useMaterial3: true,
-    fontFamily: 'Inter',
-    colorScheme: ColorScheme.fromSeed(seedColor: C.blue, brightness: Brightness.light, primary: C.blue, surface: C.skyTop),
-    scaffoldBackgroundColor: C.skyTop,
-    // iOS no tiene «ondas» al tocar: solo un leve oscurecimiento.
+    brightness: brightness,
+    fontFamily: T.family,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: p.blue,
+      brightness: brightness,
+      primary: p.inverse,
+      onPrimary: p.onInverse,
+      surface: p.surface,
+      onSurface: p.text,
+    ),
+    scaffoldBackgroundColor: p.bg,
+    canvasColor: p.bg,
     splashFactory: NoSplash.splashFactory,
-    highlightColor: const Color(0x0A000000),
-    // Transiciones de pantalla deslizando desde la derecha, como en el iPhone.
+    highlightColor: p.text.withValues(alpha: 0.04),
+    hoverColor: Colors.transparent,
+    dividerColor: p.line,
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
-      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
       TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
     }),
+    extensions: [p],
   );
-  final controlShape = WidgetStatePropertyAll<OutlinedBorder>(RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(R.control)));
 
   return base.copyWith(
-    textTheme: base.textTheme.apply(fontFamily: 'Inter', bodyColor: C.label, displayColor: C.label),
-    textSelectionTheme: const TextSelectionThemeData(cursorColor: C.blue, selectionHandleColor: C.blue),
-    inputDecorationTheme: const InputDecorationTheme(
+    textTheme: base.textTheme.apply(fontFamily: T.family, bodyColor: p.text, displayColor: p.text),
+    textSelectionTheme: TextSelectionThemeData(cursorColor: p.text, selectionColor: p.text.withValues(alpha: 0.2), selectionHandleColor: p.text),
+    inputDecorationTheme: InputDecorationTheme(
       border: InputBorder.none,
       isDense: true,
-      contentPadding: EdgeInsets.symmetric(vertical: 14),
-      hintStyle: TextStyle(color: C.label3),
+      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+      hintStyle: T.body.copyWith(color: p.text3),
     ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: ButtonStyle(
-        backgroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? C.fill : C.blue),
-        foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? C.label3 : Colors.white),
-        minimumSize: const WidgetStatePropertyAll(Size(0, 50)),
-        shape: controlShape,
-        elevation: const WidgetStatePropertyAll(0),
-        textStyle: const WidgetStatePropertyAll(TextStyle(fontFamily: 'Inter', fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.4)),
-      ),
-    ),
-    textButtonTheme: TextButtonThemeData(
-      style: ButtonStyle(
-        foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? C.label3 : C.blue),
-        shape: controlShape,
-        textStyle: const WidgetStatePropertyAll(TextStyle(fontFamily: 'Inter', fontSize: 17, fontWeight: FontWeight.w500, letterSpacing: -0.4)),
-      ),
-    ),
+    iconTheme: IconThemeData(color: p.text, size: 22),
     popupMenuTheme: PopupMenuThemeData(
-      color: C.glassSolid,
-      elevation: 12,
-      shadowColor: const Color(0x401B2A3A),
+      color: p.surface2,
+      elevation: 0,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(R.control)),
-      textStyle: T.body,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(R.control), side: BorderSide(color: p.line2)),
+      textStyle: T.body.copyWith(color: p.text),
     ),
-    sliderTheme: const SliderThemeData(
-      trackHeight: 6,
-      activeTrackColor: C.blue,
-      inactiveTrackColor: Color(0x29787880),
-      thumbColor: Colors.white,
-      overlayShape: RoundSliderOverlayShape(overlayRadius: 0),
-      thumbShape: IosThumbShape(),
-      trackShape: RoundedRectSliderTrackShape(),
-      disabledThumbColor: Color(0xFFF2F2F7),
-      disabledActiveTrackColor: Color(0x33787880),
-      disabledInactiveTrackColor: Color(0x1F787880),
+    sliderTheme: SliderThemeData(
+      trackHeight: 3,
+      activeTrackColor: p.text,
+      inactiveTrackColor: p.line2,
+      thumbShape: _Thumb(p.text, p.surface),
+      overlayShape: SliderComponentShape.noOverlay,
+      trackShape: const RoundedRectSliderTrackShape(),
+      disabledActiveTrackColor: p.text3,
+      disabledInactiveTrackColor: p.line,
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: const Color(0xE61C1C1E),
-      contentTextStyle: T.subhead.copyWith(color: Colors.white),
-      shape: RoundedSuperellipseBorder(borderRadius: BorderRadius.circular(R.control)),
+      backgroundColor: p.inverse,
+      contentTextStyle: T.small.copyWith(color: p.onInverse),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(R.control)),
     ),
-    progressIndicatorTheme: const ProgressIndicatorThemeData(color: C.label2, strokeWidth: 2),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: p.text, linearTrackColor: p.line, strokeWidth: 2),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(color: p.inverse, borderRadius: BorderRadius.circular(8)),
+      textStyle: T.small.copyWith(color: p.onInverse),
+    ),
   );
 }

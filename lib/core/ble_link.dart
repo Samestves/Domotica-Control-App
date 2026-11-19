@@ -12,7 +12,7 @@ class BleUuids {
   static const nus = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
   static const nusRx = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // la app escribe aquí
   static const nusTx = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // la placa notifica aquí
-  // Módulos HM‑10 (para Arduino Uno): un solo canal para leer y escribir.
+  // Módulos HM-10 (para Arduino Uno): un solo canal para leer y escribir.
   static const hm10 = '0000ffe0-0000-1000-8000-00805f9b34fb';
   static const hm10Char = '0000ffe1-0000-1000-8000-00805f9b34fb';
 }
@@ -47,7 +47,7 @@ class BleLink extends DeviceLink {
       final dev = BluetoothDevice.fromId(remoteId);
       _dev = dev;
       // Proyecto educativo: licencia sin fines de lucro. Para venderla haría falta la licencia comercial.
-      await dev.connect(license: License.nonprofit, timeout: const Duration(seconds: 12));
+      await dev.connect(license: License.nonprofit, timeout: const Duration(seconds: 10));
 
       final services = await dev.discoverServices();
       BluetoothCharacteristic? rx;
@@ -85,6 +85,7 @@ class BleLink extends DeviceLink {
       await sendLine('PING');
     } catch (e) {
       await _cleanup();
+      if (_closing) return setState(LinkState.disconnected); // el usuario canceló
       setState(LinkState.error, e is String ? e : 'No se pudo conectar por Bluetooth: $e');
     }
   }

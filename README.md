@@ -10,6 +10,7 @@ App Android (Flutter) para controlar varias placas ESP32 o Arduino a la vez, por
 |---|---|
 | `lib/` | La app |
 | `firmware/casa_esp32/` | El programa para el ESP32 de la maqueta |
+| `firmware/carro_esp32/` | El programa para el ESP32 del carrito 4x4 (dos L298N, sin librerías extra) |
 | `firmware/versiones/` | Programas ya compilados y probados, listos para volver a cargar |
 | `tool/placa_falsa.dart` | Una placa simulada en la PC para probar el Wi‑Fi sin hardware |
 | `tool/cargar_esp32.ps1` | Carga una versión guardada en el ESP32, o le devuelve su Blynk |

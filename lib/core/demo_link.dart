@@ -14,6 +14,7 @@ class DemoLink extends DeviceLink {
   Timer? _carTimer;
   final _rnd = Random();
   int _speed = 0;
+  String _invert = '0000';
 
   /// En la demo la alarma espera menos que en la placa real, para no aburrir al mostrarla.
   DemoLink(this.profile, {this.casaGrace = const Duration(seconds: 8)});
@@ -56,7 +57,16 @@ class DemoLink extends DeviceLink {
     final m = Msg.parse(line);
     if (m.kind == 'PING') return emitLine('PONG');
     if (m.kind == 'CFG') return emitLine('OK:${m.value}');
-    if (m.kind == 'AUTH') return emitLine('ERR:no entiendo ${m.raw}'); // el carrito no usa clave
+    if (m.kind == 'AUTH') return emitLine('ERR:AUTH no se usa en el carrito'); // igual que la placa real
+    if (m.kind == 'SYNC') {
+      emitLine('V${CarPins.turret}:0'); // el carro demo tiene torreta
+      return emitLine('V${CarPins.invert}:$_invert');
+    }
+    if (m.kind == 'TEST') return emitLine('OK:PRUEBA cada rueda debe girar hacia ADELANTE');
+    if (m.pin == CarPins.invert && RegExp(r'^[01]{4}$').hasMatch(m.value)) {
+      _invert = m.value;
+      return emitLine('V${CarPins.invert}:$_invert');
+    }
     if (m.pin == CarPins.joystick) {
       final p = m.value.split(',');
       _speed = p.length == 2 ? (int.tryParse(p[1]) ?? 0).abs() : 0;

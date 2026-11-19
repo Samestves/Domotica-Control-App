@@ -2,151 +2,113 @@ import 'package:flutter/material.dart';
 
 import '../../core/link.dart';
 import '../../models/device.dart';
+import '../../state/app_state.dart';
 import '../theme.dart';
+import 'kit.dart';
 
-Color stateColor(LinkState s) => switch (s) {
-      LinkState.connected => C.green,
-      LinkState.connecting => C.orange,
-      LinkState.error => C.red,
-      LinkState.disconnected => const Color(0xFFAEAEB2),
-    };
+/// En qué está la conexión de una placa, tal como se le muestra al usuario.
+enum Conn { connected, needsClave, connecting, reconnecting, failed, off }
 
-String stateLabel(LinkState s) => switch (s) {
-      LinkState.connected => 'Conectado',
-      LinkState.connecting => 'Conectando…',
-      LinkState.error => 'Sin conexión',
-      LinkState.disconnected => 'Desconectado',
-    };
-
-/// Punto de color con un halo suave; late despacio mientras conecta.
-class StatusDot extends StatefulWidget {
-  final LinkState state;
-  final double size;
-
-  /// Color en vez del del estado (por ejemplo, naranja cuando falta la clave).
-  final Color? color;
-  const StatusDot(this.state, {super.key, this.size = 8, this.color});
-
-  @override
-  State<StatusDot> createState() => _StatusDotState();
+Conn connOf(Session s) {
+  if (s.needsClave) return Conn.needsClave;
+  if (s.connected) return Conn.connected;
+  if (s.reconnecting) return Conn.reconnecting;
+  if (s.state == LinkState.connecting) return Conn.connecting;
+  if (s.state == LinkState.error) return Conn.failed;
+  return Conn.off;
 }
 
-class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMixin {
-  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+Color connColor(Palette c, Conn k) => switch (k) {
+      Conn.connected => c.green,
+      Conn.needsClave || Conn.connecting || Conn.reconnecting => c.amber,
+      Conn.failed => c.red,
+      Conn.off => c.text3,
+    };
 
-  @override
-  void didUpdateWidget(StatusDot old) {
-    super.didUpdateWidget(old);
-    _sync();
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _sync();
-  }
-
-  void _sync() {
-    if (widget.state == LinkState.connecting) {
-      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
-    } else {
-      _pulse.stop();
-      _pulse.value = 1;
-    }
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.color ?? stateColor(widget.state);
-    return FadeTransition(
-      opacity: Tween(begin: 0.35, end: 1.0).animate(_pulse),
-      child: Container(
-        width: widget.size,
-        height: widget.size,
-        decoration: BoxDecoration(
-          color: c,
-          shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: c.withValues(alpha: 0.35), blurRadius: widget.size, spreadRadius: 1)],
-        ),
-      ),
-    );
-  }
-}
+String connLabel(Conn k) => switch (k) {
+      Conn.connected => 'Conectado',
+      Conn.needsClave => 'Falta la clave',
+      Conn.connecting => 'Conectando',
+      Conn.reconnecting => 'Reconectando',
+      Conn.failed => 'Sin conexión',
+      Conn.off => 'Desconectado',
+    };
 
 IconData profileIcon(Profile p) => switch (p) {
-      Profile.casa => Icons.home_rounded,
-      Profile.carro => Icons.directions_car_filled_rounded,
-    };
-
-/// Degradado del icono de cada perfil.
-List<Color> profileColors(Profile p) => switch (p) {
-      Profile.casa => const [Color(0xFF4CD9A0), Color(0xFF16A37A)],
-      Profile.carro => const [Color(0xFF5AB0FF), Color(0xFF1E6FF0)],
+      Profile.casa => Ic.house,
+      Profile.carro => Ic.car,
     };
 
 IconData transportIcon(Transport t) => switch (t) {
-      Transport.ble => Icons.bluetooth_rounded,
-      Transport.wifi => Icons.wifi_rounded,
-      Transport.demo => Icons.auto_awesome_rounded,
+      Transport.ble => Ic.bluetooth,
+      Transport.wifi => Ic.wifi,
+      Transport.demo => Ic.demo,
     };
 
-/// Icono del perfil dentro de un cuadrado de esquinas continuas con degradado.
-class ProfileBadge extends StatelessWidget {
-  final Profile profile;
-  final double size;
-  const ProfileBadge(this.profile, {super.key, this.size = 52});
+/// «● CONECTADO»: el estado en mayúsculas con su punto de color.
+class ConnectionTag extends StatelessWidget {
+  final Session session;
+  const ConnectionTag({super.key, required this.session});
 
   @override
   Widget build(BuildContext context) {
-    final colors = profileColors(profile);
-    return Container(
-      width: size,
-      height: size,
-      decoration: ShapeDecoration(
-        shape: squircle(size * 0.3),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: colors),
-        shadows: [BoxShadow(color: colors.last.withValues(alpha: 0.3), blurRadius: 14, offset: const Offset(0, 6))],
-      ),
-      child: Icon(profileIcon(profile), color: Colors.white, size: size * 0.52),
-    );
+    final k = connOf(session);
+    final color = connColor(context.c, k);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      StatusDot(color: color, pulse: k == Conn.connecting || k == Conn.reconnecting),
+      const SizedBox(width: 9),
+      Flexible(child: Eyebrow(connLabel(k), color: color)),
+    ]);
   }
 }
 
-/// «● Conectado · Bluetooth»: estado de una placa en una sola línea.
-class ConnectionLine extends StatelessWidget {
-  final LinkState state;
-  final Transport transport;
-  final bool retrying;
-  final bool needsClave;
-  final Color? textColor;
-  const ConnectionLine({super.key, required this.state, required this.transport, this.retrying = false, this.needsClave = false, this.textColor});
+/// Una línea que explica el estado cuando hace falta: el error, o en qué intento va.
+String? connDetail(Session s) => switch (connOf(s)) {
+      Conn.reconnecting => 'Intento ${s.attempt} de ${s.maxAttempts}',
+      Conn.failed => s.error,
+      Conn.needsClave => s.claveMessage,
+      _ => null,
+    };
+
+/// El botón que corresponde al estado: siempre hay uno, para no quedar atrapado «conectando».
+class ConnectionAction extends StatelessWidget {
+  final Session session;
+  final bool small;
+  const ConnectionAction({super.key, required this.session, this.small = true});
 
   @override
   Widget build(BuildContext context) {
-    final label = retrying ? 'Reconectando…' : (needsClave ? 'Falta la clave' : stateLabel(state));
-    final color = textColor ?? C.label2;
-    // Un solo texto con el icono dentro: si no cabe, se corta con «…» en vez de desbordarse.
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      StatusDot(retrying ? LinkState.connecting : state, size: 7, color: needsClave ? C.orange : null),
-      const SizedBox(width: 7),
-      Flexible(
-        child: Text.rich(
-          TextSpan(style: T.footnote.copyWith(color: color), children: [
-            TextSpan(text: label, style: const TextStyle(fontWeight: FontWeight.w500)),
-            TextSpan(text: '  ·  ', style: TextStyle(color: color.withValues(alpha: 0.5))),
-            WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(transportIcon(transport), size: 13, color: color)),
-            TextSpan(text: ' ${transport.label}'),
-          ]),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+    final s = session;
+    return switch (connOf(s)) {
+      Conn.connected || Conn.needsClave => PillButton('Desconectar', kind: PillKind.secondary, small: small, onTap: s.disconnect),
+      Conn.connecting || Conn.reconnecting => PillButton('Cancelar', kind: PillKind.secondary, small: small, onTap: s.disconnect),
+      Conn.failed => PillButton('Reintentar', small: small, onTap: s.connect),
+      Conn.off => PillButton('Conectar', small: small, onTap: s.connect),
+    };
+  }
+}
+
+/// Estado y botón juntos, con la explicación debajo. Va bajo el título de cada panel.
+class ConnectionBar extends StatelessWidget {
+  final Session session;
+  const ConnectionBar({super.key, required this.session});
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = connDetail(session);
+    final k = connOf(session);
+    return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          ConnectionTag(session: session),
+          if (detail != null) ...[
+            const SizedBox(height: 5),
+            Text(detail, style: T.small.copyWith(color: k == Conn.failed ? context.c.red : context.c.text2), maxLines: 3),
+          ],
+        ]),
       ),
+      const SizedBox(width: 12),
+      ConnectionAction(session: session),
     ]);
   }
 }

@@ -133,10 +133,10 @@ class _Clause {
   _Act? _readAct() {
     if (has(const ['mitad', 'medio', 'media'])) return _Act.half;
     if (percent != null) return _Act.set;
-    if (has(const ['apaga', 'apagar', 'apague', 'apaguen'])) return _Act.off;
-    if (has(const ['enciende', 'encender', 'encienda', 'enciendan', 'prende', 'prender', 'prenda', 'prendan', 'ilumina'])) return _Act.on;
-    if (has(const ['cierra', 'cerrar', 'cierre', 'cierren', 'baja', 'bajar', 'baje', 'bajen'])) return _Act.close;
-    if (has(const ['abre', 'abrir', 'abra', 'abran', 'sube', 'subir', 'suba', 'suban', 'levanta'])) return _Act.open;
+    if (has(const ['apaga', 'apagar', 'apague', 'apaguen', 'apago', 'apagas'])) return _Act.off;
+    if (has(const ['enciende', 'encender', 'encienda', 'enciendan', 'enciendo', 'enciendes', 'prende', 'prender', 'prenda', 'prendan', 'prendo', 'prendes', 'ilumina'])) return _Act.on;
+    if (has(const ['cierra', 'cerrar', 'cierre', 'cierren', 'cierro', 'cierras', 'baja', 'bajar', 'baje', 'bajen', 'bajo'])) return _Act.close;
+    if (has(const ['abre', 'abrir', 'abra', 'abran', 'abro', 'abres', 'sube', 'subir', 'suba', 'suban', 'subo', 'levanta'])) return _Act.open;
     return null;
   }
 

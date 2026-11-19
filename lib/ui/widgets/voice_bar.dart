@@ -1,13 +1,15 @@
-import 'package:flutter/cupertino.dart';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../state/app_state.dart';
 import '../../voice/voice_controller.dart';
 import '../theme.dart';
+import 'kit.dart';
 
 /// Barra inferior para dar órdenes por voz: el micrófono y el resultado.
-/// Verde = la placa confirmó · rojo = no respondió · naranja = no se entendió la frase.
+/// Verde = la placa confirmó · rojo = no respondió · ámbar = no se entendió la frase.
 class VoiceBar extends StatelessWidget {
   final Session session;
   final VoiceController voice;
@@ -19,9 +21,10 @@ class VoiceBar extends StatelessWidget {
       listenable: voice,
       builder: (context, _) => Row(children: [
         Expanded(child: _Status(voice: voice, connected: session.connected)),
-        const SizedBox(width: 12),
+        const SizedBox(width: 14),
         _MicButton(
           listening: voice.listening,
+          enabled: session.connected || voice.listening,
           onTap: () {
             HapticFeedback.mediumImpact();
             voice.toggle(session);
@@ -39,30 +42,38 @@ class _Status extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (IconData? icon, Color color, String title, String? detail) = switch (voice.status) {
-      VoiceStatus.idle => (null, C.label2, connected ? 'Toca el micrófono y habla' : 'Conecta la casa para usar la voz', connected ? '«Abre la puerta principal»' : null),
-      VoiceStatus.starting => (null, C.label2, 'Abriendo el micrófono…', 'Espera un momento'),
-      VoiceStatus.listening => (null, C.red, 'Escuchando… habla ahora', voice.heard.isEmpty ? '«Abre la puerta principal»' : '«${voice.heard}»'),
-      VoiceStatus.working => (null, C.blue, 'Enviando…', '«${voice.heard}»'),
-      VoiceStatus.done => (Icons.check_circle_rounded, C.green, voice.message, '«${voice.heard}»'),
-      VoiceStatus.failed => (Icons.error_rounded, C.red, voice.message, voice.heard.isEmpty ? null : '«${voice.heard}»'),
-      VoiceStatus.unclear => (Icons.help_rounded, C.orange, voice.message, voice.heard.isEmpty ? null : 'Escuché: «${voice.heard}»'),
+    final c = context.c;
+    final heard = voice.heard.isEmpty ? null : '«${voice.heard}»';
+    final (IconData? icon, Color color, String label, String? detail) = switch (voice.status) {
+      VoiceStatus.idle => (null, c.text2, connected ? 'Toca y habla' : 'Conecta la casa para usar la voz', connected ? '«Enciende la luz de la cocina»' : null),
+      VoiceStatus.starting => (null, c.text2, 'Abriendo el micrófono', 'Un momento…'),
+      VoiceStatus.listening => (null, c.red, 'Escuchando', heard ?? 'Habla ahora'),
+      VoiceStatus.working => (null, c.text, 'Enviando', heard),
+      VoiceStatus.done => (Ic.checkCircle, c.green, voice.message, heard),
+      VoiceStatus.failed => (Ic.warning, c.red, voice.message, heard),
+      VoiceStatus.unclear => (Ic.warning, c.amber, voice.message, heard == null ? null : 'Escuché: $heard'),
     };
-    final tinted = !const [VoiceStatus.idle, VoiceStatus.starting, VoiceStatus.listening].contains(voice.status);
+    final result = const [VoiceStatus.done, VoiceStatus.failed, VoiceStatus.unclear].contains(voice.status);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      decoration: ShapeDecoration(shape: squircle(16), color: tinted ? color.withValues(alpha: 0.12) : Colors.transparent),
-      child: Row(children: [
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: Row(key: ValueKey('${voice.status}${voice.message}'), children: [
+        if (voice.status == VoiceStatus.listening) ...[_Wave(level: voice.level), const SizedBox(width: 12)],
         if (voice.status == VoiceStatus.working)
-          const Padding(padding: EdgeInsets.only(right: 10), child: CupertinoActivityIndicator(radius: 9))
-        else if (icon != null)
-          Padding(padding: const EdgeInsets.only(right: 10), child: Icon(icon, color: color, size: 24)),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 1.6, color: c.text)),
+          ),
+        if (icon != null) ...[Icon(icon, color: color, size: 24), const SizedBox(width: 12)],
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text(title, style: T.subhead.copyWith(color: tinted ? color : C.label, fontWeight: FontWeight.w600), maxLines: 2, overflow: TextOverflow.ellipsis),
-            if (detail != null) Text(detail, style: T.footnote, maxLines: 1, overflow: TextOverflow.ellipsis),
+            result
+                ? Text(label, style: T.callout.copyWith(color: color), maxLines: 3)
+                : Eyebrow(label, color: color),
+            if (detail != null) ...[
+              const SizedBox(height: 4),
+              Text(detail, style: T.small.copyWith(color: c.text2), maxLines: 2),
+            ],
           ]),
         ),
       ]),
@@ -70,23 +81,60 @@ class _Status extends StatelessWidget {
   }
 }
 
-/// Botón redondo del micrófono. Rojo y latiendo mientras escucha.
+/// Barras que suben y bajan con el volumen de la voz mientras escucha.
+class _Wave extends StatefulWidget {
+  final double level;
+  const _Wave({required this.level});
+
+  @override
+  State<_Wave> createState() => _WaveState();
+}
+
+class _WaveState extends State<_Wave> with SingleTickerProviderStateMixin {
+  late final _a = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat();
+
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.c.red;
+    return AnimatedBuilder(
+      animation: _a,
+      builder: (_, _) => Row(mainAxisSize: MainAxisSize.min, children: [
+        for (var i = 0; i < 4; i++)
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 1.5),
+            width: 3,
+            height: 5 + 17 * (0.15 + 0.85 * widget.level) * (0.55 + 0.45 * sin(_a.value * 2 * pi + i * 1.3)).abs(),
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+          ),
+      ]),
+    );
+  }
+}
+
+/// Botón redondo del micrófono. Rojo y con un anillo que late mientras escucha.
 class _MicButton extends StatefulWidget {
   final bool listening;
+  final bool enabled;
   final VoidCallback onTap;
-  const _MicButton({required this.listening, required this.onTap});
+  const _MicButton({required this.listening, required this.enabled, required this.onTap});
 
   @override
   State<_MicButton> createState() => _MicButtonState();
 }
 
 class _MicButtonState extends State<_MicButton> with SingleTickerProviderStateMixin {
-  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
 
   @override
   void didUpdateWidget(_MicButton old) {
     super.didUpdateWidget(old);
-    if (widget.listening && !_pulse.isAnimating) _pulse.repeat(reverse: true);
+    if (widget.listening && !_pulse.isAnimating) _pulse.repeat();
     if (!widget.listening) _pulse.stop();
   }
 
@@ -98,31 +146,34 @@ class _MicButtonState extends State<_MicButton> with SingleTickerProviderStateMi
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.listening ? C.red : C.blue;
+    final c = context.c;
+    final bg = widget.listening ? c.red : c.inverse;
+    final fg = widget.listening ? Colors.white : c.onInverse;
     return Semantics(
       button: true,
       label: widget.listening ? 'Dejar de escuchar' : 'Dar una orden por voz',
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedBuilder(
-          animation: _pulse,
-          builder: (context, child) => Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.35),
-                  blurRadius: 12 + (widget.listening ? _pulse.value * 14 : 0),
-                  spreadRadius: widget.listening ? _pulse.value * 4 : 0,
-                ),
-              ],
+      child: Tap(
+        onTap: widget.enabled ? widget.onTap : null,
+        scale: 0.92,
+        child: Opacity(
+          opacity: widget.enabled ? 1 : 0.4,
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, child) => Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: widget.listening ? Border.all(color: c.red.withValues(alpha: 1 - _pulse.value), width: 1 + 6 * _pulse.value) : null,
+              ),
+              padding: const EdgeInsets.all(3),
+              child: child,
             ),
-            child: child,
+            child: Container(
+              decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
+              child: Icon(widget.listening ? Ic.stop : Ic.micFill, color: fg, size: 24),
+            ),
           ),
-          child: Icon(widget.listening ? Icons.stop_rounded : Icons.mic_rounded, color: Colors.white, size: 28),
         ),
       ),
     );

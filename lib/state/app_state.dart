@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -56,11 +57,20 @@ class Session extends ChangeNotifier {
   /// Se llama cuando cambia algo del dispositivo que hay que guardar (por ejemplo, la clave).
   final void Function()? onDeviceChanged;
 
-  /// Esperas entre reintentos cuando la conexión se cae sola.
-  static const retryDelays = [Duration(seconds: 2), Duration(seconds: 4), Duration(seconds: 8), Duration(seconds: 15)];
+  /// Esperas entre reintentos cuando la conexión se cae sola. Después del último, queda «Sin conexión».
+  static const retryDelays = [Duration(seconds: 2), Duration(seconds: 5), Duration(seconds: 10)];
   bool _wantConnected = false;
   int _retries = 0;
   Timer? _retryTimer;
+
+  /// Latido: mientras está conectada, la app pregunta PING cada [heartbeat].
+  /// Si la placa no dice nada en [silenceLimit] (se apagó, se alejó), la conexión se da por caída.
+  static const heartbeat = Duration(seconds: 3);
+  static const silenceLimit = Duration(seconds: 7);
+  Timer? _heartbeatTimer;
+
+  /// Latidos seguidos sin que la placa diga nada.
+  int _silentBeats = 0;
 
   /// Si la placa no contesta a la clave en este tiempo, es una placa sin clave (por ejemplo, el carrito).
   static const claveTimeout = Duration(milliseconds: 2500);
@@ -79,7 +89,7 @@ class Session extends ChangeNotifier {
 
   static DeviceLink _defaultLink(SavedDevice d) => switch (d.transport) {
         Transport.ble => BleLink(d.address),
-        Transport.wifi => WifiLink(d.address, d.port),
+        Transport.wifi => WifiLink(d.address, d.port, ssid: d.ssid, password: d.wifiPass),
         Transport.demo => DemoLink(d.profile.name),
       };
 
@@ -103,6 +113,16 @@ class Session extends ChangeNotifier {
   /// true mientras la app espera para reintentar una conexión caída.
   bool get retrying => _retryTimer?.isActive ?? false;
 
+  /// true desde que la conexión se cayó sola hasta que vuelve o se acaban los intentos.
+  bool get reconnecting => _wantConnected && _retries > 0 && (retrying || state == LinkState.connecting);
+
+  /// Intento de reconexión en curso (1, 2, 3) y cuántos hay.
+  int get attempt => _retries;
+  int get maxAttempts => retryDelays.length;
+
+  /// Algo está en marcha (conectando o esperando para reintentar): se puede cancelar.
+  bool get busy => retrying || state == LinkState.connecting;
+
   /// Conecta porque el usuario lo pidió. Si después se cae, la app reintenta sola.
   Future<void> connect() async {
     _wantConnected = true;
@@ -111,12 +131,33 @@ class Session extends ChangeNotifier {
     await _open();
   }
 
-  /// Desconecta porque el usuario lo pidió: no se reintenta.
+  /// Desconecta (o cancela un intento) porque el usuario lo pidió: no se reintenta.
   Future<void> disconnect() async {
     _wantConnected = false;
+    _retries = 0;
     _retryTimer?.cancel();
+    _stopHeartbeat();
     await _link?.disconnect();
     notifyListeners();
+  }
+
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _silentBeats = 0;
+    _heartbeatTimer = Timer.periodic(heartbeat, (_) {
+      if (!linked) return;
+      if (++_silentBeats * heartbeat.inMilliseconds > silenceLimit.inMilliseconds) {
+        _stopHeartbeat();
+        _link?.fail('La placa dejó de responder. ¿Se apagó o está lejos?');
+        return;
+      }
+      _link?.sendLine('PING'); // sin anotarlo en los mensajes: es solo el latido
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
   }
 
   Future<void> _open() async {
@@ -129,15 +170,25 @@ class Session extends ChangeNotifier {
     _subs.add(link.lines.listen(_onLine));
     notifyListeners();
     await link.connect();
+    if (_link != link) return; // se canceló o se reemplazó mientras conectaba
+    if (!_wantConnected && linked) {
+      await link.disconnect(); // el usuario canceló mientras conectaba
+      return;
+    }
     if (linked) {
       _retries = 0;
+      _startHeartbeat();
       _sendClave('AUTH', device.clave ?? '');
     }
     notifyListeners();
   }
 
   void _onState(LinkState s) {
-    if (s != LinkState.connected) _resetClave();
+    if (s != LinkState.connected) {
+      _resetClave();
+      _stopHeartbeat();
+      _clearPending();
+    }
     if (s == LinkState.error && _wantConnected && _retries < retryDelays.length) {
       _retryTimer?.cancel();
       _retryTimer = Timer(retryDelays[_retries++], _open);
@@ -256,6 +307,8 @@ class Session extends ChangeNotifier {
   }
 
   void _onLine(String line) {
+    _silentBeats = 0;
+    if (line == 'PONG') return; // respuesta al latido: no hace falta mostrarla
     _addLog(true, line);
     final m = Msg.parse(line);
     if (!_messages.isClosed) _messages.add(m);
@@ -265,6 +318,7 @@ class Session extends ChangeNotifier {
       _ready(); // una versión anterior del programa no conoce la clave
     } else if (m.isPin) {
       values[m.pin!] = m.value;
+      _confirmed(m.pin!);
       if (device.profile == Profile.casa && m.pin == CasaPins.siren && m.value == '1') {
         lastAlert = 'Alarma sonando en ${device.name}';
       }
@@ -278,12 +332,56 @@ class Session extends ChangeNotifier {
   }
 
   /// Envía un valor a un pin virtual y lo recuerda para mostrarlo en el panel.
-  void send(int pin, Object value, {bool remember = true, bool quiet = false}) {
+  /// Con [confirm], el control queda «enviando» hasta que la placa responda con ese pin.
+  void send(int pin, Object value, {bool remember = true, bool quiet = false, bool confirm = false}) {
     final line = pinMsg(pin, value);
     if (remember) values[pin] = value.toString();
     if (!quiet) _addLog(false, line);
+    if (confirm) expect([pin]);
     _link?.sendLine(line);
     notifyListeners();
+  }
+
+  // ---------- Confirmación de la placa ----------
+
+  /// Pines enviados que todavía esperan respuesta de la placa.
+  final Set<int> pending = {};
+
+  /// Pines que la placa no confirmó a tiempo (se muestran con un aviso unos segundos).
+  final Set<int> unconfirmed = {};
+  final _pendingTimers = <int, Timer>{};
+  static const confirmTimeout = Duration(milliseconds: 2500);
+
+  /// Marca estos pines como «esperando a la placa». Se limpian al llegar su respuesta.
+  void expect(Iterable<int> pins) {
+    if (!connected) return;
+    for (final p in pins) {
+      _pendingTimers[p]?.cancel();
+      pending.add(p);
+      unconfirmed.remove(p);
+      _pendingTimers[p] = Timer(confirmTimeout, () {
+        if (!pending.remove(p)) return;
+        unconfirmed.add(p);
+        notifyListeners();
+        _pendingTimers[p] = Timer(const Duration(seconds: 3), () {
+          if (unconfirmed.remove(p)) notifyListeners();
+        });
+      });
+    }
+    notifyListeners();
+  }
+
+  void _confirmed(int pin) {
+    if (pending.remove(pin) | unconfirmed.remove(pin)) _pendingTimers.remove(pin)?.cancel();
+  }
+
+  void _clearPending() {
+    for (final t in _pendingTimers.values) {
+      t.cancel();
+    }
+    _pendingTimers.clear();
+    pending.clear();
+    unconfirmed.clear();
   }
 
   void sendRaw(String line) {
@@ -310,6 +408,8 @@ class Session extends ChangeNotifier {
   void dispose() {
     _wantConnected = false;
     _retryTimer?.cancel();
+    _stopHeartbeat();
+    _clearPending();
     _claveTimer?.cancel();
     _messages.close();
     _teardown();
@@ -342,10 +442,24 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_showPinsKey, v);
   }
 
+  static const _themeKey = 'ui_theme';
+
+  /// Claro, oscuro o el del sistema. Aparte del resto del estado, para no redibujar toda la app con cada mensaje.
+  final theme = ValueNotifier(ThemeMode.system);
+  ThemeMode get themeMode => theme.value;
+
+  Future<void> setThemeMode(ThemeMode m) async {
+    theme.value = m;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_themeKey, m.name);
+  }
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
     showPins = prefs.getBool(_showPinsKey) ?? false;
+    theme.value = ThemeMode.values.asNameMap()[prefs.getString(_themeKey)] ?? ThemeMode.system;
     devices.clear();
     if (raw != null) {
       try {
