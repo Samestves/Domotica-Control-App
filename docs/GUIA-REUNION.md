@@ -2,7 +2,8 @@
 
 ## Dónde estamos
 
-- **App:** Alpha 0.9.0. Pasó una auditoría completa del código (ver [AUDITORIA.md](AUDITORIA.md)) y 71 pruebas automáticas.
+- **App:** Alpha 0.9.2. Pasó una auditoría completa del código (ver [AUDITORIA.md](AUDITORIA.md)) y 84 pruebas automáticas.
+  Desde la 0.9.1 se actualiza sola desde GitHub (ver [ACTUALIZACIONES.md](ACTUALIZACIONES.md)).
 - **Casa:** el ESP32 del grupo tiene nuestro programa, con el cableado de su documento «Conexiones GPIO».
   Está **probado por Bluetooth con el Redmi** con la versión `alpha-0.6`: luces, puertas, persianas y alarma responden.
   En la placa suelta solo se ve «Luz Sala 1», porque es el LED azul del propio ESP32 (GPIO 2).
@@ -39,7 +40,10 @@ Solo quien sepa la clave puede controlar la casa, por Bluetooth o por Wi‑Fi. C
 - **La primera vez** que un teléfono se conecta, la app pide **crear la clave**: de 4 a 8 números. Anótenla.
   **Usen 6 a 8 números:** cuesta mucho más adivinarla.
 - Cada teléfono la escribe **una sola vez**; después entra solo.
-- **Cambiarla:** en la casa, menú ⋮ → **Cambiar la clave**. En el carrito, botón de ajustes → **Cambiar la clave**.
+- **Cambiarla:** solo desde un teléfono **conectado que ya entró con la clave actual**. En el inicio, mantengan
+  presionado el dispositivo → **Cambiar la clave** (desde la 0.9.2). También en el panel de la casa, menú ⋮, y en
+  los ajustes del carrito. La app espera a que la placa confirme y avisa «Clave cambiada»; los demás teléfonos
+  tendrán que escribir la nueva la próxima vez que se conecten.
 - **Tres claves incorrectas** bloquean los intentos durante 30 segundos: en la casa, solo los de esa conexión (así nadie
   bloquea al dueño desde afuera); en el carrito, los de todos.
 - En la casa, con la clave ya creada, un teléfono que se conecta por Bluetooth y **no la entrega en 15 segundos** se

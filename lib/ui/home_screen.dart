@@ -12,11 +12,13 @@ import 'casa_panel.dart';
 import 'credits_screen.dart';
 import 'theme.dart';
 import 'widgets/app_scaffold.dart';
+import 'widgets/clave.dart';
 import 'widgets/kit.dart';
+import 'widgets/news_sheet.dart';
 import 'widgets/status.dart';
 import 'widgets/update_sheet.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   /// true mientras se abre una pantalla: un doble toque no abre dos (dos paneles del carrito se pisarían la orientación).
@@ -45,6 +47,24 @@ class HomeScreen extends StatelessWidget {
   static void _add(BuildContext context) => _push(context, const AddDeviceScreen());
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Recién actualizada: cuenta una vez qué trae esta versión. Es también la prueba de que se actualizó.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final app = AppScope.read(context);
+      if (!app.newsPending) return;
+      app.markNewsSeen();
+      showNewsSheet(context, justUpdated: true);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final c = context.c;
@@ -60,7 +80,7 @@ class HomeScreen extends StatelessWidget {
         Eyebrow(connected == 0 ? 'Ninguno conectado' : '$connected de ${app.devices.length} conectados', color: connected > 0 ? c.green : c.text2),
       ]),
       actions: [
-        RoundButton(icon: Ic.plus, tooltip: 'Agregar dispositivo', size: 40, onTap: () => _add(context)),
+        RoundButton(icon: Ic.plus, tooltip: 'Agregar dispositivo', size: 40, onTap: () => HomeScreen._add(context)),
         RoundButton(icon: Ic.settings, tooltip: 'Ajustes', size: 40, onTap: () => showSettingsSheet(context)),
       ],
       slivers: [
@@ -69,7 +89,7 @@ class HomeScreen extends StatelessWidget {
           sliver: SliverList.list(children: [
             for (final s in alerts) ...[_AlertBanner(session: s), const SizedBox(height: 12)],
             if (app.update != null) ...[UpdateBanner(release: app.update!), const SizedBox(height: 12)],
-            if (app.devices.isEmpty) _EmptyState(onAdd: () => _add(context)),
+            if (app.devices.isEmpty) _EmptyState(onAdd: () => HomeScreen._add(context)),
             for (final d in app.devices) ...[_DeviceCard(device: d), const SizedBox(height: 12)],
             const SizedBox(height: 28),
             Center(
@@ -340,13 +360,26 @@ class _AboutSheetState extends State<_AboutSheet> {
           ListRow(icon: Ic.bluetooth, title: 'Conexión', detail: 'Bluetooth LE o Wi-Fi, varias placas a la vez'),
         ]),
         const SizedBox(height: 14),
+        RowGroup(children: [
+          ListRow(
+            icon: Ic.demo,
+            title: 'Novedades',
+            detail: 'Qué trae la $appVersion',
+            trailing: Icon(Ic.chevronRight, size: 18, color: c.text3),
+            onTap: () {
+              Navigator.pop(context);
+              showNewsSheet(context);
+            },
+          ),
+        ]),
+        const SizedBox(height: 14),
         Text('Mantén presionado un dispositivo para ver sus opciones.', style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
       ]),
     );
   }
 }
 
-/// Opciones de un dispositivo: conectar o desconectar, y eliminar con confirmación.
+/// Opciones de un dispositivo: conectar o desconectar, cambiar la clave y eliminar con confirmación.
 void _showDeviceOptions(BuildContext context, Session s) {
   final d = s.device;
   showAppSheet<void>(context, (sheet) {
@@ -371,6 +404,22 @@ void _showDeviceOptions(BuildContext context, Session s) {
                 s.linked || s.busy ? s.disconnect() : s.connect();
               },
             ),
+            // Solo un teléfono conectado que ya entró con la clave actual puede cambiarla. Si este teléfono tiene la
+            // clave guardada, la fila se ve aunque esté desconectado, para que se sepa dónde está.
+            if ((s.connected && s.keyed) || d.clave != null)
+              ListRow(
+                icon: Ic.lock,
+                iconColor: s.connected && s.keyed ? null : c.text3,
+                title: 'Cambiar la clave',
+                titleColor: s.connected && s.keyed ? null : c.text3,
+                detail: s.connected && s.keyed ? 'Los otros teléfonos tendrán que escribir la nueva' : 'Conéctate para cambiarla',
+                onTap: s.connected && s.keyed
+                    ? () {
+                        Navigator.pop(sheet);
+                        showChangeClaveSheet(context, s);
+                      }
+                    : null,
+              ),
             ListRow(
               icon: Ic.trash,
               title: 'Eliminar dispositivo',

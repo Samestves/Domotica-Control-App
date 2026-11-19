@@ -31,11 +31,25 @@ $m = [regex]::Match((Get-Content 'pubspec.yaml' -Raw), '(?m)^version:\s*(\d+\.\d
 if (-not $m.Success) { throw 'No encontré la versión en pubspec.yaml (debe verse como 0.9.1+21).' }
 $version = $m.Groups[1].Value
 $build = $m.Groups[2].Value
-$dart = Get-Content 'lib\version.dart' -Raw
+$dart = Get-Content 'lib\version.dart' -Raw -Encoding UTF8
 if ($dart -notmatch "Alpha $([regex]::Escape($version))'" -or $dart -notmatch "appBuild = $build;") {
   throw "lib\version.dart no coincide con pubspec.yaml ($version+$build). Cambien los dos juntos."
 }
 $tag = "v$version+$build"
+
+# Sin -Notas, la descripción es la lista appNews de lib\version.dart: la misma que la app muestra al actualizarse.
+if (-not $Notas) {
+  $news = [regex]::Match($dart, '(?s)appNews = \[(.*?)\];')
+  if ($news.Success) {
+    $items = [regex]::Matches($news.Groups[1].Value, "'((?:[^'\\]|\\.)*)'") | ForEach-Object { '- ' + ($_.Groups[1].Value -replace "\\'", "'") }
+    $Notas = $items -join "`n"
+  }
+}
+if ($Notas) {
+  Write-Host 'Novedades:'
+  Write-Host $Notas
+  Write-Host ''
+}
 
 # Los avisos que flutter y gh escriben en la salida de errores no son fallas: vale su código de salida.
 function Run-Native([scriptblock] $command) {

@@ -128,7 +128,7 @@ class ClaveField extends StatelessWidget {
   }
 }
 
-/// Hoja para cambiar la clave de la casa estando conectado.
+/// Hoja para cambiar la clave de la casa o del carrito estando conectado. Espera a que la placa la confirme.
 Future<void> showChangeClaveSheet(BuildContext context, Session session) => showAppSheet<void>(context, (_) => _ChangeClaveSheet(session: session));
 
 class _ChangeClaveSheet extends StatefulWidget {
@@ -142,6 +142,11 @@ class _ChangeClaveSheet extends StatefulWidget {
 class _ChangeClaveSheetState extends State<_ChangeClaveSheet> {
   final _code = TextEditingController();
 
+  /// true desde que esta hoja envió la clave: solo entonces muestra cómo va (no un cambio viejo).
+  bool _sent = false;
+
+  Session get _s => widget.session;
+
   @override
   void dispose() {
     _code.dispose();
@@ -150,25 +155,70 @@ class _ChangeClaveSheetState extends State<_ChangeClaveSheet> {
 
   void _save() {
     final c = _code.text.trim();
-    if (!validClave(c)) return;
-    widget.session.changeClave(c);
-    Navigator.pop(context);
+    if (!validClave(c) || !_s.connected) return;
+    HapticFeedback.lightImpact();
+    _sent = true;
+    _s.changeClave(c);
   }
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 4),
-          child: SheetHeader(eyebrow: 'Seguridad', title: 'Cambiar la clave', detail: 'De 4 a 8 números. Los otros teléfonos tendrán que escribir la nueva.'),
-        ),
-        const SizedBox(height: 20),
-        ClaveField(controller: _code, visible: true, onSubmitted: _save, onChanged: () => setState(() {})),
-        const SizedBox(height: 20),
-        PillButton('Guardar clave nueva', expand: true, onTap: validClave(_code.text.trim()) ? _save : null),
-      ]),
+    return ListenableBuilder(
+      listenable: _s,
+      builder: (context, _) {
+        final c = context.c;
+        final step = _sent ? _s.claveChange : null;
+        final what = _s.device.profile == Profile.carro ? 'el carrito' : 'la casa';
+
+        if (step == ClaveChange.done) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(Ic.checkCircle, size: 40, color: c.green),
+                  const SizedBox(height: 14),
+                  const SheetHeader(eyebrow: 'Seguridad', title: 'Clave cambiada'),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Este teléfono ya la recuerda. Los otros tendrán que escribir la nueva la próxima vez que se conecten a $what. Anótala.',
+                    style: T.small.copyWith(color: c.text2),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 22),
+              PillButton('Listo', expand: true, onTap: () => Navigator.pop(context)),
+            ]),
+          );
+        }
+
+        final saving = step == ClaveChange.saving;
+        final offline = !_s.connected && !saving;
+        final problem = step == ClaveChange.failed ? _s.claveChangeError : (offline ? 'Se desconectó. Conéctate otra vez para cambiarla.' : null);
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: SheetHeader(eyebrow: 'Seguridad', title: 'Cambiar la clave', detail: 'De 4 a 8 números. Los otros teléfonos tendrán que escribir la nueva.'),
+            ),
+            const SizedBox(height: 20),
+            ClaveField(controller: _code, visible: true, enabled: !saving && !offline, onSubmitted: _save, onChanged: () => setState(() {})),
+            if (problem != null) ...[
+              const SizedBox(height: 10),
+              Text(problem, style: T.small.copyWith(color: offline ? c.amber : c.red)),
+            ],
+            const SizedBox(height: 20),
+            PillButton(
+              saving ? 'Guardando…' : (step == ClaveChange.failed ? 'Intentar otra vez' : 'Guardar clave nueva'),
+              leading: saving ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.6, color: c.onInverse)) : null,
+              expand: true,
+              onTap: !saving && !offline && validClave(_code.text.trim()) ? _save : null,
+            ),
+          ]),
+        );
+      },
     );
   }
 }

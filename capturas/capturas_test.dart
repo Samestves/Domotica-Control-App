@@ -16,6 +16,7 @@ import 'package:control_domotica/ui/carro_panel.dart';
 import 'package:control_domotica/ui/casa_panel.dart';
 import 'package:control_domotica/ui/credits_screen.dart';
 import 'package:control_domotica/ui/home_screen.dart';
+import 'package:control_domotica/ui/widgets/news_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,9 +46,9 @@ void _setSize(WidgetTester t, Size logical) {
 }
 
 /// Una app con dos placas demo y una real guardadas, como la tendría el usuario.
-Future<AppState> _state() async {
+Future<AppState> _state({DeviceLink Function(SavedDevice)? linkFor}) async {
   SharedPreferences.setMockInitialValues({});
-  final app = AppState();
+  final app = AppState(linkFor: linkFor);
   await app.load();
   await app.add(SavedDevice(id: 'esp32', name: 'Casa Domótica', profile: Profile.casa, transport: Transport.ble, address: '3C:71:BF:19:A7:1A'));
   return app;
@@ -93,6 +94,43 @@ void main() {
           await t.pump(const Duration(milliseconds: 100));
         }
         await _shot('12_firma');
+      });
+
+      testWidgets('novedades', (t) async {
+        final app = await _state();
+        await _show(t, app, const HomeScreen(), mode);
+        showNewsSheet(t.element(find.byType(HomeScreen)), justUpdated: true);
+        await t.pump();
+        await t.pump(const Duration(seconds: 1));
+        await _shot('13_novedades_$tema');
+      });
+
+      testWidgets('cambiar la clave', (t) async {
+        final app = await _state(linkFor: (d) => d.transport == Transport.demo ? DemoLink(d.profile.name) : _KeyedHouseLink());
+        final casa = app.devices.firstWhere((d) => d.id == 'esp32')..clave = '1234';
+        final s = app.session(casa);
+        await t.runAsync(() async {
+          await s.connect();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        });
+        await _show(t, app, const HomeScreen(), mode);
+        await t.longPress(find.text('Casa Domótica'));
+        await t.pump();
+        await t.pump(const Duration(seconds: 1));
+        await _shot('14_opciones_clave_$tema');
+        await t.tap(find.text('Cambiar la clave'));
+        await t.pump();
+        await t.pump(const Duration(seconds: 1));
+        await t.enterText(find.byType(TextField), '482913');
+        await t.pump();
+        await t.tap(find.text('GUARDAR CLAVE NUEVA'));
+        for (var i = 0; i < 5; i++) {
+          await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+          await t.pump(const Duration(milliseconds: 20));
+        }
+        await t.pump(const Duration(seconds: 1));
+        await _shot('15_clave_cambiada_$tema');
+        await t.runAsync(s.disconnect);
       });
 
       testWidgets('agregar dispositivo', (t) async {
@@ -206,6 +244,20 @@ void main() {
         await t.runAsync(s.disconnect);
       });
     });
+  }
+}
+
+/// Una casa con clave que acepta la guardada y también la nueva.
+class _KeyedHouseLink extends DeviceLink {
+  @override
+  Future<void> connect() async => setState(LinkState.connected);
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {
+    if (line.startsWith('AUTH') || line.startsWith('CLAVE')) emitLine('AUTH:OK');
   }
 }
 

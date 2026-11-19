@@ -9,11 +9,16 @@ Desde la **Alpha 0.9.1**, la app se actualiza sola desde GitHub, gratis:
 - **La primera vez**, Android pide permitir que Control Domótica instale actualizaciones («Permitir de esta fuente»).
   Se activa una sola vez y la instalación sigue sola al volver.
 - Los dispositivos guardados y las claves **se conservan** al actualizar.
+- **Al abrir la versión nueva** sale una vez la hoja «Qué hay de nuevo» (desde la 0.9.2). Si aparece, la
+  actualización funcionó. Se puede volver a ver en Ajustes → Acerca de → Novedades.
 
 Si el teléfono está unido a la red Wi‑Fi de una placa (Casa Domotica o Carrito 4x4), no tiene internet: la app lo
 avisa y hay que salir de esa red para actualizar.
 
-## Una sola vez: preparar GitHub
+## Una sola vez: preparar GitHub (ya hecho)
+
+El repositorio está en https://github.com/Samestves/Domotica-Control-App y la Alpha 0.9.1 ya está publicada.
+Estos pasos quedan por si hay que repetirlos en otra cuenta.
 
 1. **Crear el repositorio** en https://github.com/new con el nombre `Domotica-Control-App`, **público**, y sin marcar
    «Add a README» (el proyecto ya tiene uno). Si eligen otro nombre, cámbienlo en `lib/core/updater.dart` (`repo`).
@@ -33,11 +38,14 @@ avisa y hay que salir de esa red para actualizar.
 
 ## Cada versión nueva
 
-1. Suban la versión en **los dos lugares**, por ejemplo a `0.9.2+22`:
-   - `pubspec.yaml` → `version: 0.9.2+22`
-   - `lib/version.dart` → `appVersion = 'Alpha 0.9.2'` y `appBuild = 22`
+1. Suban la versión en **los dos lugares**, por ejemplo a `0.9.3+23`:
+   - `pubspec.yaml` → `version: 0.9.3+23`
+   - `lib/version.dart` → `appVersion = 'Alpha 0.9.3'` y `appBuild = 23`
 
    El número de después del `+` **siempre tiene que subir**: Android no instala una versión con un número menor.
+
+   En el mismo `lib/version.dart`, cambien la lista `appNews`: una frase corta por cada cosa nueva, entre comillas
+   simples (y sin usar comillas simples dentro). Es lo que la app muestra al actualizarse y lo que se publica en GitHub.
 2. En PowerShell, desde la carpeta del proyecto:
 
    ```powershell
@@ -45,8 +53,9 @@ avisa y hay que salir de esa red para actualizar.
    ```
 
    Compila los dos APK (64 y 32 bits), los deja en `entregas\` y dice paso a paso qué poner en GitHub:
-   la etiqueta (por ejemplo `v0.9.2+22`), el título, la descripción y los dos APK. Con la herramienta de GitHub
-   instalada (`gh`), `.\tool\publicar.ps1 -Notas "qué trae" -Publicar` lo hace todo solo.
+   la etiqueta (por ejemplo `v0.9.3+23`), el título, la descripción y los dos APK. Con la herramienta de GitHub
+   instalada (`gh`), `.\tool\publicar.ps1 -Publicar` lo hace todo solo, con la lista `appNews` como descripción
+   (`-Notas "otro texto"` la reemplaza).
 3. En GitHub, **Publish release** (no «pre-release» ni borrador: la app solo ve la última versión publicada).
 
 ## Cuidados

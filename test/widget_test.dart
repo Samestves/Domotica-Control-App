@@ -15,6 +15,7 @@ import 'package:control_domotica/ui/widgets/carro_ajustes.dart';
 import 'package:control_domotica/ui/widgets/casa_tiles.dart';
 import 'package:control_domotica/ui/widgets/drive_controls.dart';
 import 'package:control_domotica/ui/widgets/status.dart';
+import 'package:control_domotica/version.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -296,6 +297,63 @@ void main() {
     });
   });
 
+  group('Novedades al actualizar', () {
+    final saved = jsonEncode([SavedDevice(id: 'a', name: 'Casa', profile: Profile.casa, transport: Transport.ble, address: 'X').toJson()]);
+    Future<AppState> loaded(Map<String, Object> prefs) async {
+      SharedPreferences.setMockInitialValues(prefs);
+      final app = AppState();
+      await app.load();
+      return app;
+    }
+
+    test('la primera instalación no las muestra', () async {
+      expect((await loaded({})).newsPending, isFalse);
+      final again = AppState();
+      await again.load();
+      expect(again.newsPending, isFalse, reason: 'quedó anotado que ya conoce esta versión');
+    });
+
+    test('quien viene de la 0.9.1 (que no anotaba nada) las ve una sola vez', () async {
+      final app = await loaded({'devices_v1': saved});
+      expect(app.newsPending, isTrue);
+      await app.markNewsSeen();
+      final again = AppState();
+      await again.load();
+      expect(again.newsPending, isFalse);
+    });
+
+    test('salen con cada versión nueva, pero no al volver a una vieja', () async {
+      expect((await loaded({'devices_v1': saved, 'novedades_vistas': appBuild - 1})).newsPending, isTrue);
+      expect((await loaded({'devices_v1': saved, 'novedades_vistas': appBuild})).newsPending, isFalse);
+      expect((await loaded({'devices_v1': saved, 'novedades_vistas': appBuild + 3})).newsPending, isFalse);
+    });
+
+    test('hay novedades escritas para esta versión', () {
+      expect(appNews, isNotEmpty);
+      expect(appNews.every((n) => n.trim().isNotEmpty && !n.contains("'")), isTrue, reason: 'publicar.ps1 las lee entre comillas simples');
+    });
+
+    testWidgets('al abrir la app recién actualizada sale la hoja, una sola vez', (t) async {
+      t.view.devicePixelRatio = 1;
+      t.view.physicalSize = const Size(800, 1400);
+      addTearDown(t.view.reset);
+      final app = await loaded({'devices_v1': saved});
+      await t.pumpWidget(ControlApp(state: app));
+      await t.pump();
+      await t.pump(const Duration(seconds: 1));
+      expect(find.text('Qué hay de nuevo'), findsOneWidget);
+      expect(find.text(appNews.first), findsOneWidget);
+      expect(find.text('Actualizada a $appVersion'.toUpperCase()), findsOneWidget);
+
+      await t.tap(find.text('ENTENDIDO'));
+      await t.pump();
+      await t.pump(const Duration(seconds: 1));
+      expect(find.text('Qué hay de nuevo'), findsNothing);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt('novedades_vistas'), appBuild);
+    });
+  });
+
   group('Casa del grupo', () {
     test('el mapa de pines coincide con su documento de conexiones', () {
       final all = [...casaControls, casaSiren];
@@ -422,7 +480,50 @@ void main() {
       expect(board.sim.clave, '5678');
       expect(d.clave, '5678');
       expect(s.claveMessage, 'Clave cambiada');
+      expect(s.claveChange, ClaveChange.done);
       expect(s.connected, isTrue);
+      await s.disconnect();
+    });
+
+    test('cambiar la clave: si la placa no responde lo avisa, y si contesta tarde igual la guarda', () async {
+      final board = _Board()..sim.clave = '1234';
+      final d = SavedDevice(id: 'm', name: 'Casa', profile: Profile.casa, transport: Transport.ble, clave: '1234');
+      final s = Session(d, linkFor: (_) => _MuteLink(board));
+      await s.connect();
+      await settle();
+      s.changeClave('5678');
+      expect(s.claveChange, ClaveChange.saving);
+      await Future<void>.delayed(Session.changeTimeout + const Duration(milliseconds: 200));
+      expect(s.claveChange, ClaveChange.failed);
+      expect(s.claveChangeError, contains('no respondió'));
+      expect(d.clave, '1234', reason: 'sin confirmación, este teléfono sigue con la de antes');
+
+      board.link!.emitLine('AUTH:OK'); // la respuesta llega tarde
+      await settle();
+      expect(s.claveChange, ClaveChange.done);
+      expect(d.clave, '5678');
+      await s.disconnect();
+    });
+
+    test('cambiar la clave: si se corta la conexión o la placa la pide otra vez, lo avisa', () async {
+      final board = _Board()..sim.clave = '1234';
+      final d = SavedDevice(id: 'x', name: 'Casa', profile: Profile.casa, transport: Transport.ble, clave: '1234');
+      final s = Session(d, linkFor: (_) => _MuteLink(board));
+      await s.connect();
+      await settle();
+      s.changeClave('5678');
+      await s.disconnect();
+      expect(s.claveChange, ClaveChange.failed);
+      expect(s.claveChangeError, contains('Se cortó'));
+      expect(d.clave, '1234');
+
+      await s.connect();
+      await settle();
+      s.changeClave('5678');
+      board.link!.emitLine('AUTH:PIDE');
+      await settle();
+      expect(s.claveChange, ClaveChange.failed);
+      expect(s.claveChangeError, contains('pidió'));
       await s.disconnect();
     });
 
@@ -670,6 +771,76 @@ void main() {
     expect(find.text('CONECTAR'), findsWidgets, reason: 'cada placa desconectada tiene su botón');
   });
 
+  testWidgets('«Cambiar la clave» está en las opciones del dispositivo y espera a que la casa confirme', (t) async {
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(800, 1400);
+    addTearDown(t.view.reset);
+    final board = _Board()..sim.clave = '1234';
+    SharedPreferences.setMockInitialValues({});
+    final app = AppState(linkFor: (d) => d.transport == Transport.demo ? DemoLink(d.profile.name) : _SimLink(board));
+    await app.load();
+    final casa = SavedDevice(id: 'k', name: 'Casa real', profile: Profile.casa, transport: Transport.ble, address: 'X', clave: '1234');
+    await app.add(casa);
+    await t.pumpWidget(ControlApp(state: app));
+    await t.pump();
+
+    Future<void> options(String name) async {
+      await t.longPress(find.text(name));
+      await t.pump();
+      await t.pump(const Duration(seconds: 1));
+    }
+
+    Future<void> close() async {
+      await t.tapAt(const Offset(400, 40)); // fuera de la hoja
+      await t.pump();
+      await t.pump(const Duration(seconds: 1));
+    }
+
+    // Una demo no tiene clave: no aparece.
+    await options('Casa (demo)');
+    expect(find.text('Cambiar la clave'), findsNothing);
+    await close();
+
+    // Desconectada: se ve, pero pide conectarse.
+    await options('Casa real');
+    expect(find.text('Cambiar la clave'), findsOneWidget);
+    expect(find.text('Conéctate para cambiarla'), findsOneWidget);
+
+    // Conectada y con la clave entregada: abre la hoja.
+    final s = app.session(casa);
+    await t.runAsync(() async {
+      await s.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await t.pump();
+    expect(s.connected, isTrue);
+    expect(find.text('Los otros teléfonos tendrán que escribir la nueva'), findsOneWidget);
+    await t.tap(find.text('Cambiar la clave'));
+    await t.pump();
+    await t.pump(const Duration(seconds: 1));
+
+    await t.enterText(find.byType(TextField), '5678');
+    await t.pump();
+    await t.tap(find.text('GUARDAR CLAVE NUEVA'));
+    await t.pump();
+    expect(find.text('GUARDANDO…'), findsOneWidget, reason: 'espera la respuesta antes de cerrar');
+    // La respuesta de la casa simulada cruza entre el reloj de la prueba y el real: se dejan correr los dos.
+    for (var i = 0; i < 5; i++) {
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await t.pump(const Duration(milliseconds: 20));
+    }
+    expect(find.text('Clave cambiada'), findsOneWidget);
+    expect(board.sim.clave, '5678');
+    expect(casa.clave, '5678');
+
+    await t.tap(find.text('LISTO'));
+    await t.pump();
+    await t.pump(const Duration(seconds: 1));
+    expect(find.text('Clave cambiada'), findsNothing);
+    await t.runAsync(s.disconnect);
+    await t.pump(const Duration(seconds: 1));
+  });
+
   testWidgets('tres toques al logo en «Acerca de» abren la firma', (tester) async {
     // Ancho como el de siempre (la letra de prueba es más ancha que D-DIN), pero alto como un teléfono.
     tester.view.devicePixelRatio = 1;
@@ -769,6 +940,17 @@ class _SimLink extends DeviceLink {
   Future<void> sendLine(String line) async {
     await Future<void>.delayed(Duration.zero);
     board.sim.handle(line);
+  }
+}
+
+/// La casa simulada, pero la respuesta a CLAVE se pierde (la prueba la envía a mano cuando quiere).
+class _MuteLink extends _SimLink {
+  _MuteLink(super.board);
+
+  @override
+  Future<void> sendLine(String line) async {
+    if (line.startsWith('CLAVE:')) return;
+    await super.sendLine(line);
   }
 }
 

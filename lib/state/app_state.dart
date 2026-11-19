@@ -14,6 +14,7 @@ import '../core/wifi_link.dart';
 import '../core/wifi_net.dart';
 import '../models/device.dart';
 import '../models/pins.dart';
+import '../version.dart';
 
 class LogLine {
   final bool incoming;
@@ -23,6 +24,18 @@ class LogLine {
 }
 
 /// En qué va la clave de la casa en la conexión actual.
+/// Cómo va un cambio de clave pedido desde la app.
+enum ClaveChange {
+  /// Enviada: se espera que la placa la confirme.
+  saving,
+
+  /// La placa la guardó y este teléfono también.
+  done,
+
+  /// No se confirmó (ver [Session.claveChangeError]).
+  failed,
+}
+
 enum ClaveState {
   /// Esperando la respuesta de la placa.
   checking,
@@ -86,8 +99,17 @@ class Session extends ChangeNotifier {
   String? _pendingClave;
   Timer? _claveTimer;
 
-  /// true mientras se espera la respuesta a «Cambiar la clave» (solo entonces se avisa «Clave cambiada»).
-  bool _changingClave = false;
+  /// Cómo va «Cambiar la clave»: la hoja espera aquí la respuesta de la placa. null si nadie la está cambiando.
+  ClaveChange? claveChange;
+
+  /// Por qué no se pudo cambiar la clave (cuando [claveChange] es [ClaveChange.failed]).
+  String? claveChangeError;
+  Timer? _changeTimer;
+
+  /// Si la placa no confirma la clave nueva en este tiempo, la hoja avisa que no respondió.
+  static const changeTimeout = Duration(seconds: 5);
+
+  bool get _changingClave => claveChange == ClaveChange.saving;
 
   /// Cambia cada vez que el usuario desconecta: un intento de conexión viejo que termina tarde lo nota y se cierra.
   int _generation = 0;
@@ -236,11 +258,25 @@ class Session extends ChangeNotifier {
   /// Cambia la clave estando ya dentro. La placa responde AUTH:OK y la app guarda la nueva.
   void changeClave(String c) {
     _pendingClave = c;
-    _changingClave = true;
+    claveChange = ClaveChange.saving;
+    claveChangeError = null;
     claveMessage = null;
+    _changeTimer?.cancel();
+    _changeTimer = Timer(changeTimeout, () {
+      if (!_changingClave) return;
+      _changeFailed('La placa no respondió. Revisa la conexión e intenta otra vez.');
+      notifyListeners();
+    });
     _addLog(false, 'CLAVE:${'•' * c.length}');
     _link?.sendLine('CLAVE:$c');
     notifyListeners();
+  }
+
+  /// El cambio de clave no se confirmó. La clave guardada sigue siendo la de antes.
+  void _changeFailed(String why) {
+    _changeTimer?.cancel();
+    claveChange = ClaveChange.failed;
+    claveChangeError = why;
   }
 
   /// Envía AUTH o CLAVE y espera la respuesta. La clave no se muestra en los mensajes.
@@ -271,6 +307,11 @@ class Session extends ChangeNotifier {
     _claveTimer?.cancel();
     final parts = value.split(':');
     final n = parts.length > 1 ? parts[1] : '';
+    if (parts.first != 'OK' && _changingClave) {
+      _changeFailed(parts.first == 'PIDE'
+          ? 'La placa pidió otra vez la clave actual. Escríbela y vuelve a intentarlo.'
+          : 'La placa no aceptó la clave nueva (respondió «$value»).');
+    }
     switch (parts.first) {
       case 'OK':
         final p = _pendingClave;
@@ -281,10 +322,13 @@ class Session extends ChangeNotifier {
         }
         if (clave != ClaveState.ok) {
           _ready();
-        } else if (_changingClave) {
+        } else if (p != null && claveChange != null) {
+          // La placa confirmó la clave nueva, aunque sea tarde (después del aviso de que no respondía).
+          _changeTimer?.cancel();
+          claveChange = ClaveChange.done;
+          claveChangeError = null;
           claveMessage = 'Clave cambiada';
         }
-        _changingClave = false;
       case 'NUEVA':
         _forgetClave();
         clave = ClaveState.create;
@@ -307,7 +351,6 @@ class Session extends ChangeNotifier {
         clave = ClaveState.ask;
       default:
         // Una versión del programa que responde algo que esta app no conoce: no se queda «Conectando» para siempre.
-        _changingClave = false;
         clave = ClaveState.ask;
         claveMessage = 'La placa respondió «$value», que esta versión de la app no entiende.';
     }
@@ -334,7 +377,9 @@ class Session extends ChangeNotifier {
     keyed = false;
     claveMessage = null;
     _pendingClave = null;
-    _changingClave = false;
+    if (_changingClave) {
+      _changeFailed('Se cortó la conexión antes de que la placa confirmara. Si al volver no entra, escribe la clave nueva.');
+    }
   }
 
   /// La app es la fuente de verdad de los pines: al conectar, envía a la placa
@@ -453,6 +498,7 @@ class Session extends ChangeNotifier {
     _stopHeartbeat();
     _clearPending();
     _claveTimer?.cancel();
+    _changeTimer?.cancel();
     _messages.close();
     _teardown();
     super.dispose();
@@ -497,6 +543,18 @@ class AppState extends ChangeNotifier {
     } catch (_) {}
   }
 
+  static const _newsKey = 'novedades_vistas';
+
+  /// true si la app se acaba de actualizar y todavía no mostró qué trae esta versión.
+  bool newsPending = false;
+
+  /// Anota que las novedades de esta versión ya se mostraron: no vuelven a salir solas.
+  Future<void> markNewsSeen() async {
+    newsPending = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_newsKey, appBuild);
+  }
+
   static const _showPinsKey = 'ui_show_pins';
 
   /// Modo técnico: muestra el pin virtual y el GPIO de cada control. Apagado, el panel se ve más limpio.
@@ -535,6 +593,11 @@ class AppState extends ChangeNotifier {
     }
 
     final raw = read(() => prefs.getString(_key));
+    // Las novedades salen solo al actualizar: no en la primera instalación (sin nada guardado), ni al volver
+    // a una versión vieja. La 0.9.1 no anotaba nada, así que quien viene de ella tiene dispositivos guardados.
+    final seen = read(() => prefs.getInt(_newsKey));
+    newsPending = seen == null ? raw != null : seen < appBuild;
+    if (raw == null && seen == null) await prefs.setInt(_newsKey, appBuild);
     showPins = read(() => prefs.getBool(_showPinsKey)) ?? false;
     theme.value = ThemeMode.values.asNameMap()[read(() => prefs.getString(_themeKey))] ?? ThemeMode.system;
     devices.clear();
