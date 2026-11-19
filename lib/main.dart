@@ -9,8 +9,14 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   final state = AppState();
-  await state.load();
+  try {
+    await state.load();
+  } catch (e) {
+    // Nunca quedarse en la pantalla de carga por un dato guardado raro: la app abre igual.
+    debugPrint('No se pudo leer lo guardado: $e');
+  }
   runApp(ControlApp(state: state));
+  state.checkForUpdateQuietly(); // sin esperar: la app abre al instante
 }
 
 /// Hace llegar el estado de la app a todas las pantallas.

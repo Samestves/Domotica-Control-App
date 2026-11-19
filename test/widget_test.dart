@@ -1,15 +1,21 @@
+import 'dart:convert';
+
 import 'package:control_domotica/core/casa_sim.dart';
 import 'package:control_domotica/core/demo_link.dart';
 import 'package:control_domotica/core/link.dart';
 import 'package:control_domotica/core/protocol.dart';
+import 'package:control_domotica/core/wifi_net.dart';
 import 'package:control_domotica/main.dart';
 import 'package:control_domotica/models/controls.dart';
 import 'package:control_domotica/models/device.dart';
 import 'package:control_domotica/state/app_state.dart';
+import 'package:control_domotica/ui/carro_panel.dart';
 import 'package:control_domotica/ui/credits_screen.dart';
 import 'package:control_domotica/ui/widgets/carro_ajustes.dart';
+import 'package:control_domotica/ui/widgets/casa_tiles.dart';
+import 'package:control_domotica/ui/widgets/drive_controls.dart';
 import 'package:control_domotica/ui/widgets/status.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -63,6 +69,13 @@ void main() {
     expect(gpioProblem(34, output: true), isNotNull); // solo entrada
     expect(gpioProblem(7, output: true), isNotNull); // memoria interna
     expect(gpioProblem(24, output: true), isNotNull); // no existe
+    expect(gpioProblem(1, output: true), isNotNull); // cable USB (Monitor Serie)
+    expect(gpioProblem(3, output: true), isNotNull);
+    // Contraseñas Wi-Fi que Android acepta (si no, se perdería la red actual con un error en inglés).
+    expect(WifiNet.validPassword('carrito4x4'), isTrue);
+    expect(WifiNet.validPassword(''), isTrue, reason: 'red abierta');
+    expect(WifiNet.validPassword('corta'), isFalse);
+    expect(WifiNet.validPassword('contraseña1'), isFalse, reason: 'la ñ no la acepta Android');
     expect(gpioProblem(40, output: true), isNotNull);
   });
 
@@ -147,6 +160,139 @@ void main() {
       await t.pump(const Duration(seconds: 2));
       await connecting;
       expect(connOf(s), Conn.off);
+    });
+  });
+
+  group('Conexión robusta (auditoría)', () {
+    final d = SavedDevice(id: 'q', name: 'Casa', profile: Profile.casa, transport: Transport.ble);
+
+    test('varias escrituras fallidas seguidas gastan un solo reintento y conservan el primer motivo', () async {
+      final links = <_FlakyLink>[];
+      final s = Session(d, linkFor: (_) => (links..add(_FlakyLink())).last);
+      await s.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(s.connected, isTrue);
+      links.single
+        ..setState(LinkState.error, 'La placa se desconectó.')
+        ..setState(LinkState.error, 'No se pudo enviar por Bluetooth.')
+        ..setState(LinkState.error, 'No se pudo enviar por Bluetooth.');
+      await Future<void>.delayed(Duration.zero);
+      expect(s.attempt, 1, reason: 'una caída = un intento, no tres');
+      expect(s.error, 'La placa se desconectó.');
+      await s.disconnect();
+    });
+
+    // Con tiempo real: cerrar la conexión vieja necesita vueltas reales del reloj.
+    test('cancelar y volver a conectar: la conexión vieja que termina tarde no estorba', () async {
+      final links = <_SlowLink>[];
+      final s = Session(d, linkFor: (_) => (links..add(_SlowLink())).last);
+      final first = s.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await s.disconnect();
+      final second = s.connect();
+      await Future.wait([first, second]);
+      await Future<void>.delayed(Session.claveTimeout + const Duration(milliseconds: 300)); // placa sin clave
+      expect(links.length, 2);
+      expect(links.first.state, isNot(LinkState.connected), reason: 'la vieja quedó cerrada');
+      expect(s.connected, isTrue, reason: 'la nueva es la que vale');
+      await s.disconnect();
+    });
+
+    test('dos toques en Conectar abren una sola conexión', () async {
+      final links = <_SlowLink>[];
+      final s = Session(d, linkFor: (_) => (links..add(_SlowLink())).last);
+      await Future.wait([s.connect(), s.connect()]);
+      expect(links.length, 1);
+      await s.disconnect();
+    });
+
+    test('una respuesta de clave desconocida no deja «Conectando» para siempre', () async {
+      final s = Session(d, linkFor: (_) => _ReplyLink('AUTH:RARO'));
+      await s.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(s.clave, ClaveState.ask);
+      expect(s.claveMessage, contains('RARO'));
+      await s.disconnect();
+    });
+
+    test('«Clave cambiada» solo aparece si el usuario la cambió', () async {
+      // Una casa lenta que contesta AUTH:OK después del tiempo de espera.
+      final s = Session(d, linkFor: (_) => _ReplyLink('AUTH:OK', delay: Session.claveTimeout + const Duration(milliseconds: 300)));
+      await s.connect();
+      await Future<void>.delayed(Session.claveTimeout + const Duration(milliseconds: 700));
+      expect(s.connected, isTrue);
+      expect(s.claveMessage, isNull);
+      await s.disconnect();
+    });
+
+    test('repetir la misma orden en silencio no redibuja la pantalla', () async {
+      final s = Session(d, linkFor: (_) => _FlakyLink());
+      var redraws = 0;
+      s.addListener(() => redraws++);
+      s.send(CarPins.throttle, 50, quiet: true);
+      expect(redraws, 1, reason: 'cambió: hay que mostrarlo');
+      s.send(CarPins.throttle, 50, quiet: true);
+      expect(redraws, 1, reason: 'igual que antes: no hace falta');
+      s.send(CarPins.throttle, 60, quiet: true);
+      expect(redraws, 2);
+    });
+
+    test('las letras con tilde partidas entre dos paquetes llegan bien', () {
+      final b = LineBuffer();
+      final bytes = utf8.encode('OK:luces 5 · bocina ñ\n');
+      final cut = bytes.indexOf(0xC2) + 1; // justo en medio del «·»
+      expect(b.addBytes(bytes.sublist(0, cut)), isEmpty);
+      expect(b.addBytes(bytes.sublist(cut)), ['OK:luces 5 · bocina ñ']);
+      expect(b.addBytes([0xFF, 0x41, 0x0A]), ['\uFFFDA'], reason: 'un byte raro no corta la conexión');
+      expect(b.addBytes([...List.filled(LineBuffer.maxLine + 10, 0x41), 0x0A, 0x42, 0x0A]), ['B'],
+          reason: 'una línea larguísima se descarta entera');
+    });
+
+    test('Android deja una sola red de placa: una segunda placa por Wi-Fi avisa en vez de pisar la otra', () {
+      WifiNet.claim('Casa Domotica');
+      expect(WifiNet.busyWith('Carrito 4x4'), 'Casa Domotica');
+      expect(WifiNet.busyWith('Casa Domotica'), isNull, reason: 'la misma red sí se puede compartir');
+      WifiNet.unclaim('Casa Domotica');
+      expect(WifiNet.busyWith('Carrito 4x4'), isNull);
+    });
+  });
+
+  group('Datos guardados (auditoría)', () {
+    final good = SavedDevice(id: 'a', name: 'Casa', profile: Profile.casa, transport: Transport.ble, address: 'X').toJson();
+
+    test('un dispositivo que esta versión no entiende no borra los demás y se conserva', () async {
+      final future = {...good, 'id': 'r', 'profile': 'robot'}; // de una versión más nueva de la app
+      SharedPreferences.setMockInitialValues({'devices_v1': jsonEncode([future, good])});
+      final app = AppState();
+      await app.load();
+      expect(app.devices.map((d) => d.id), ['a']);
+      await app.save();
+      final prefs = await SharedPreferences.getInstance();
+      final saved = jsonDecode(prefs.getString('devices_v1')!) as List<dynamic>;
+      expect(saved.map((e) => (e as Map)['id']), containsAll(['a', 'r']), reason: 'el robot sigue guardado');
+    });
+
+    test('si todo está dañado, se guarda una copia y la app abre igual', () async {
+      SharedPreferences.setMockInitialValues({'devices_v1': '{basura', 'ui_show_pins': 'no es bool'});
+      final app = AppState();
+      await app.load();
+      expect(app.devices, isEmpty);
+      expect(app.showPins, isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('devices_v1_respaldo'), '{basura');
+    });
+
+    test('si el usuario borra todas las placas, las demos no vuelven a aparecer', () async {
+      SharedPreferences.setMockInitialValues({});
+      final app = AppState();
+      await app.load();
+      expect(app.devices, hasLength(2), reason: 'primer uso: dos demos');
+      for (final d in [...app.devices]) {
+        await app.remove(d);
+      }
+      final again = AppState();
+      await again.load();
+      expect(again.devices, isEmpty);
     });
   });
 
@@ -308,6 +454,206 @@ void main() {
       expect(invertedWheels(s), [false, true, false, false]);
       await s.disconnect();
     });
+
+    /// Panel del carrito con una placa simulada que anota todo lo que recibe.
+    Future<(AppState, Session, List<_RecLink>)> openPanel(WidgetTester t) async {
+      t.view.devicePixelRatio = 1;
+      t.view.physicalSize = const Size(900, 420);
+      addTearDown(t.view.reset);
+      SharedPreferences.setMockInitialValues({});
+      final links = <_RecLink>[];
+      final app = AppState(linkFor: (_) => (links..add(_RecLink())).last);
+      await app.load();
+      final carro = app.devices.firstWhere((d) => d.profile == Profile.carro);
+      final s = app.session(carro);
+      await s.connect();
+      await t.pumpWidget(ControlApp(state: app, home: CarroPanel(device: carro)));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(s.connected, isTrue);
+      return (app, s, links);
+    }
+
+    Future<void> close(WidgetTester t, Session s) async {
+      await t.pumpWidget(const SizedBox());
+      await s.disconnect();
+      await t.pump(const Duration(seconds: 1));
+    }
+
+    int throttleSent(List<String> lines) =>
+        lines.where((l) => l.startsWith('V${CarPins.throttle}:')).map((l) => int.parse(l.split(':')[1])).fold(0, (a, b) => a > b ? a : b);
+
+    testWidgets('al reconectar no arranca solo con el acelerador que tenía antes del corte', (t) async {
+      final (_, s, links) = await openPanel(t);
+      expect(links.single.sent, containsAll(['V${CarPins.joystick}:0,0', 'V${CarPins.throttle}:0']),
+          reason: 'al abrir el panel la placa recibe «quieto»');
+
+      await t.drag(find.byType(Throttle), const Offset(0, -80));
+      await t.pump(const Duration(milliseconds: 500));
+      expect(throttleSent(links.single.sent), greaterThan(0), reason: 'el acelerador se movió');
+
+      links.single.drop(); // el carrito sale de alcance
+      await t.pump(const Duration(milliseconds: 100));
+      expect(t.widget<Throttle>(find.byType(Throttle)).value, 0, reason: 'el acelerador vuelve a cero al cortarse');
+
+      await t.pump(Session.retryDelays.first + const Duration(milliseconds: 300)); // se reconecta solo
+      // Cerrar la conexión vieja necesita una vuelta real del reloj (en el teléfono es inmediato).
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await t.pump(const Duration(milliseconds: 100));
+      for (var i = 0; i < 10; i++) {
+        await t.pump(const Duration(milliseconds: 100)); // un segundo de repeticiones
+      }
+      expect(links.length, 2, reason: 'hubo reconexión');
+      expect(s.connected, isTrue);
+      expect(links.last.sent, contains('V${CarPins.throttle}:0'), reason: 'al reconectar, «quieto»');
+      expect(throttleSent(links.last.sent), 0, reason: 'nunca vuelve a mandar el acelerador viejo');
+      await close(t, s);
+    });
+
+    testWidgets('si la app pasa a segundo plano, el carrito frena y no se repiten órdenes', (t) async {
+      final (_, s, links) = await openPanel(t);
+      await t.drag(find.byType(Throttle), const Offset(0, -80));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(throttleSent(links.single.sent), greaterThan(0));
+
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await t.pump();
+      links.single.sent.clear();
+      await t.pump(const Duration(seconds: 1));
+      expect(throttleSent(links.single.sent), 0, reason: 'en segundo plano no repite el acelerador');
+      expect(t.widget<Throttle>(find.byType(Throttle)).value, 0);
+
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await t.pump();
+      await close(t, s);
+    });
+
+    testWidgets('si el carrito pide clave (carro-0.4), el panel muestra la tarjeta para crearla', (t) async {
+      t.view.devicePixelRatio = 1;
+      t.view.physicalSize = const Size(900, 420);
+      addTearDown(t.view.reset);
+      SharedPreferences.setMockInitialValues({});
+      final app = AppState(linkFor: (_) => _ReplyLink('AUTH:NUEVA'));
+      await app.load();
+      final carro = app.devices.firstWhere((d) => d.profile == Profile.carro);
+      final s = app.session(carro);
+      await s.connect();
+      await t.pumpWidget(ControlApp(state: app, home: CarroPanel(device: carro)));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.text('Crea la clave del carrito'), findsOneWidget);
+      expect(find.byType(Throttle), findsNothing, reason: 'sin clave no se maneja');
+      await t.pumpWidget(const SizedBox());
+      await s.disconnect();
+      await t.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('cuando la placa pone el seguro, la app suelta sus controles y le avisa «quieto»', (t) async {
+      final (_, s, links) = await openPanel(t);
+      await t.drag(find.byType(Throttle), const Offset(0, -80));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(t.widget<Throttle>(find.byType(Throttle)).value, greaterThan(0));
+
+      links.single.sent.clear();
+      links.single.emitLine('ERR:suelta el joystick y el acelerador para volver a manejar');
+      await t.pump();
+      await t.pump();
+      expect(t.widget<Throttle>(find.byType(Throttle)).value, 0, reason: 'hay que volver a acelerar a propósito');
+      expect(links.single.sent, containsAll(['V${CarPins.joystick}:0,0', 'V${CarPins.throttle}:0']));
+      await t.pump(const Duration(seconds: 1));
+      expect(throttleSent(links.single.sent), 0, reason: 'no vuelve a mandar el acelerador viejo');
+      await close(t, s);
+    });
+
+    testWidgets('la reversa y las luces se leen de la placa al entrar al panel', (t) async {
+      final (_, s, links) = await openPanel(t);
+      expect(find.text('0 %'), findsOneWidget);
+      links.single.emitLine('V${CarPins.reverse}:1'); // la placa recuerda la reversa de antes
+      await t.pump();
+      await t.pump(); // la línea llega después del primer cuadro
+      expect(find.text('-0 %'), findsOneWidget, reason: 'la velocidad muestra marcha atrás');
+
+      await t.tap(find.bySemanticsLabel('Reversa'));
+      await t.pump();
+      expect(links.single.sent.last, 'V${CarPins.reverse}:0', reason: 'tocar Reversa la quita, no la vuelve a poner');
+      await close(t, s);
+    });
+  });
+
+  group('Casa: doble toque', () {
+    /// Una casa conectada que no confirma nada todavía (como una placa lenta): las órdenes quedan «enviando».
+    Future<(Session, _RecLink)> casa(WidgetTester t, Widget Function(Session) build) async {
+      t.view.devicePixelRatio = 1;
+      t.view.physicalSize = const Size(500, 900);
+      addTearDown(t.view.reset);
+      SharedPreferences.setMockInitialValues({});
+      final links = <_RecLink>[];
+      final app = AppState(linkFor: (_) => (links..add(_RecLink())).last);
+      await app.load();
+      final s = app.session(app.devices.firstWhere((d) => d.profile == Profile.casa));
+      await s.connect();
+      // Como en el panel de la casa: la tarjeta se redibuja con cada cambio de la sesión.
+      await t.pumpWidget(ControlApp(
+        state: app,
+        home: Scaffold(body: SingleChildScrollView(child: ListenableBuilder(listenable: s, builder: (_, _) => build(s)))),
+      ));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(s.connected, isTrue);
+      links.single.sent.clear();
+      return (s, links.single);
+    }
+
+    int count(_RecLink l, int pin) => l.sent.where((x) => x.startsWith('V$pin:')).length;
+
+    testWidgets('dos toques en Armar no arman y desarman', (t) async {
+      final (s, link) = await casa(t, (s) => SecurityCard(session: s));
+      final at = t.getCenter(find.text('ARMAR'));
+      await t.tapAt(at);
+      await t.pump(const Duration(milliseconds: 100));
+      await t.pump();
+      expect(find.text('DESARMAR'), findsOneWidget, reason: 'el botón ya cambió de texto');
+      await t.tapAt(at); // el segundo toque cae en el mismo lugar, que ahora dice «Desarmar»
+      await t.pump(const Duration(milliseconds: 100));
+      expect(count(link, CasaPins.armed), 1);
+      expect(s.values[CasaPins.armed], '1', reason: 'queda armada');
+      await s.disconnect();
+      await t.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('Sirena y en seguida «Apagar alarma» no apaga lo que se acaba de pedir', (t) async {
+      final (s, link) = await casa(t, (s) => SecurityCard(session: s));
+      final at = t.getCenter(find.text('SIRENA'));
+      await t.tapAt(at);
+      await t.pump(const Duration(milliseconds: 100));
+      await t.pump();
+      expect(find.text('APAGAR ALARMA'), findsOneWidget, reason: '«Apagar alarma» ocupa ahora ese lugar');
+      await t.tapAt(at);
+      await t.pump(const Duration(milliseconds: 100));
+      expect(count(link, CasaPins.siren), 1);
+      expect(count(link, CasaPins.armed), 0);
+      await s.disconnect();
+      await t.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('dos toques en una luz no la prenden y apagan', (t) async {
+      final spec = casaControls.firstWhere((c) => c.vpin == 12); // luz de la cocina
+      final (s, link) = await casa(t, (s) => ControlTile(session: s, spec: spec, showPins: false));
+      await t.tap(find.byType(ControlTile));
+      await t.pump(const Duration(milliseconds: 100));
+      await t.tap(find.byType(ControlTile));
+      await t.pump(const Duration(milliseconds: 100));
+      expect(count(link, 12), 1);
+      expect(s.values[12], '1');
+
+      // Cuando la placa confirma, el siguiente toque sí vale.
+      link.emitLine('V12:1');
+      await t.pump();
+      await t.pump();
+      await t.tap(find.byType(ControlTile));
+      await t.pump(const Duration(milliseconds: 100));
+      expect(count(link, 12), 2);
+      expect(s.values[12], '0');
+      await s.disconnect();
+      await t.pump(const Duration(seconds: 3));
+    });
   });
 
   testWidgets('la pantalla de inicio muestra las placas demo', (tester) async {
@@ -369,6 +715,18 @@ void main() {
   });
 }
 
+/// Placa simulada que anota cada línea recibida y contesta al latido.
+class _RecLink extends _FlakyLink {
+  final sent = <String>[];
+
+  @override
+  Future<void> sendLine(String line) async {
+    sent.add(line);
+    if (line == 'PING') emitLine('PONG');
+    await super.sendLine(line);
+  }
+}
+
 /// Conexión de prueba que se puede tumbar a mano.
 class _FlakyLink extends DeviceLink {
   @override
@@ -424,6 +782,25 @@ class _DeadLink extends DeviceLink {
 
   @override
   Future<void> sendLine(String line) async {}
+}
+
+/// Placa que contesta a AUTH con [reply] (y a PING con PONG), opcionalmente con retraso.
+class _ReplyLink extends DeviceLink {
+  final String reply;
+  final Duration delay;
+  _ReplyLink(this.reply, {this.delay = Duration.zero});
+
+  @override
+  Future<void> connect() async => setState(LinkState.connected);
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {
+    if (line == 'PING') emitLine('PONG');
+    if (line.startsWith('AUTH')) Future<void>.delayed(delay, () => emitLine(reply));
+  }
 }
 
 /// Tarda en conectar, y se puede cancelar mientras tanto (como el Bluetooth).

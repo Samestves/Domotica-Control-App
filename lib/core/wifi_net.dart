@@ -27,6 +27,9 @@ class WifiProblem implements Exception {
   bool get locationOff => code == 'ubicacion_apagada';
   bool get noPermission => code == 'sin_permiso' || code == 'permiso';
 
+  /// Android ya no muestra la pregunta («No volver a preguntar»): solo se puede dar en Ajustes de la app.
+  bool get blocked => code == 'permiso_bloqueado';
+
   @override
   String toString() => message;
 }
@@ -61,6 +64,10 @@ class WifiNet {
   /// Busca redes. Las de las placas van primero; después, de mejor a peor señal.
   static Future<List<WifiNetwork>> scan() async {
     if (!await permission()) {
+      if (await permissionBlocked()) {
+        throw const WifiProblem('permiso_bloqueado',
+            'Android ya no vuelve a preguntar por el permiso. Ábrelo en los ajustes de la app: Permisos → Ubicación (y Dispositivos cercanos).');
+      }
       throw const WifiProblem(
           'permiso', 'Para mostrar las redes Wi-Fi, Android pide el permiso de ubicación. La app no usa ni guarda dónde estás.');
     }
@@ -79,8 +86,23 @@ class WifiNet {
     }
   }
 
+  /// true si el usuario marcó «No volver a preguntar» en el permiso de redes cercanas.
+  static Future<bool> permissionBlocked() async {
+    try {
+      return await _ch.invokeMethod<bool>('permisoBloqueado') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Contraseña que Android acepta para una red Wi-Fi: vacía (red abierta) o de 8 a 63 letras sin tildes.
+  static bool validPassword(String p) => p.isEmpty || (p.length >= 8 && p.length <= 63 && p.codeUnits.every((c) => c >= 32 && c <= 126));
+
   /// Une la app a la red de la placa. Android muestra una ventanita para confirmar.
   static Future<void> connect(String ssid, String password) async {
+    if (!validPassword(password)) {
+      throw const WifiProblem('clave_invalida', 'La contraseña de una red Wi-Fi tiene de 8 a 63 letras o números, sin tildes ni ñ.');
+    }
     try {
       await _ch.invokeMethod('conectarRed', {'ssid': ssid, 'clave': password});
     } on PlatformException catch (e) {
@@ -106,6 +128,36 @@ class WifiNet {
     } catch (_) {}
   }
 
+  // Quién está usando el Wi-Fi ahora mismo: red de placa → conexiones abiertas ('' = una placa en el Wi-Fi de casa).
+  static final _users = <String, int>{};
+
+  /// Red de placa que ya usa otra conexión abierta, distinta de [ssid], o null.
+  /// Android solo deja unirse a una red de placa a la vez.
+  static String? busyWith(String? ssid) {
+    for (final e in _users.entries) {
+      if (e.value > 0 && e.key.isNotEmpty && e.key != ssid) return e.key;
+    }
+    return null;
+  }
+
+  static void claim(String? ssid) => _users.update(ssid ?? '', (n) => n + 1, ifAbsent: () => 1);
+
+  static void unclaim(String? ssid) {
+    final k = ssid ?? '';
+    final n = (_users[k] ?? 0) - 1;
+    if (n > 0) {
+      _users[k] = n;
+    } else {
+      _users.remove(k);
+    }
+  }
+
+  /// Si ninguna conexión usa el Wi-Fi, suelta la red de la placa y desata la app de la red,
+  /// para que el teléfono vuelva a su Wi-Fi de siempre.
+  static Future<void> releaseIfUnused() async {
+    if (_users.isEmpty) await release();
+  }
+
   static Future<void> openLocationSettings() async {
     try {
       await _ch.invokeMethod('ajustesUbicacion');
@@ -115,6 +167,13 @@ class WifiNet {
   static Future<void> openSettings() async {
     try {
       await _ch.invokeMethod('ajustesWifi');
+    } catch (_) {}
+  }
+
+  /// Ajustes de esta app (permisos), para cuando Android ya no muestra la pregunta.
+  static Future<void> openAppSettings() async {
+    try {
+      await _ch.invokeMethod('ajustesApp');
     } catch (_) {}
   }
 }

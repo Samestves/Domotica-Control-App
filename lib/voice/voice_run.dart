@@ -15,9 +15,12 @@ Future<String?> runVoiceCommand(Session s, VoiceCommand c, {Duration timeout = c
     if (!result.isCompleted) result.complete(problem);
   }
 
+  // Solo cuenta un error que hable de los pines de esta orden: otro aviso de la placa no la hace fallar.
+  bool aboutThis(String err) => c.sends.keys.any((p) => RegExp('\\bV$p\\b').hasMatch(err));
+
   final sub = s.messages.listen((m) {
     if (m.isPin && pending[m.pin] == int.tryParse(m.value)) pending.remove(m.pin);
-    if (m.kind == 'ERR') finish('La casa respondió: ${m.value}');
+    if (m.kind == 'ERR' && aboutThis(m.value)) finish('La casa respondió: ${m.value}');
     if (m.kind == 'AUTH') finish('La casa pide la clave.');
     if (pending.isEmpty) finish(null);
   });

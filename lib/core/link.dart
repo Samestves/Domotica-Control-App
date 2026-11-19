@@ -22,9 +22,12 @@ abstract class DeviceLink {
     if (!_lines.isClosed) _lines.add(line);
   }
 
+  /// Cambia el estado y avisa. Repetir el mismo estado no avisa otra vez: por ejemplo, varias escrituras
+  /// fallidas seguidas son una sola caída (si no, cada una gastaría un reintento).
   void setState(LinkState s, [String? error]) {
-    _current = s;
+    if (s == _current) return; // se conserva el primer mensaje, que explica mejor qué pasó
     if (error != null) lastError = error;
+    _current = s;
     if (!_state.isClosed) _state.add(s);
   }
 

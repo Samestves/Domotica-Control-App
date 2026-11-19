@@ -33,7 +33,10 @@ String stateWord(Session s, ControlSpec spec) {
   };
 }
 
+/// Mientras la placa no confirma la orden anterior de este control, otro toque no hace nada:
+/// un doble toque abriría y cerraría la puerta (o prendería y apagaría la luz) sin querer.
 void _toggle(Session s, ControlSpec spec) {
+  if (s.pending.contains(spec.vpin)) return;
   HapticFeedback.selectionClick();
   s.send(spec.vpin, isOn(s, spec) ? 0 : 1, confirm: true);
 }
@@ -46,11 +49,15 @@ void _editPins(BuildContext context, Session s, ControlSpec spec) {
 /// Cambio de icono con un pequeño salto: se nota que algo pasó.
 Widget _swapIcon(IconData icon, double size, Color color) => AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
-      transitionBuilder: (child, a) => ScaleTransition(
-        scale: Tween(begin: 0.6, end: 1.0).animate(CurvedAnimation(parent: a, curve: Curves.easeOutBack)),
-        child: FadeTransition(opacity: a, child: child),
-      ),
+      transitionBuilder: _popIn,
       child: Icon(icon, key: ValueKey(icon), size: size, color: color),
+    );
+
+/// Aparece creciendo con un pequeño rebote. Función fija (no se crea en cada dibujo) y sin CurvedAnimation:
+/// así no quedan escuchas pegadas a la animación, aunque la tarjeta se redibuje muchas veces (sirena sonando).
+Widget _popIn(Widget child, Animation<double> a) => ScaleTransition(
+      scale: a.drive(CurveTween(curve: Curves.easeOutBack)).drive(Tween(begin: 0.6, end: 1.0)),
+      child: FadeTransition(opacity: a, child: child),
     );
 
 /// Indicador pequeño en la esquina: girando mientras espera a la placa, aviso si no respondió.
@@ -170,7 +177,12 @@ class _SecurityCardState extends State<SecurityCard> with SingleTickerProviderSt
     super.dispose();
   }
 
+  /// Armar, desarmar y la sirena comparten el mismo lugar en pantalla: mientras cualquiera de ellos
+  /// espera a la placa, no se acepta otro toque (si no, un doble toque arma y desarma).
+  bool get _waiting => widget.session.pending.any((p) => p == CasaPins.armed || p == CasaPins.siren);
+
   void _send(int pin, int value) {
+    if (_waiting) return;
     HapticFeedback.mediumImpact();
     widget.session
       ..clearAlert()

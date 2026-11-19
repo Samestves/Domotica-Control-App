@@ -34,10 +34,22 @@ enum VoiceStatus {
 /// Escucha una frase con el reconocimiento de voz del teléfono (el mismo de Google),
 /// la convierte en una orden para la casa, espera la confirmación de la placa y la dice en voz alta.
 class VoiceController extends ChangeNotifier {
+  /// El reconocedor es uno solo para toda la app (el plugin siempre devuelve el mismo).
+  /// Por eso cada pantalla le conecta sus avisos al abrir y se los quita al cerrar.
   final _stt = SpeechToText();
   final _tts = FlutterTts();
   bool _ready = false;
+  bool _ttsReady = false;
+  bool _disposed = false;
+  Future<bool>? _initializing;
   String? _locale;
+
+  /// Por qué no se pudo usar el reconocimiento de voz, para explicarlo.
+  String _initProblem = 'No puedo usar el micrófono. Revisa el permiso en Ajustes.';
+
+  /// Cuándo empezó la escucha actual: los avisos que llegan justo después son del turno anterior.
+  DateTime _listenStarted = DateTime(0);
+  static const _staleWindow = Duration(milliseconds: 300);
 
   VoiceStatus status = VoiceStatus.idle;
 
@@ -78,43 +90,94 @@ class VoiceController extends ChangeNotifier {
 
   bool get listening => status == VoiceStatus.listening || status == VoiceStatus.starting;
 
-  Future<bool> _init() async {
-    if (_ready) return true;
-    _ready = await _stt.initialize(onStatus: _onStatus, onError: _onError);
-    if (!_ready) return false;
-    final locales = await _stt.locales();
-    final spanish = locales.where((l) => l.localeId.toLowerCase().startsWith('es')).map((l) => l.localeId).toList();
-    final system = await _stt.systemLocale();
-    _locale = (system != null && system.localeId.toLowerCase().startsWith('es')) ? system.localeId : (spanish.isEmpty ? null : spanish.first);
-    await _tts.setLanguage('es-ES');
-    await _tts.setSpeechRate(0.56);
-    await _tts.awaitSpeakCompletion(false);
+  /// Prepara el reconocimiento una sola vez a la vez (si se toca el micrófono mientras se prepara, se espera).
+  Future<bool> _init() {
+    if (_ready) {
+      _attach();
+      return Future.value(true);
+    }
+    return _initializing ??= _initNow().whenComplete(() => _initializing = null);
+  }
+
+  Future<bool> _initNow() async {
+    try {
+      _ready = await _stt.initialize(onStatus: _onStatus, onError: _onError);
+    } on PlatformException catch (e) {
+      _ready = false;
+      _initProblem = e.code == 'recognizerNotAvailable'
+          ? 'Este teléfono no tiene reconocimiento de voz. Instala o activa la app de Google.'
+          : 'No pude iniciar el reconocimiento de voz (${e.code}).';
+      return false;
+    } catch (e) {
+      _ready = false;
+      _initProblem = 'No pude iniciar el reconocimiento de voz.';
+      return false;
+    }
+    if (!_ready) {
+      var allowed = true;
+      try {
+        allowed = await _stt.hasPermission;
+      } catch (_) {}
+      _initProblem = allowed
+          ? 'No pude iniciar el reconocimiento de voz. Revisa que la app de Google esté activada.'
+          : 'Necesito permiso para usar el micrófono. Actívalo en Ajustes → Apps → Control Domótica → Permisos.';
+      return false;
+    }
+    _attach();
+    try {
+      final locales = await _stt.locales();
+      final spanish = locales.where((l) => l.localeId.toLowerCase().startsWith('es')).map((l) => l.localeId).toList();
+      final system = await _stt.systemLocale();
+      _locale = (system != null && system.localeId.toLowerCase().startsWith('es')) ? system.localeId : (spanish.isEmpty ? null : spanish.first);
+    } catch (_) {
+      _locale = null; // se usa el idioma del teléfono
+    }
     return true;
+  }
+
+  /// Conecta los avisos del reconocedor a esta pantalla (otra pantalla pudo haberlos tenido antes).
+  void _attach() {
+    _stt.statusListener = _onStatus;
+    _stt.errorListener = _onError;
+  }
+
+  /// La voz de la app (lo que dice en voz alta), aparte del reconocimiento: así los avisos siempre salen en español.
+  Future<void> _initTts() async {
+    if (_ttsReady) return;
+    try {
+      await _tts.setLanguage('es-ES');
+      await _tts.setSpeechRate(0.56);
+      await _tts.awaitSpeakCompletion(false);
+      _ttsReady = true;
+    } catch (_) {}
   }
 
   /// Prepara el reconocimiento y la voz antes del primer toque, para que la primera orden no espere.
   Future<void> warmUp() async {
-    try {
-      await _init();
-    } catch (_) {
-      // Si falla aquí, se vuelve a intentar al tocar el micrófono y ahí se explica el problema.
-    }
+    await _initTts();
+    await _init(); // si falla, al tocar el micrófono se explica el problema
   }
 
   /// Toca el micrófono: empieza a escuchar. Si ya escuchaba, termina y procesa lo que oyó.
   Future<void> toggle(Session s) async {
+    if (_disposed) return;
     if (listening) return _stop();
+    // Mientras la placa confirma la orden anterior, el micrófono espera: si no, la confirmación vieja
+    // pisaría la orden nueva.
+    if (status == VoiceStatus.working) return;
     _session = s;
     _clear?.cancel();
     _stable?.cancel();
     _clock
       ..reset()
       ..start();
+    await _initTts();
     await _tts.stop(); // que el micrófono no escuche a la propia app
     if (!await _init()) {
-      _show(VoiceStatus.failed, 'No puedo usar el micrófono. Revisa el permiso en Ajustes.');
+      _show(VoiceStatus.failed, _initProblem);
       return;
     }
+    if (_disposed) return;
     _turn++;
     _retried = false;
     heard = '';
@@ -138,20 +201,33 @@ class VoiceController extends ChangeNotifier {
 
   /// Volumen del micrófono (dB que da Android, más o menos de −2 a 10).
   void _onLevel(int turn, double db) {
-    if (turn != _turn) return;
+    if (turn != _turn || _disposed) return;
+    var changed = false;
     if (status == VoiceStatus.starting) {
       _mark('micrófono listo (llegó sonido)');
       status = VoiceStatus.listening;
       HapticFeedback.lightImpact();
+      changed = true; // aunque el primer sonido sea silencio, la barra debe pasar a «Escuchando»
     }
     final v = ((db + 2) / 12).clamp(0.0, 1.0);
-    if ((v - level).abs() < 0.04 && status == VoiceStatus.listening) return;
+    if (!changed && (v - level).abs() < 0.04) return;
     level = v;
     notifyListeners();
   }
 
   Future<void> _listen() async {
     final turn = _turn;
+    _listenStarted = DateTime.now();
+    try {
+      await _listenNow(turn);
+    } catch (e) {
+      if (turn != _turn || _disposed) return;
+      _turn++;
+      _show(VoiceStatus.failed, 'No pude abrir el micrófono. Intenta de nuevo.', speak: false);
+    }
+  }
+
+  Future<void> _listenNow(int turn) async {
     await _stt.listen(
       onResult: (r) {
         if (turn != _turn) return;
@@ -191,6 +267,7 @@ class VoiceController extends ChangeNotifier {
   static const _dangling = {
     'de', 'del', 'la', 'el', 'los', 'las', 'y', 'e', 'al', 'a', 'en', 'con', 'por', 'para', 'que', 'un', 'una', 'mi',
     'luego', 'después', 'despues', 'también', 'tambien', 'además', 'ademas', 'todas', 'todos',
+    'no', 'menos', 'excepto', 'salvo', // «apaga la de la sala, no…»: lo importante viene después
   };
 
   /// Si lo que va escuchando ya es una orden completa y deja de cambiar, la ejecuta sin esperar el silencio final.
@@ -210,9 +287,14 @@ class VoiceController extends ChangeNotifier {
     });
   }
 
+  /// Un aviso que llega justo después de empezar a escuchar es del turno anterior (por ejemplo, el «done» del stop).
+  bool get _stale => DateTime.now().difference(_listenStarted) < _staleWindow;
+
   void _onStatus(String s) {
+    if (_disposed) return;
     final turn = _turn;
     _mark('estado: $s');
+    if (_stale) return;
     // Ojo: Android dice «listening» apenas se pide, antes de estar listo. Por eso no se usa aquí.
     // Dejó de escuchar: se espera un poco el resultado final antes de decidir.
     if ((s == 'done' || s == 'notListening') && status == VoiceStatus.listening) {
@@ -221,8 +303,11 @@ class VoiceController extends ChangeNotifier {
   }
 
   void _onError(SpeechRecognitionError e) {
+    if (_disposed) return;
     final turn = _turn;
     _mark('error: ${e.errorMsg}');
+    final busy = e.errorMsg == 'error_busy' || e.errorMsg == 'error_client';
+    if (_stale && !busy) return; // error del stop() anterior: no cierra este turno
     _lastError = e.errorMsg;
     // El reconocedor seguía ocupado con el turno anterior: se reintenta una vez.
     if ((e.errorMsg == 'error_busy' || e.errorMsg == 'error_client') && !_retried && heard.isEmpty) {
@@ -232,9 +317,19 @@ class VoiceController extends ChangeNotifier {
       });
       return;
     }
-    if (e.errorMsg == 'error_network' || e.errorMsg == 'error_network_timeout' || e.errorMsg == 'error_server') {
+    final problem = switch (e.errorMsg) {
+      'error_network' || 'error_network_timeout' || 'error_server' || 'error_server_disconnected' =>
+        'El reconocimiento de voz necesita internet, o el paquete de voz en español descargado.',
+      'error_permission' || 'error_insufficient_permissions' =>
+        'Necesito permiso para usar el micrófono. Actívalo en Ajustes → Apps → Control Domótica → Permisos.',
+      'error_language_unavailable' || 'error_language_not_supported' =>
+        'El reconocimiento de voz no tiene el español instalado. Agrégalo en los ajustes de voz de Google.',
+      'error_audio_error' => 'Otra app está usando el micrófono. Ciérrala e intenta de nuevo.',
+      _ => null,
+    };
+    if (problem != null) {
       _turn++;
-      _show(VoiceStatus.failed, 'El reconocimiento de voz necesita internet, o el paquete de voz en español descargado.', speak: false);
+      _show(VoiceStatus.failed, problem, speak: false);
       return;
     }
     // Silencio o algo que no se reconoció: se usa lo que haya escuchado.
@@ -251,7 +346,11 @@ class VoiceController extends ChangeNotifier {
       final noMatch = _lastError == 'error_no_match';
       _show(
         VoiceStatus.unclear,
-        noMatch ? 'Te escuché, pero no entendí las palabras. Habla un poco más cerca del teléfono.' : 'No te escuché. Toca el micrófono y habla cuando diga «Escuchando».',
+        _locale == null
+            ? 'Tu teléfono no tiene el español para el reconocimiento de voz. Agrégalo en los ajustes de voz de Google.'
+            : noMatch
+                ? 'Te escuché, pero no entendí las palabras. Habla un poco más cerca del teléfono.'
+                : 'No te escuché. Toca el micrófono y habla cuando diga «Escuchando».',
         speak: false,
       );
     } else if (s != null) {
@@ -268,16 +367,19 @@ class VoiceController extends ChangeNotifier {
       _show(VoiceStatus.unclear, parsed.problem!);
       return;
     }
+    final turn = _turn;
     status = VoiceStatus.working;
     message = cmd.done;
     notifyListeners();
     _mark('orden enviada');
     final problem = await runVoiceCommand(s, cmd);
     _mark(problem == null ? 'la placa confirmó' : 'sin confirmar: $problem');
+    if (_disposed || turn != _turn) return; // se salió de la pantalla o empezó otra orden: no hablar encima
     problem == null ? _show(VoiceStatus.done, cmd.done) : _show(VoiceStatus.failed, problem);
   }
 
   void _show(VoiceStatus st, String text, {bool speak = true}) {
+    if (_disposed) return;
     status = st;
     message = text;
     notifyListeners();
@@ -292,11 +394,15 @@ class VoiceController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _turn++;
     _clear?.cancel();
     _stable?.cancel();
-    _stt.cancel();
-    _tts.stop();
+    // Se sueltan los avisos antes de cancelar: el «notListening» del cancel ya no llega aquí.
+    if (_stt.statusListener == _onStatus) _stt.statusListener = null;
+    if (_stt.errorListener == _onError) _stt.errorListener = null;
+    _stt.cancel().ignore();
+    _tts.stop().ignore();
     super.dispose();
   }
 }

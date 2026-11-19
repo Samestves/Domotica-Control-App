@@ -39,6 +39,16 @@ class _JoystickState extends State<Joystick> {
   }
 
   @override
+  void didUpdateWidget(Joystick old) {
+    super.didUpdateWidget(old);
+    // Si se corta la conexión con el dedo puesto, la perilla vuelve al centro (sin mandar nada).
+    if (old.enabled && !widget.enabled && _knob != Offset.zero) {
+      _knob = Offset.zero;
+      _dragging = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = context.c;
     final s = widget.size;

@@ -66,6 +66,7 @@ extension ControlPins on ControlSpec {
 String? gpioProblem(int gpio, {bool output = true}) {
   if (gpio < 0 || gpio > 39) return 'El ESP32 tiene GPIO del 0 al 39.';
   if (gpio >= 6 && gpio <= 11) return 'Los GPIO 6 a 11 los usa la memoria de la placa.';
+  if (gpio == 1 || gpio == 3) return 'Los GPIO 1 y 3 son el cable USB (Monitor Serie) de la placa.';
   if (const {20, 24, 28, 29, 30, 31}.contains(gpio)) return 'El GPIO $gpio no existe en el ESP32.';
   if (output && gpio >= 34) return 'Los GPIO 34 a 39 solo sirven como entrada.';
   return null;

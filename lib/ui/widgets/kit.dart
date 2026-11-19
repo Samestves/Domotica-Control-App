@@ -28,6 +28,9 @@ class Ic {
   static const play = IconData(0xe3d0, fontFamily: 'PhosphorLight') /* play */;
   static const trash = IconData(0xe4a6, fontFamily: 'PhosphorLight') /* trash */;
   static const lock = IconData(0xe2fa, fontFamily: 'PhosphorLight') /* lock */;
+  static const eye = IconData(0xe220, fontFamily: 'PhosphorLight') /* eye */;
+  static const download = IconData(0xe20c, fontFamily: 'PhosphorLight') /* downloadSimple */;
+  static const eyeOff = IconData(0xe224, fontFamily: 'PhosphorLight') /* eyeSlash */;
   static const lockOpen = IconData(0xe306, fontFamily: 'PhosphorLight') /* lockOpen */;
   static const terminal = IconData(0xeae8, fontFamily: 'PhosphorLight') /* terminalWindow */;
   static const pins = IconData(0xe610, fontFamily: 'PhosphorLight') /* cpu */;
@@ -708,7 +711,13 @@ class Brand extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         const AppMark(size: 28),
         const SizedBox(width: 12),
-        Text('CONTROL DOMÓTICA', style: T.button.copyWith(letterSpacing: 2.6, color: context.c.text)),
+        // Con letra grande en un teléfono angosto, el nombre se achica en vez de salirse.
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('CONTROL DOMÓTICA', maxLines: 1, style: T.button.copyWith(letterSpacing: 2.6, color: context.c.text)),
+          ),
+        ),
       ]),
     );
   }

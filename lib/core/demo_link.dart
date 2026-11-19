@@ -25,6 +25,7 @@ class DemoLink extends DeviceLink {
   Future<void> connect() async {
     setState(LinkState.connecting);
     await Future.delayed(const Duration(milliseconds: 600));
+    if (state != LinkState.connecting) return; // se canceló mientras «conectaba»
     setState(LinkState.connected);
     emitLine('HELLO:Placa demo');
     if (_isCar) {

@@ -24,7 +24,8 @@ class VoiceBar extends StatelessWidget {
         const SizedBox(width: 14),
         _MicButton(
           listening: voice.listening,
-          enabled: session.connected || voice.listening,
+          // Mientras dice «Enviando», el micrófono espera a que la placa confirme.
+          enabled: (session.connected || voice.listening) && voice.status != VoiceStatus.working,
           onTap: () {
             HapticFeedback.mediumImpact();
             voice.toggle(session);

@@ -1,13 +1,16 @@
 /*
-  Carrito 4x4 · programa para el ESP32 del carrito
-  ------------------------------------------------
+  Carrito 4x4 · programa para el ESP32 del carrito · versión carro-0.4
+  --------------------------------------------------------------------
   Cuatro motores TT con dos puentes H L298N. Se maneja desde la misma app de la casa
   (panel «Auto Robot») por Bluetooth LE o por Wi-Fi. Gira como un tanque: para doblar,
   las ruedas de un lado van más lento o hacia atrás.
 
   Wi-Fi propio: el ESP32 crea la red «Carrito 4x4» (contraseña: carrito4x4).
   La app se une a esa red y se conecta a la IP 192.168.4.1, puerto 3333.
-  Bluetooth y Wi-Fi funcionan a la vez: un teléfono por cada uno.
+  Bluetooth y Wi-Fi funcionan a la vez: un teléfono por cada uno. Por Wi-Fi, si ya hay un teléfono
+  con clave conectado, otro que llegue recibe «ERR:ya hay otro telefono conectado por Wi-Fi» y se
+  corta (salvo que el primero lleve 6 s mudo). Un teléfono por Wi-Fi que pasa 6 s sin mandar nada
+  se desconecta (la app manda PING cada 3 s).
 
   Pines virtuales (los mismos del panel del carrito en la app):
     V20  joystick «x,y», cada uno de -100 a 100 (y positivo = adelante, x positivo = derecha)
@@ -19,12 +22,36 @@
     V26  bocina: 1 = pitar un momento
     V27  invertir ruedas: cuatro 0/1 en orden DI, TI, DD, TD. Ej.: V27:0100 invierte la trasera izquierda
 
+  Clave del carrito (de 4 a 8 números; el mismo protocolo que la casa). Por Bluetooth y Wi-Fi el
+  carrito no obedece hasta recibirla, y cada conexión la entrega por su cuenta:
+    AUTH:123456     la app entrega la clave. Respuestas:
+                      AUTH:OK          correcta
+                      AUTH:MAL:2       incorrecta; quedan 2 intentos
+                      AUTH:ESPERA:30   demasiados intentos; hay que esperar 30 s
+                      AUTH:NUEVA       el carrito todavía no tiene clave: hay que crearla
+                      AUTH:PIDE        falta la clave (se envió una orden sin entregarla)
+    CLAVE:123456    crea la clave, o la cambia si ya se entregó la actual. Responde AUTH:OK.
+    Sin clave solo se contesta PING; cualquier otra orden responde AUTH:PIDE (o AUTH:NUEVA).
+    El Monitor Serie (cable USB) no necesita clave. Ahí, CLAVE:BORRAR deja el carrito sin clave.
+    Sin computadora: mantener presionado BOOT 5 s con la placa encendida también la borra
+    (las luces parpadean 3 veces para confirmarlo).
+
   Seguridad:
-    - Si se corta el Bluetooth o el Wi-Fi, los motores se detienen al instante.
-    - Si la app deja de enviar señal por 1 segundo mientras el carrito anda, se detiene solo.
+    - Un solo conductor: el primero (Bluetooth, Wi-Fi o Monitor Serie) que manda joystick o acelerador
+      distinto de cero maneja; a los demás se les responde «ERR:otro telefono esta manejando el carrito».
+      Deja de ser el conductor si se desconecta o pasa 1 segundo sin mandar joystick ni acelerador.
+      Parar (V24:0, V20:0,0, el freno de la app) vale desde cualquiera.
+    - Si se corta el Bluetooth o el Wi-Fi del que maneja, los motores se detienen al instante.
+    - Si el conductor deja de enviar joystick o acelerador por 1 segundo mientras el carrito anda,
+      se detiene solo. PING y las demás órdenes no cuentan como señal.
       (La app 0.7.2 o más nueva repite la orden mientras mantienes el joystick.)
+    - Seguro de manejo: después de conectarse, desconectarse o frenar por falta de señal, no obedece
+      movimientos hasta que el joystick (V20:0,0) y el acelerador (V24:0) lleguen en cero.
     - Arranque suave: los motores no saltan de golpe a toda velocidad.
-    - Con sensor de distancia: no avanza si hay un obstáculo a menos de 15 cm (sí puede girar o retroceder).
+    - Con sensor de distancia: no avanza si hay un obstáculo a menos de 15 cm (sí puede girar o retroceder)
+      y, si aparece uno mientras avanza, frena al instante. Si el sensor deja de contestar avisa con un
+      ERR (y con un OK cuando vuelve).
+    - Si el programa se traba más de 5 s, la placa se reinicia sola (watchdog) y los motores quedan quietos.
 
   Ruedas: DI delantera izquierda · TI trasera izquierda · DD delantera derecha · TD trasera derecha
   Pines de fábrica (los de la guía de armado):
@@ -35,10 +62,12 @@
     TD      B       17              18             19
     Luces 23 · Bocina 5 · Torreta y sensor: sin conectar
 
-  Otros mensajes (por la app o el Monitor Serie a 115200):
+  Otros mensajes (por la app o el Monitor Serie a 115200; todos piden la clave menos PING):
     SYNC                  la placa responde con el estado actual
-    TEST                  mueve cada rueda hacia adelante, una por una, para ver cuál es cuál
-                          (las órdenes que lleguen mientras tanto se descartan)
+    TEST                  mueve cada rueda hacia adelante, una por una, para ver cuál es cuál:
+                          OK:PRUEBA rueda <nombre> por cada una y al final OK:PRUEBA terminada.
+                          Se cancela con «ERR:prueba cancelada: ...» si llega joystick, acelerador o freno,
+                          otro TEST, o se desconecta el teléfono que la pidió.
     PINES                 muestra los pines que está usando
     PING                  responde PONG
     RUEDA:DI:32,33,25     cambia los pines de una rueda (EN, IN1, IN2)
@@ -46,8 +75,10 @@
     SENSOR:21,34          sensor HC-SR04: TRIG en 21 y ECHO en 34 (¡ECHO con divisor de voltaje a 3,3 V!)
     SENSOR:NO             quita el sensor
     MINIMO:35             potencia mínima (%) con la que las ruedas empiezan a girar
-    FABRICA               vuelve a los pines de fábrica
-  Los cambios se guardan en la placa.
+    FABRICA               vuelve a los pines de fábrica (la clave no se borra)
+  Los cambios se guardan en la placa. Los números se revisan (CFG:V23:abc da ERR en vez de usar 0),
+  los GPIO 1 y 3 (Monitor Serie) y 6 a 11 (memoria) no se aceptan, y una línea de más de 120 letras
+  se descarta entera.
 
   Placa: "ESP32 Dev Module" con Partition Scheme "Huge APP". Sin librerías extra.
 */
@@ -56,18 +87,36 @@
 #include <Preferences.h>
 
 // ============ CONFIGURACIÓN ============
+#define FW_VERSION  "carro-0.4"
 #define DEVICE_NAME "Carrito 4x4"
 #define USE_WIFI    1                      // 1 = crear también la red Wi-Fi propia del carrito
+#if USE_WIFI
+#include <WiFi.h>                          // aquí arriba: el IDE declara rawSend(WiFiClient&...) al principio
+#include <lwip/sockets.h>
+#endif
 const char*    AP_PASS = "carrito4x4";     // mínimo 8 letras
 const uint16_t TCP_PORT = 3333;
-const uint32_t SIGNAL_TIMEOUT_MS = 1000;   // sin señal este tiempo => se detiene
+const uint32_t SIGNAL_TIMEOUT_MS = 1000;   // sin joystick ni acelerador del conductor este tiempo => se detiene
+const uint32_t TCP_IDLE_MS = 6000;         // un teléfono por Wi-Fi que no manda nada este tiempo se desconecta
 const uint8_t  RAMP_STEP = 12;             // cuánto cambia la potencia cada 10 ms (arranque suave)
 const int      STOP_CM = 15;               // con sensor: no avanza si hay algo más cerca
+const uint8_t  SENSOR_FAILS = 10;          // lecturas seguidas sin respuesta => avisa que el sensor no responde
 const uint16_t HORN_MS = 350;
 const uint32_t MOTOR_FREQ = 1000;          // Hz del PWM de los motores (el L298N es lento)
+const uint16_t TEST_SPIN_MS = 1200, TEST_PAUSE_MS = 500;   // TEST: cuánto gira cada rueda y la pausa entre ruedas
+const unsigned MAX_LINE = 120;             // una línea más larga se descarta entera
+
+// Clave del carrito (igual que la casa)
+const uint8_t  MAX_FAILS = 3;
+const uint32_t LOCK_MS = 30000;            // espera tras 3 claves incorrectas
+const uint32_t RESET_HOLD_MS = 5000;       // BOOT presionado este tiempo borra la clave
+const int      BOOT_PIN = 0;
 
 enum : uint8_t { VPIN_JOY = 20, VPIN_TURRET = 21, VPIN_DIST = 22, VPIN_LIGHTS = 23,
                  VPIN_THROTTLE = 24, VPIN_REVERSE = 25, VPIN_HORN = 26, VPIN_INVERT = 27 };
+
+// De dónde llegó una línea. Cada conexión entrega la clave por su cuenta (igual que la casa).
+enum Src : uint8_t { SRC_SERIAL, SRC_BLE, SRC_TCP, SRC_NONE };
 
 // ============ AJUSTES GUARDADOS ============
 struct Config {
@@ -99,23 +148,59 @@ bool reverseGear = false, lightsOn = false;
 int16_t target[4] = {0, 0, 0, 0};    // -255..255
 int16_t current[4] = {0, 0, 0, 0};
 int distanceCm = -1;
-uint32_t lastRx = 0, lastRamp = 0, hornUntil = 0, lastSensor = 0, lastDistReport = 0;
+uint32_t lastRx = 0;                 // última orden de joystick o acelerador del conductor (watchdog de señal)
+uint32_t lastRamp = 0, hornUntil = 0, lastSensor = 0, lastDistReport = 0;
 int lastDistSent = -100;
 bool lastObstacle = false;
+uint8_t sensorFails = 0;             // lecturas seguidas en que el sensor no contestó
 bool turretWarned = false;   // el aviso de «sin torreta» se da una vez por conexión
+
+// Un solo conductor: solo el origen que está manejando puede mover el carrito (parar puede cualquiera).
+Src driver = SRC_NONE;
+uint8_t waitNeutral = 0;     // orígenes (bit 1 << Src) que quisieron manejar mientras otro manejaba: deben soltar los controles antes de tomarlo
+uint8_t warnedSrc = 0;       // a quién ya se le avisó que no puede manejar (un aviso, no uno cada 90 ms)
+
+// Prueba de ruedas (TEST), atendida desde loop() sin bloquear.
+int8_t testWheel = -1;       // rueda que está en prueba (-1 = sin prueba)
+bool testPaused = false;     // true = en la pausa después de girar
+uint32_t testUntil = 0;
+Src testSrc = SRC_SERIAL;    // quién la pidió: si se desconecta, se cancela
+
+bool testRunning() { return testWheel >= 0; }
+
+// Clave del carrito
+volatile bool authed[3] = {true, false, false};   // el cable USB no necesita clave
+String carKey;                                    // "" = el carrito todavía no tiene clave
+uint8_t failCount = 0;
+uint32_t lockStart = 0;
+
+// Seguro de manejo: después de conectarse, desconectarse o frenar por falta de señal, el carrito
+// no obedece movimientos hasta que el joystick (V20:0,0) y el acelerador (V24:0) lleguen en cero.
+// Así no arranca solo si un teléfono reconecta con el acelerador puesto.
+bool driveLocked = true, lockJoyNeutral = false, lockThrottleNeutral = false, lockWarned = false;
+
+void lockDriving() {
+  driveLocked = true;
+  lockJoyNeutral = lockThrottleNeutral = lockWarned = false;
+}
 String lastPrinted;
 
 volatile bool bleConnected = false;
-volatile bool bleJustDisconnected = false;
-volatile bool bleJustConnected = false;
+
+// Línea que se va juntando, una por origen (Serie, BLE, TCP).
+struct LineIn { String buf; bool tooLong = false; };
+LineIn lineIn[3];
+
+void clearLine(Src s) { lineIn[s].buf = ""; lineIn[s].tooLong = false; }
 
 void sendLine(const String& line);
-void discardPendingInput();
+void reply(Src src, const String& line);
 
 // ============ PINES ============
-// Mismas reglas que la app.
+// Mismas reglas que la app, y además los GPIO 1 y 3 (el cable USB del Monitor Serie).
 const char* gpioProblem(int gpio, bool output = true) {
   if (gpio < 0 || gpio > 39) return "el ESP32 tiene GPIO del 0 al 39";
+  if (gpio == 1 || gpio == 3) return "los GPIO 1 y 3 los usa el Monitor Serie (cable USB)";
   if (gpio >= 6 && gpio <= 11) return "los GPIO 6 a 11 los usa la memoria de la placa";
   if (gpio == 20 || gpio == 24 || (gpio >= 28 && gpio <= 31)) return "ese GPIO no existe en el ESP32";
   if (output && gpio >= 34) return "los GPIO 34 a 39 solo sirven como entrada";
@@ -150,10 +235,25 @@ String pinOwner(int gpio) {
   return "";
 }
 
-void releasePin(int gpio) {
+// Igual que pinOwner, pero sin armar textos (se llama en cada vuelta del loop).
+bool pinInUse(int gpio) {
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 3; j++)
+      if (cfg.wheel[i][j] == gpio) return true;
+  return cfg.lights == gpio || cfg.horn == gpio || cfg.turret == gpio || cfg.trig == gpio || cfg.echo == gpio;
+}
+
+// Suelta un pin que deja de usarse sin dejarlo flotando: una entrada del L298N al aire puede mover
+// un motor sola. Queda como salida en su nivel «apagado» (LOW; HIGH para luces o bocina invertidas).
+// ECHO y los GPIO 34-39 quedan como entrada (no deben o no pueden ser salida), y el GPIO 0 vuelve
+// a ser el botón BOOT (en el DevKit ya tiene resistencia a 3,3 V; en LOW borraría la clave).
+void releasePin(int gpio, bool offLevel, bool input) {
   if (gpio < 0) return;
   ledcDetachPin(gpio);
-  pinMode(gpio, INPUT);
+  if (gpio == BOOT_PIN) { pinMode(gpio, INPUT_PULLUP); return; }
+  if (input || gpio >= 34) { pinMode(gpio, INPUT); return; }
+  pinMode(gpio, OUTPUT);
+  digitalWrite(gpio, offLevel ? HIGH : LOW);
 }
 
 void setupWheel(int i) {
@@ -188,6 +288,7 @@ void setupTurret() {
 }
 
 void setupSensor() {
+  sensorFails = 0;
   if (cfg.trig < 0 || cfg.echo < 0) { distanceCm = -1; return; }
   pinMode(cfg.trig, OUTPUT);
   digitalWrite(cfg.trig, LOW);
@@ -203,12 +304,12 @@ void setupAll() {
 }
 
 void releaseAll() {
-  for (int i = 0; i < 4; i++) for (int j = 0; j < 3; j++) releasePin(cfg.wheel[i][j]);
-  releasePin(cfg.lights);
-  releasePin(cfg.horn);
-  releasePin(cfg.turret);
-  releasePin(cfg.trig);
-  releasePin(cfg.echo);
+  for (int i = 0; i < 4; i++) for (int j = 0; j < 3; j++) releasePin(cfg.wheel[i][j], LOW, false);
+  releasePin(cfg.lights, cfg.lightsInv, false);
+  releasePin(cfg.horn, cfg.hornInv, false);
+  releasePin(cfg.turret, LOW, false);
+  releasePin(cfg.trig, LOW, false);
+  releasePin(cfg.echo, LOW, true);
 }
 
 // ============ MOTORES ============
@@ -258,13 +359,21 @@ bool moving() {
   return false;
 }
 
-// Detiene todo al instante (sin rampa).
+// Detiene todo al instante (sin rampa). También termina la prueba de ruedas, si estaba corriendo.
 void stopNow(const char* why) {
   bool was = moving();
+  testWheel = -1;
   joyX = joyY = throttle = 0;
   for (int i = 0; i < 4; i++) { target[i] = current[i] = 0; applyWheel(i); }
   lastPrinted = "";
   if (was && why) sendLine(String("ERR:") + why);
+}
+
+// Cancela la prueba de ruedas (si está corriendo): motores quietos y un ERR que dice por qué.
+void abortTest(const char* why) {
+  if (!testRunning()) return;
+  stopNow(nullptr);
+  sendLine(String("ERR:prueba cancelada: ") + why);
 }
 
 // Arranque y frenado suaves: la potencia se acerca a la pedida poco a poco.
@@ -279,16 +388,77 @@ void loopRamp(uint32_t now) {
   }
 }
 
+// ============ CONDUCTOR ============
+void releaseDriver() { driver = SRC_NONE; warnedSrc = 0; }
+
+// Avisa una sola vez a un origen que su orden de manejo no se aplica.
+void warnOnce(Src src, const char* text) {
+  if (warnedSrc & (1 << src)) return;
+  warnedSrc |= 1 << src;
+  reply(src, text);
+}
+
+// Llegó joystick o acelerador. Parar vale desde cualquier origen; moverse, solo desde el conductor
+// (el primero que se mueve cuando no hay otro). Solo el conductor renueva el watchdog de señal.
+// Devuelve false si la orden se ignora.
+bool acceptDrive(Src src, bool stop) {
+  abortTest(stop ? "llego una orden de parar" : "llego una orden de manejo");
+  uint8_t bit = 1 << src;
+  if (stop) {
+    waitNeutral &= ~bit;
+    warnedSrc &= ~bit;
+    if (src == driver) lastRx = millis();
+    return true;
+  }
+  if (driver != SRC_NONE && driver != src) {
+    waitNeutral |= bit;
+    warnOnce(src, "ERR:otro telefono esta manejando el carrito");
+    return false;
+  }
+  if (waitNeutral & bit) {   // quiso manejar mientras otro manejaba: primero tiene que soltar los controles
+    warnOnce(src, "ERR:suelta el joystick y el acelerador para volver a manejar");
+    return false;
+  }
+  driver = src;
+  lastRx = millis();
+  return true;
+}
+
+// Un teléfono se conectó, se desconectó o perdió la clave: se olvida lo que mandó a medias y, si
+// era el que manejaba (o nadie manejaba), el carrito se detiene con el seguro puesto.
+void sourceChanged(Src s) {
+  clearLine(s);
+  waitNeutral &= ~(1 << s);
+  warnedSrc &= ~(1 << s);
+  turretWarned = false;
+  if (testRunning()) {
+    if (s == testSrc) abortTest("se desconecto el telefono que la pidio");
+    return;
+  }
+  if (driver == s || driver == SRC_NONE) {
+    stopNow(nullptr);
+    lockDriving();
+    releaseDriver();
+  }
+}
+
+// Watchdog de señal: solo lo renuevan el joystick y el acelerador del conductor (no PING ni otras
+// órdenes, así un teléfono en segundo plano que solo manda PING no deja el carrito andando).
 void loopSafety(uint32_t now) {
-  if (bleJustDisconnected) { bleJustDisconnected = false; stopNow(nullptr); Serial.println("Bluetooth desconectado: carrito detenido"); }
-  if (bleJustConnected) { bleJustConnected = false; stopNow(nullptr); lastRx = now; turretWarned = false; }
-  if (moving() && now - lastRx > SIGNAL_TIMEOUT_MS) stopNow("sin señal: el carrito se detuvo");
+  if (testRunning() || now - lastRx <= SIGNAL_TIMEOUT_MS) return;   // la prueba de ruedas no necesita señal
+  // También si quedó algo pedido sin moverse (por ejemplo, el acelerador puesto frente a un obstáculo).
+  if (moving() || joyX || joyY || throttle) { stopNow("sin señal: el carrito se detuvo"); lockDriving(); }
+  if (driver != SRC_NONE) releaseDriver();
 }
 
 // ============ LUCES, BOCINA, SENSOR ============
+void writeLights(bool on) {
+  if (cfg.lights >= 0) digitalWrite(cfg.lights, (on != (bool)cfg.lightsInv) ? HIGH : LOW);
+}
+
 void setLights(bool on) {
   lightsOn = on;
-  if (cfg.lights >= 0) digitalWrite(cfg.lights, (on != (bool)cfg.lightsInv) ? HIGH : LOW);
+  writeLights(on);
 }
 
 void setHorn(bool on) {
@@ -299,22 +469,148 @@ void loopHorn(uint32_t now) {
   if (hornUntil && (int32_t)(now - hornUntil) >= 0) { hornUntil = 0; setHorn(false); }
 }
 
-void loopSensor(uint32_t now) {
-  if (cfg.trig < 0 || cfg.echo < 0 || now - lastSensor < 80) return;
-  lastSensor = now;
+const char* SENSOR_ERR = "ERR:el sensor de distancia no responde: revisa TRIG, ECHO y sus 5 V";
+
+// Dispara el HC-SR04 y mide el eco (como mucho ~35 ms). Devuelve los µs del eco, 0 si no volvió eco
+// dentro de ~4 m (nada adelante) o -1 si el sensor no contestó: el ECHO nunca subió o sigue arriba.
+// (pulseIn daba 0 en los dos casos y no permitía saber si el sensor estaba desconectado.)
+long echoMicros() {
+  if (digitalRead(cfg.echo) == HIGH) return -1;
   digitalWrite(cfg.trig, HIGH);
   delayMicroseconds(10);
   digitalWrite(cfg.trig, LOW);
-  unsigned long us = pulseIn(cfg.echo, HIGH, 25000);   // hasta ~4 m
-  distanceCm = us ? (int)(us / 58) : 400;
+  uint32_t t0 = micros();
+  while (digitalRead(cfg.echo) == LOW) if (micros() - t0 > 10000) return -1;
+  uint32_t t1 = micros();
+  while (digitalRead(cfg.echo) == HIGH) if (micros() - t1 > 25000) return 0;
+  return (long)(micros() - t1);
+}
+
+void loopSensor(uint32_t now) {
+  if (cfg.trig < 0 || cfg.echo < 0 || now - lastSensor < 80) return;
+  lastSensor = now;
+  long us = echoMicros();
+  if (us >= 0) {
+    if (sensorFails >= SENSOR_FAILS) sendLine("OK:el sensor de distancia volvio a responder");
+    sensorFails = 0;
+  } else if (sensorFails < SENSOR_FAILS && ++sensorFails == SENSOR_FAILS) {
+    sendLine(SENSOR_ERR);   // una sola vez, hasta que vuelva a responder
+  }
+  distanceCm = us > 0 ? (int)(us / 58) : 400;
   bool obstacle = obstacleAhead();
-  if (obstacle != lastObstacle) { lastObstacle = obstacle; computeTargets(); }
+  if (obstacle != lastObstacle && !testRunning()) {
+    lastObstacle = obstacle;
+    computeTargets();
+    // Obstáculo adelante: el avance se corta al instante, sin rampa (girar o retroceder sigue con rampa).
+    if (obstacle)
+      for (int i = 0; i < 4; i++)
+        if (current[i] > 0 && current[i] > target[i]) { current[i] = target[i] > 0 ? target[i] : 0; applyWheel(i); }
+  }
   bool changed = abs(distanceCm - lastDistSent) >= 2;
   if ((changed && now - lastDistReport > 300) || now - lastDistReport > 2000) {
     lastDistReport = now;
     lastDistSent = distanceCm;
     sendLine("V" + String(VPIN_DIST) + ":" + String(distanceCm));
   }
+}
+
+// ============ CLAVE (igual que la casa) ============
+void loadKey() {
+  prefs.begin("carro", true);
+  carKey = prefs.getString("clave", "");
+  prefs.end();
+}
+
+// Un origen pierde la clave (el Monitor Serie nunca la pierde).
+void deauth(Src s) {
+  if (s == SRC_SERIAL || !authed[s]) return;
+  authed[s] = false;
+  sourceChanged(s);
+}
+
+// Guarda la clave nueva ("" = sin clave). Las otras conexiones tendrán que entregarla otra vez.
+void storeKey(const String& key, Src keep) {
+  carKey = key;
+  prefs.begin("carro", false);
+  prefs.putString("clave", key);
+  prefs.end();
+  for (int s = SRC_BLE; s <= SRC_TCP; s++) if (s != keep) deauth((Src)s);
+}
+
+bool validKey(const String& k) {
+  if (k.length() < 4 || k.length() > 8) return false;
+  for (size_t i = 0; i < k.length(); i++) if (!isDigit(k[i])) return false;
+  return true;
+}
+
+// Segundos que faltan del bloqueo por intentos fallidos (0 = sin bloqueo).
+uint32_t lockLeft(uint32_t now) {
+  if (lockStart == 0) return 0;
+  uint32_t elapsed = now - lockStart;
+  if (elapsed >= LOCK_MS) { lockStart = 0; return 0; }
+  return (LOCK_MS - elapsed + 999) / 1000;
+}
+
+// AUTH:<clave>
+void handleAuth(Src src, const String& given) {
+  if (carKey.length() == 0) { reply(src, "AUTH:NUEVA"); return; }
+  uint32_t wait = lockLeft(millis());
+  if (wait) { reply(src, "AUTH:ESPERA:" + String(wait)); return; }
+  if (given == carKey) {
+    failCount = 0;
+    authed[src] = true;
+    reply(src, "AUTH:OK");
+    return;
+  }
+  deauth(src);
+  if (given.length() == 0) { reply(src, "AUTH:PIDE"); return; }   // la app aún no la conoce: no cuenta como intento
+  if (++failCount >= MAX_FAILS) {
+    failCount = 0;
+    lockStart = millis() | 1;   // nunca 0, que significa «sin bloqueo»
+    reply(src, "AUTH:ESPERA:" + String(LOCK_MS / 1000));
+  } else {
+    reply(src, "AUTH:MAL:" + String(MAX_FAILS - failCount));
+  }
+}
+
+// CLAVE:<nueva>. Crear la primera no pide nada; cambiarla exige haber entregado la actual.
+void handleNewKey(Src src, const String& key) {
+  if (src == SRC_SERIAL && key.equalsIgnoreCase("BORRAR")) {
+    storeKey("", SRC_SERIAL);
+    reply(src, "OK:el carrito quedo sin clave");
+    return;
+  }
+  if (carKey.length() && !authed[src]) { reply(src, "AUTH:PIDE"); return; }
+  if (!validKey(key)) { reply(src, "ERR:la clave debe tener de 4 a 8 numeros"); return; }
+  storeKey(key, src);
+  authed[src] = true;
+  reply(src, "AUTH:OK");
+  Serial.println("Clave del carrito guardada");
+}
+
+// Mantener BOOT presionado 5 s borra la clave, por si se olvida y no hay computadora a mano.
+// Las luces parpadean 3 veces para confirmarlo, sin delay(): el loop sigue atendiendo los motores.
+uint8_t blinkLeft = 0;
+uint32_t blinkNext = 0;
+
+void loopResetButton(uint32_t now) {
+  static uint32_t pressStart = 0;
+  static bool done = false;
+  if (blinkLeft && (int32_t)(now - blinkNext) >= 0) {
+    blinkLeft--;
+    blinkNext = now + 250;
+    if (blinkLeft) writeLights(blinkLeft % 2 == 0);   // 6 prendidas, 5 apagadas, ... 1 apagadas
+    else setLights(lightsOn);                         // 0: como estaban
+  }
+  if (pinInUse(BOOT_PIN)) { pressStart = 0; return; }   // el GPIO 0 se usa para otra cosa
+  if (digitalRead(BOOT_PIN) == HIGH) { pressStart = 0; done = false; return; }
+  if (pressStart == 0) pressStart = now | 1;
+  if (done || now - pressStart < RESET_HOLD_MS) return;
+  done = true;
+  storeKey("", SRC_SERIAL);
+  Serial.println("Clave borrada con el boton BOOT");
+  blinkLeft = 7;
+  blinkNext = now;
 }
 
 // ============ MENSAJES ============
@@ -331,6 +627,7 @@ void sync() {
   sendLine("V" + String(VPIN_INVERT) + ":" + invertString());
   if (cfg.turret >= 0) sendLine("V" + String(VPIN_TURRET) + ":" + String(turretAngle));   // la app muestra la torreta solo si existe
   if (distanceCm >= 0) sendLine("V" + String(VPIN_DIST) + ":" + String(distanceCm));
+  if (cfg.trig >= 0 && sensorFails >= SENSOR_FAILS) sendLine(SENSOR_ERR);   // para el teléfono que recién llega
 }
 
 String pinText(int8_t g) { return g < 0 ? String("-") : String((int)g); }
@@ -343,38 +640,70 @@ void showPins() {
            " · sensor " + pinText(cfg.trig) + "," + pinText(cfg.echo) + " · minimo " + String(cfg.minPower) + " %");
 }
 
-// Mueve cada rueda hacia adelante, una por una. Detiene todo antes y después.
-void wheelTest() {
-  stopNow(nullptr);
-  sendLine("OK:PRUEBA cada rueda debe girar hacia ADELANTE");
-  for (int i = 0; i < 4; i++) {
-    sendLine(String("OK:PRUEBA rueda ") + WHEEL_NAME[i]);
-    current[i] = toPower(60);
-    applyWheel(i);
-    delay(1200);
-    current[i] = 0;
-    applyWheel(i);
-    delay(500);
-  }
-  discardPendingInput();   // por ejemplo, otros TEST tocados mientras giraban las ruedas
-  lastRx = millis();
-  sendLine("OK:PRUEBA terminada. Si una rueda giro hacia atras, activa Invertir en esa rueda");
+// Prueba de ruedas: cada rueda gira hacia adelante TEST_SPIN_MS y queda quieta TEST_PAUSE_MS, una por
+// una. La sigue loopTest() sin bloquear, así el loop sigue atendiendo el freno, las conexiones y la clave.
+// (Antes se borraba lo que llegaba durante la prueba; ya no hace falta: ahora cada orden se atiende
+// en el momento, y borrar la cola de Bluetooth perdería los avisos de conexión.)
+void spinTestWheel(int w) {
+  testWheel = w;
+  testPaused = false;
+  sendLine(String("OK:PRUEBA rueda ") + WHEEL_NAME[w]);
+  current[w] = toPower(60);
+  applyWheel(w);
+  testUntil = millis() + TEST_SPIN_MS;
 }
 
-// Lista de tres números separados por coma.
+void startTest(Src src) {
+  if (testRunning()) { abortTest("se pidio TEST otra vez mientras corria"); return; }
+  stopNow(nullptr);
+  releaseDriver();
+  testSrc = src;
+  sendLine("OK:PRUEBA cada rueda debe girar hacia ADELANTE");
+  spinTestWheel(0);
+}
+
+void loopTest(uint32_t now) {
+  if (!testRunning() || (int32_t)(now - testUntil) < 0) return;
+  int w = testWheel;
+  if (!testPaused) {          // terminó de girar: la rueda se detiene y empieza la pausa
+    current[w] = 0;
+    applyWheel(w);
+    testPaused = true;
+    testUntil = now + TEST_PAUSE_MS;
+  } else if (w < 3) {
+    spinTestWheel(w + 1);
+  } else {
+    testWheel = -1;
+    sendLine("OK:PRUEBA terminada. Si una rueda giro hacia atras, activa Invertir en esa rueda");
+  }
+}
+
+// Número entero estricto: solo dígitos, con un «-» delante si hace falta. "abc", "" o "12x" no valen
+// (toInt() los convertía en 0 o en 12 sin avisar).
+bool parseIntStrict(String s, int& out) {
+  s.trim();
+  unsigned i = (s.length() && s[0] == '-') ? 1 : 0;
+  if (s.length() == i || s.length() - i > 6) return false;   // vacío o demasiado largo
+  long v = 0;
+  for (unsigned k = i; k < s.length(); k++) {
+    if (!isDigit(s[k])) return false;
+    v = v * 10 + (s[k] - '0');
+  }
+  out = i ? -v : v;
+  return true;
+}
+
+// Lista de números separados por coma. Devuelve cuántos leyó, o -1 si alguno no es número o sobran.
 int parseList(const String& s, int* out, int maxN) {
   int n = 0, start = 0;
-  while (n < maxN) {
+  while (true) {
     int comma = s.indexOf(',', start);
     String part = comma < 0 ? s.substring(start) : s.substring(start, comma);
-    part.trim();
-    if (!part.length()) return -1;
-    for (unsigned k = 0; k < part.length(); k++) if (!isDigit(part[k])) return -1;
-    out[n++] = part.toInt();
-    if (comma < 0) break;
+    if (n >= maxN || !parseIntStrict(part, out[n])) return -1;
+    n++;
+    if (comma < 0) return n;
     start = comma + 1;
   }
-  return n;
 }
 
 // Revisa una lista de pines nuevos para una pieza. Devuelve el problema, o "" si están bien.
@@ -400,8 +729,9 @@ void handleWheelPins(const String& arg) {   // DI:32,33,25
   const bool out[3] = {true, true, true};
   String problem = checkPins(pins, 3, out, String("rueda ") + WHEEL_CODE[w]);
   if (problem.length()) { sendLine("ERR:" + problem); return; }
+  abortTest("cambiaron los pines de una rueda");
   stopNow(nullptr);
-  for (int j = 0; j < 3; j++) releasePin(cfg.wheel[w][j]);
+  for (int j = 0; j < 3; j++) releasePin(cfg.wheel[w][j], LOW, false);
   for (int j = 0; j < 3; j++) cfg.wheel[w][j] = pins[j];
   setupWheel(w);
   saveConfig();
@@ -410,7 +740,11 @@ void handleWheelPins(const String& arg) {   // DI:32,33,25
 
 void handleCfg(const String& arg) {         // V23:23:0:1
   int vpin, gpio, inv, en;
-  if (sscanf(arg.c_str(), "V%d:%d:%d:%d", &vpin, &gpio, &inv, &en) != 4) { sendLine("ERR:CFG " + arg); return; }
+  int a = arg.indexOf(':'), b = arg.indexOf(':', a + 1), c = arg.indexOf(':', b + 1);
+  if (a < 0 || b < 0 || c < 0 || (arg[0] != 'V' && arg[0] != 'v') ||
+      !parseIntStrict(arg.substring(1, a), vpin) || !parseIntStrict(arg.substring(a + 1, b), gpio) ||
+      !parseIntStrict(arg.substring(b + 1, c), inv) || !parseIntStrict(arg.substring(c + 1), en) ||
+      inv < 0 || inv > 1 || en < 0 || en > 1) { sendLine("ERR:CFG " + arg); return; }
   int8_t* slot; uint8_t* slotInv; const char* name;
   if (vpin == VPIN_LIGHTS) { slot = &cfg.lights; slotInv = &cfg.lightsInv; name = "luces"; }
   else if (vpin == VPIN_HORN) { slot = &cfg.horn; slotInv = &cfg.hornInv; name = "bocina"; }
@@ -421,22 +755,27 @@ void handleCfg(const String& arg) {         // V23:23:0:1
     String problem = checkPins(&gpio, 1, out, name);
     if (problem.length()) { sendLine("ERR:" + problem); return; }
   }
-  releasePin(*slot);
-  *slot = en ? gpio : -1;
-  *slotInv = inv ? 1 : 0;
-  if (vpin == VPIN_TURRET) setupTurret(); else setupOutput(*slot, *slotInv);
-  if (vpin == VPIN_LIGHTS) setLights(lightsOn);
-  saveConfig();
+  int8_t pin = en ? gpio : -1;
+  if (*slot != pin || *slotInv != inv) {   // solo se toca y se graba si cambió (la app lo reenvía al conectar)
+    releasePin(*slot, vpin == VPIN_TURRET ? LOW : *slotInv, false);
+    *slot = pin;
+    *slotInv = inv;
+    if (vpin == VPIN_TURRET) setupTurret(); else setupOutput(*slot, *slotInv);
+    if (vpin == VPIN_LIGHTS) setLights(lightsOn);
+    saveConfig();
+  }
   sendLine(String("OK:") + name + (en ? " GPIO " + String(gpio) + (inv ? " inv" : "") : String(" sin conectar")));
 }
 
 void handleSensor(String arg) {             // 21,34  o  NO
+  arg.trim();
   arg.toUpperCase();
-  releasePin(cfg.trig);
-  releasePin(cfg.echo);
+  releasePin(cfg.trig, LOW, false);
+  releasePin(cfg.echo, LOW, true);
   if (arg == "NO") {
     cfg.trig = cfg.echo = -1;
     distanceCm = -1;
+    sensorFails = 0;
     saveConfig();
     sendLine("OK:sensor quitado");
     return;
@@ -467,57 +806,110 @@ void handleInvert(String v) {               // 0100
     if (v[i] != '0' && v[i] != '1') { sendLine("ERR:V27 necesita cuatro 0/1, por ejemplo 0100"); return; }
     if (v[i] == '1') mask |= 1 << i;
   }
-  stopNow(nullptr);
-  cfg.invertMask = mask;
-  saveConfig();
+  if (mask != cfg.invertMask) {   // solo se graba si cambió (cada escritura gasta la memoria de la placa)
+    abortTest("cambio el sentido de una rueda");
+    stopNow(nullptr);
+    cfg.invertMask = mask;
+    saveConfig();
+  }
   sendLine("V" + String(VPIN_INVERT) + ":" + invertString());
 }
 
-void handleLine(String line) {
+// Con el seguro puesto: anota si este control llegó en cero y quita el seguro cuando los dos lo hicieron.
+// Devuelve true si la orden se puede aplicar.
+bool unlockWith(bool neutral, bool& seen) {
+  if (neutral) seen = true;
+  if (lockJoyNeutral && lockThrottleNeutral) {
+    driveLocked = false;
+    return true;
+  }
+  if (!neutral && !lockWarned) {
+    lockWarned = true;
+    sendLine("ERR:suelta el joystick y el acelerador para volver a manejar");
+  }
+  return false;
+}
+
+// Con el seguro puesto solo cuenta lo que manda el conductor (o cualquiera, si nadie maneja).
+// Mientras hay seguro el carrito ya está detenido, así que ignorar el «parar» de otro no cambia nada.
+bool lockedFor(Src src, bool neutral, bool& seen) {
+  if (!driveLocked) return false;
+  if (driver != SRC_NONE && driver != src) return true;
+  return !unlockWith(neutral, seen);
+}
+
+void handleLine(Src src, String line) {
   line.trim();
   if (!line.length()) return;
-  lastRx = millis();
   String up = line;
   up.toUpperCase();
 
-  if (up == "PING") { sendLine("PONG"); return; }
+  if (up == "PING") { reply(src, "PONG"); return; }   // sin clave también; no cuenta como señal de manejo
+  if (up.startsWith("AUTH:")) { handleAuth(src, line.substring(5)); return; }
+  if (up.startsWith("CLAVE:")) { handleNewKey(src, line.substring(6)); return; }
+  if (!authed[src]) { reply(src, carKey.length() ? "AUTH:PIDE" : "AUTH:NUEVA"); return; }
+
   if (up == "SYNC") { sync(); return; }
-  if (up == "TEST") { wheelTest(); return; }
+  if (up == "TEST") { startTest(src); return; }
   if (up == "PINES") { showPins(); return; }
-  if (up == "FABRICA") { stopNow(nullptr); releaseAll(); cfg = DEFAULTS; saveConfig(); setupAll(); sendLine("OK:pines de fabrica"); showPins(); return; }
-  if (up.startsWith("AUTH:")) { sendLine("ERR:AUTH no se usa en el carrito"); return; }   // la app entiende: placa sin clave
+  if (up == "FABRICA") {
+    abortTest("cambiaron los pines");
+    stopNow(nullptr); releaseAll(); cfg = DEFAULTS; saveConfig(); setupAll();
+    sendLine("OK:pines de fabrica"); showPins();
+    return;
+  }
   if (up.startsWith("RUEDA:")) { handleWheelPins(line.substring(6)); return; }
   if (up.startsWith("CFG:")) { handleCfg(line.substring(4)); return; }
   if (up.startsWith("SENSOR:")) { handleSensor(line.substring(7)); return; }
   if (up.startsWith("MINIMO:")) {
-    int m = line.substring(7).toInt();
-    if (m < 0 || m > 90) { sendLine("ERR:MINIMO va de 0 a 90"); return; }
-    cfg.minPower = m;
-    saveConfig();
+    int m;
+    if (!parseIntStrict(line.substring(7), m) || m < 0 || m > 90) { sendLine("ERR:MINIMO va de 0 a 90"); return; }
+    if (m != cfg.minPower) { cfg.minPower = m; saveConfig(); }
     computeTargets();
     sendLine("OK:minimo " + String(m) + " %");
     return;
   }
 
   int colon = line.indexOf(':');
-  if (line[0] != 'V' || colon < 2) { sendLine("ERR:no entiendo " + line); return; }
-  int vpin = line.substring(1, colon).toInt();
+  int vpin;
+  if (line[0] != 'V' || colon < 2 || !parseIntStrict(line.substring(1, colon), vpin)) { sendLine("ERR:no entiendo " + line); return; }
   String v = line.substring(colon + 1);
+  int n = 0;   // valor de los pines que llevan un solo número
+  bool single = vpin == VPIN_TURRET || vpin == VPIN_LIGHTS || vpin == VPIN_THROTTLE || vpin == VPIN_REVERSE || vpin == VPIN_HORN;
+  if (single && !parseIntStrict(v, n)) { sendLine("ERR:V" + String(vpin) + " necesita un numero"); return; }
 
   switch (vpin) {
     case VPIN_JOY: {
       int comma = v.indexOf(',');
-      if (comma < 0) { sendLine("ERR:V20 necesita x,y"); return; }
-      joyX = v.substring(0, comma).toInt();
-      joyY = v.substring(comma + 1).toInt();
+      int x, y;
+      if (comma < 0 || !parseIntStrict(v.substring(0, comma), x) || !parseIntStrict(v.substring(comma + 1), y)) {
+        sendLine("ERR:V20 necesita x,y");
+        return;
+      }
+      bool stop = x == 0 && y == 0;
+      if (!acceptDrive(src, stop) || lockedFor(src, stop, lockJoyNeutral)) return;
+      joyX = x;
+      joyY = y;
       computeTargets();
       return;   // sin respuesta: llegan muchos por segundo
     }
-    case VPIN_THROTTLE: throttle = constrain(v.toInt(), 0, 100); computeTargets(); return;
-    case VPIN_REVERSE:  reverseGear = v.toInt() != 0; computeTargets(); sendLine("V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0)); return;
-    case VPIN_LIGHTS:   setLights(v.toInt() != 0); sendLine("V" + String(VPIN_LIGHTS) + ":" + String(lightsOn ? 1 : 0)); return;
+    case VPIN_THROTTLE: {
+      int t = constrain(n, 0, 100);
+      if (!acceptDrive(src, t == 0) || lockedFor(src, t == 0, lockThrottleNeutral)) return;
+      throttle = t;
+      computeTargets();
+      return;
+    }
+    case VPIN_REVERSE:
+      if (driver != SRC_NONE && driver != src) {   // la reversa cambia el sentido del que maneja: solo él la toca
+        warnOnce(src, "ERR:otro telefono esta manejando el carrito");
+        reply(src, "V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0));
+        return;
+      }
+      reverseGear = n != 0; computeTargets(); sendLine("V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0)); return;
+    case VPIN_LIGHTS:   setLights(n != 0); sendLine("V" + String(VPIN_LIGHTS) + ":" + String(lightsOn ? 1 : 0)); return;
     case VPIN_HORN:
-      if (v.toInt()) { setHorn(true); hornUntil = millis() + HORN_MS; } else { setHorn(false); hornUntil = 0; }
+      if (n) { setHorn(true); hornUntil = millis() + HORN_MS; } else { setHorn(false); hornUntil = 0; }
       return;
     case VPIN_TURRET:
       if (cfg.turret < 0) {
@@ -525,7 +917,7 @@ void handleLine(String line) {
         turretWarned = true;
         return;
       }
-      turretAngle = constrain(v.toInt(), 0, 359);
+      turretAngle = constrain(n, 0, 359);
       writeTurret();
       return;
     case VPIN_INVERT: handleInvert(v); return;
@@ -533,11 +925,20 @@ void handleLine(String line) {
   }
 }
 
-void feedChar(String& buf, char k) {
+// Junta caracteres hasta completar una línea. Una línea de más de MAX_LINE letras se descarta entera
+// (antes se cortaba y se ejecutaba el pedazo).
+void feedChar(Src src, char k) {
+  LineIn& in = lineIn[src];
   if (k == '\n' || k == '\r') {
-    if (buf.length()) { String l = buf; buf = ""; handleLine(l); }
-  } else if (buf.length() < 120) {
-    buf += k;
+    if (in.tooLong) { clearLine(src); reply(src, "ERR:linea demasiado larga (mas de 120 letras): se descarto"); return; }
+    if (in.buf.length()) { String l = in.buf; in.buf = ""; handleLine(src, l); }
+  } else if (in.tooLong) {
+    // se ignora hasta el fin de la línea
+  } else if (in.buf.length() >= MAX_LINE) {
+    in.buf = "";
+    in.tooLong = true;
+  } else {
+    in.buf += k;
   }
 }
 
@@ -550,17 +951,28 @@ void feedChar(String& buf, char k) {
 #define NUS_TX      "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 const size_t BLE_CHUNK = 20;
 BLECharacteristic* txChar = nullptr;
-QueueHandle_t bleRxQueue;
-String bleBuffer;
+QueueHandle_t bleRxQueue;             // bytes recibidos; el Bluetooth corre en otra tarea
+
+// Marcas que el Bluetooth mete en la cola al conectarse o desconectarse un teléfono. loop() las lee
+// en orden con los bytes, así lo que quedó del teléfono anterior (una línea a medias, un AUTH viejo)
+// nunca se aplica al nuevo. Son bytes que la app no usa; si un teléfono los manda, se descartan.
+const uint8_t BLE_MARK_ON = 0x01, BLE_MARK_OFF = 0x02;
+
+void bleMark(uint8_t mark) {
+  authed[SRC_BLE] = false;            // ya mismo: no enviarle nada al teléfono nuevo antes de su clave
+  xQueueReset(bleRxQueue);            // bytes viejos fuera
+  xQueueSend(bleRxQueue, &mark, 0);   // la cola quedó vacía: siempre cabe
+}
 
 class ServerCb : public BLEServerCallbacks {
-  void onConnect(BLEServer*) override { bleConnected = true; bleJustConnected = true; }
-  void onDisconnect(BLEServer* s) override { bleConnected = false; bleJustDisconnected = true; s->getAdvertising()->start(); }
+  void onConnect(BLEServer*) override { bleMark(BLE_MARK_ON); bleConnected = true; }
+  void onDisconnect(BLEServer* s) override { bleConnected = false; bleMark(BLE_MARK_OFF); s->getAdvertising()->start(); }
 };
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     const uint8_t* data = c->getData();
-    for (size_t i = 0; i < c->getLength(); i++) xQueueSend(bleRxQueue, &data[i], 0);
+    for (size_t i = 0; i < c->getLength(); i++)
+      if (data[i] != BLE_MARK_ON && data[i] != BLE_MARK_OFF) xQueueSend(bleRxQueue, &data[i], 0);
   }
 };
 
@@ -584,7 +996,15 @@ void setupBle() {
 
 void loopBle() {
   uint8_t k;
-  while (xQueueReceive(bleRxQueue, &k, 0) == pdTRUE) feedChar(bleBuffer, (char)k);
+  while (xQueueReceive(bleRxQueue, &k, 0) == pdTRUE) {
+    if (k == BLE_MARK_ON || k == BLE_MARK_OFF) {
+      authed[SRC_BLE] = false;   // otra vez, en orden: un AUTH viejo procesado recién no autentica al nuevo
+      sourceChanged(SRC_BLE);
+      Serial.println(k == BLE_MARK_ON ? "Bluetooth conectado" : "Bluetooth desconectado");
+    } else {
+      feedChar(SRC_BLE, (char)k);
+    }
+  }
 }
 
 void bleSend(const String& out) {
@@ -600,11 +1020,22 @@ void bleSend(const String& out) {
 
 // ============ WI-FI (red propia, TCP) ============
 #if USE_WIFI
-#include <WiFi.h>
 WiFiServer tcpServer(TCP_PORT);
 WiFiClient tcpClient;
-String tcpBuffer;
 bool tcpWasConnected = false;
+uint32_t tcpLastRx = 0;               // último byte recibido del teléfono por Wi-Fi
+
+// Escribe sin esperar. WiFiClient::print puede trabar el loop hasta 10 s si el teléfono no recibe
+// (salió de alcance) y se llenó lo pendiente; aquí, si no cabe, se corta esa conexión.
+bool rawSend(WiFiClient& c, const String& text) {
+  int fd = c.fd();
+  if (fd < 0 || !c.connected()) return false;
+  int sent = lwip_send(fd, text.c_str(), text.length(), MSG_DONTWAIT);
+  if (sent == (int)text.length()) return true;
+  Serial.println("Wi-Fi: el telefono no recibe; se corta la conexion");
+  c.stop();
+  return false;
+}
 
 void setupWifi() {
   WiFi.mode(WIFI_AP);
@@ -614,75 +1045,97 @@ void setupWifi() {
   Serial.println("Wi-Fi propio listo: red \"" DEVICE_NAME "\", IP " + WiFi.softAPIP().toString() + ", puerto " + String(TCP_PORT));
 }
 
-void loopWifi() {
+void loopWifi(uint32_t now) {
+  bool active = tcpClient.connected();
+  if (active && now - tcpLastRx > TCP_IDLE_MS) {   // conexión medio abierta: el teléfono no da señales
+    tcpClient.stop();
+    active = false;
+    Serial.println("Wi-Fi: el telefono no da senales hace 6 s; se corta la conexion");
+  }
   if (tcpServer.hasClient()) {
-    if (tcpClient && tcpClient.connected()) tcpClient.stop();   // un teléfono a la vez por Wi-Fi
-    tcpClient = tcpServer.accept();
-    tcpClient.setNoDelay(true);
-    tcpBuffer = "";
-    tcpWasConnected = true;
-    stopNow(nullptr);
-    lastRx = millis();
-    sendLine("HELLO:" DEVICE_NAME);
+    WiFiClient incoming = tcpServer.accept();
+    if (active && authed[SRC_TCP]) {   // no se expulsa a un teléfono con clave que sigue activo
+      while (incoming.available()) incoming.read();   // si quedan datos sin leer, el cierre borraría el aviso
+      rawSend(incoming, "ERR:ya hay otro telefono conectado por Wi-Fi\n");
+      incoming.stop();
+      Serial.println("Wi-Fi: se rechazo otro telefono (ya hay uno conectado)");
+    } else {
+      if (active) tcpClient.stop();   // el anterior todavía no entregaba la clave: se reemplaza
+      tcpClient = incoming;
+      tcpClient.setNoDelay(true);
+      tcpLastRx = now;
+      tcpWasConnected = true;
+      authed[SRC_TCP] = false;   // cada teléfono que se conecta entrega la clave de nuevo
+      sourceChanged(SRC_TCP);
+      Serial.println("Wi-Fi: telefono conectado");
+      reply(SRC_TCP, "HELLO:" DEVICE_NAME);
+    }
   }
-  if (tcpWasConnected && !(tcpClient && tcpClient.connected())) {
+  if (tcpWasConnected && !tcpClient.connected()) {
     tcpWasConnected = false;
-    stopNow(nullptr);
-    Serial.println("Wi-Fi desconectado: carrito detenido");
+    authed[SRC_TCP] = false;
+    sourceChanged(SRC_TCP);
+    Serial.println("Wi-Fi desconectado");
   }
-  while (tcpClient && tcpClient.connected() && tcpClient.available()) feedChar(tcpBuffer, tcpClient.read());
+  // Como mucho 512 bytes por vuelta, para que un teléfono que manda sin parar no trabe el loop.
+  for (int n = 0; n < 512 && tcpClient.connected() && tcpClient.available(); n++) {
+    tcpLastRx = millis();
+    feedChar(SRC_TCP, (char)tcpClient.read());
+  }
 }
 #endif
 
+// Respuesta solo para quien preguntó (por ejemplo, el resultado de la clave).
+void reply(Src src, const String& line) {
+  Serial.println("-> " + line);
+  if (src == SRC_BLE) bleSend(line + "\n");
+#if USE_WIFI
+  if (src == SRC_TCP && tcpClient.connected()) rawSend(tcpClient, line + "\n");
+#endif
+}
+
+// Aviso para todos: el Monitor Serie y cada teléfono que ya entregó la clave.
 void sendLine(const String& line) {
   Serial.println("-> " + line);
-  bleSend(line + "\n");
+  if (authed[SRC_BLE]) bleSend(line + "\n");
 #if USE_WIFI
-  if (tcpClient && tcpClient.connected()) tcpClient.print(line + "\n");
+  if (authed[SRC_TCP] && tcpClient.connected()) rawSend(tcpClient, line + "\n");
 #endif
 }
 
 // ============ PROGRAMA PRINCIPAL ============
-String serialBuffer;
-
-// Borra lo que llegó y todavía no se leyó (por Bluetooth, Wi-Fi o cable).
-void discardPendingInput() {
-  xQueueReset(bleRxQueue);
-  bleBuffer = "";
-  while (Serial.available()) Serial.read();
-  serialBuffer = "";
-#if USE_WIFI
-  while (tcpClient && tcpClient.available()) tcpClient.read();
-  tcpBuffer = "";
-#endif
-}
-
 void setup() {
   loadConfig();
   setupAll();            // motores quietos lo antes posible
   setLights(false);
   setHorn(false);
+  if (!pinInUse(BOOT_PIN)) pinMode(BOOT_PIN, INPUT_PULLUP);   // botón BOOT: 5 s presionado borra la clave
+  loadKey();
 
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n== " DEVICE_NAME " ==");
+  Serial.println("\n== " DEVICE_NAME " (" FW_VERSION ") ==");
   setupBle();
 #if USE_WIFI
   setupWifi();
 #endif
   showPins();
+  Serial.println(carKey.length() ? "El carrito tiene clave." : "El carrito no tiene clave: el primer telefono que se conecte la crea.");
   Serial.println("Escribe mensajes aqui mismo para probar, por ejemplo: V20:0,60 (adelante) o TEST");
+  enableLoopWDT();       // si loop() se traba más de 5 s, la placa se reinicia (los motores quedan quietos)
 }
 
 void loop() {
-  while (Serial.available()) feedChar(serialBuffer, Serial.read());
+  while (Serial.available()) feedChar(SRC_SERIAL, Serial.read());
   loopBle();
 #if USE_WIFI
-  loopWifi();
+  loopWifi(millis());
 #endif
-  uint32_t now = millis();
+  uint32_t now = millis();   // después de leer: lastRx nunca queda «en el futuro»
   loopSafety(now);
+  loopTest(now);
   loopSensor(now);
-  loopRamp(now);
+  if (!testRunning()) loopRamp(now);   // durante la prueba las ruedas las maneja loopTest
   loopHorn(now);
+  loopResetButton(now);
 }

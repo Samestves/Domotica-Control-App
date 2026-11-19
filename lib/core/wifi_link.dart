@@ -17,6 +17,20 @@ class WifiLink extends DeviceLink {
   final _buf = LineBuffer();
 
   bool _closing = false;
+  ConnectionTask<Socket>? _pending;
+
+  /// true mientras esta conexión cuenta como usuaria del Wi-Fi (ver [WifiNet.claim]).
+  bool _claimed = false;
+
+  /// Último aviso de error de la placa: si cierra la conexión justo después, ese es el motivo
+  /// (por ejemplo, «ya hay otro teléfono conectado por Wi-Fi»).
+  String? _lastErr;
+  DateTime _lastErrAt = DateTime(0);
+
+  /// El motivo de cierre, si la placa avisó un error justo antes de cerrar.
+  String _closedWhy() => DateTime.now().difference(_lastErrAt) < const Duration(seconds: 2) && _lastErr != null
+      ? 'La placa cerró la conexión: $_lastErr'
+      : 'La placa cerró la conexión.';
 
   /// Red propia de la placa: si se conoce, la app se une a ella antes de conectar.
   final String? ssid;
@@ -30,6 +44,11 @@ class WifiLink extends DeviceLink {
     _closing = false;
     setState(LinkState.connecting);
     final net = ssid;
+    final other = WifiNet.busyWith(net);
+    if (other != null) {
+      return setState(LinkState.error,
+          'El teléfono ya está unido a «$other» por otra placa. Desconecta esa placa primero: Android deja unirse a una sola red de placa a la vez.');
+    }
     if (net != null && await WifiNet.joined() != net) {
       try {
         await WifiNet.connect(net, password ?? '');
@@ -38,24 +57,46 @@ class WifiLink extends DeviceLink {
         return setState(LinkState.error, e.message);
       }
     }
+    // Después de cada espera: si el usuario canceló mientras tanto, no se sigue.
+    if (_closing) return setState(LinkState.disconnected);
     final onWifi = await _useWifi();
+    if (_closing) return setState(LinkState.disconnected);
     try {
-      final s = await Socket.connect(host, port, timeout: const Duration(seconds: 6));
+      final task = await Socket.startConnect(host, port);
+      _pending = task;
+      final s = await task.socket.timeout(const Duration(seconds: 6), onTimeout: () {
+        task.cancel();
+        throw TimeoutException('sin respuesta');
+      });
+      _pending = null;
+      if (_closing) {
+        s.destroy(); // se abrió justo después de cancelar: se cierra sin usarla
+        return setState(LinkState.disconnected);
+      }
       s.setOption(SocketOption.tcpNoDelay, true);
       _socket = s;
-      _sub = s.cast<List<int>>().transform(utf8.decoder).listen(
-        (chunk) {
-          for (final l in _buf.add(chunk)) {
+      _sub = s.listen(
+        (bytes) {
+          for (final l in _buf.addBytes(bytes)) {
+            if (l.startsWith('ERR:')) {
+              _lastErr = l.substring(4);
+              _lastErrAt = DateTime.now();
+            }
             emitLine(l);
           }
         },
         onError: (e) => _drop('Se perdió la conexión: $e'),
-        onDone: () => _drop(_closing ? null : 'La placa cerró la conexión.'),
+        onDone: () => _drop(_closing ? null : _closedWhy()),
         cancelOnError: true,
       );
+      // Errores al escribir (por ejemplo, si la placa se apaga a mitad): se tratan como una caída.
+      s.done.catchError((Object e) => _drop(_closing ? null : 'Se perdió la conexión.'));
+      WifiNet.claim(net);
+      _claimed = true;
       setState(LinkState.connected);
       await sendLine('PING');
     } catch (e) {
+      _pending = null;
       if (_closing) return setState(LinkState.disconnected); // el usuario canceló
       setState(
         LinkState.error,
@@ -83,12 +124,18 @@ class WifiLink extends DeviceLink {
     _sub = null;
     _socket?.destroy();
     _socket = null;
+    if (_claimed) {
+      _claimed = false;
+      WifiNet.unclaim(ssid);
+    }
     setState(error == null ? LinkState.disconnected : LinkState.error, error);
   }
 
   @override
   Future<void> disconnect() async {
     _closing = true;
+    _pending?.cancel();
+    _pending = null;
     _drop();
   }
 

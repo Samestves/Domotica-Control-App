@@ -39,6 +39,12 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
   ScanResult? _picked;
   bool _scanning = false;
   String? _scanError;
+
+  /// Qué botón ofrecer cuando la búsqueda por Bluetooth falla (activar ubicación, ir a permisos).
+  _BleFix? _bleFix;
+
+  /// Ya se guardó (evita guardar dos veces con un doble toque).
+  bool _saving = false, _saved = false;
   StreamSubscription? _resSub, _scanSub;
 
   // Wi-Fi: redes cercanas de verdad y la red de la placa a la que se unió la app.
@@ -57,19 +63,22 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
     _name.dispose();
     _ip.dispose();
     _port.dispose();
+    // Se unió a la red de una placa y salió sin guardar: el teléfono vuelve a su Wi-Fi de siempre.
+    if (_joined != null && !_saved) WifiNet.releaseIfUnused();
     super.dispose();
   }
 
   Future<void> _scan() async {
     setState(() {
       _scanError = null;
+      _bleFix = null;
       _boards = [];
       _others = [];
       _picked = null;
     });
     try {
       if (await FlutterBluePlus.isSupported == false) {
-        setState(() => _scanError = 'Este teléfono no tiene Bluetooth LE.');
+        if (mounted) setState(() => _scanError = 'Este teléfono no tiene Bluetooth LE.');
         return;
       }
       if (FlutterBluePlus.adapterStateNow != BluetoothAdapterState.on) {
@@ -88,7 +97,20 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
       });
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
     } catch (e) {
-      setState(() => _scanError = 'No se pudo buscar. Activa el Bluetooth y acepta los permisos.');
+      if (!mounted) return;
+      final why = e.toString().toLowerCase();
+      setState(() {
+        if (why.contains('location')) {
+          // Android 11 o más viejo: sin la ubicación encendida no deja buscar por Bluetooth.
+          _scanError = 'Activa la ubicación del teléfono: Android la pide para buscar por Bluetooth.';
+          _bleFix = _BleFix.location;
+        } else if (why.contains('permission')) {
+          _scanError = 'Falta el permiso de Bluetooth (dispositivos cercanos). Dalo en los ajustes de la app.';
+          _bleFix = _BleFix.permission;
+        } else {
+          _scanError = 'No se pudo buscar. Activa el Bluetooth y acepta los permisos.';
+        }
+      });
     }
   }
 
@@ -108,6 +130,8 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
+    _saving = true;
     final d = SavedDevice(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       name: _name.text.trim(),
@@ -124,6 +148,7 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
       wifiPass: _transport == Transport.wifi && _ip.text.trim() == _ownIp ? _joinedPass : null,
     );
     await AppScope.read(context).add(d);
+    _saved = true;
     if (mounted) Navigator.pop(context);
   }
 
@@ -212,6 +237,15 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
             ]),
           ),
         ),
+        if (_bleFix != null) ...[
+          PillButton(
+            _bleFix == _BleFix.location ? 'Activar ubicación' : 'Abrir ajustes de la app',
+            small: true,
+            kind: PillKind.secondary,
+            onTap: _bleFix == _BleFix.location ? WifiNet.openLocationSettings : WifiNet.openAppSettings,
+          ),
+          const SizedBox(height: 12),
+        ],
         RowGroup(
           footer: _scanError ?? _bleHint,
           children: [
@@ -329,39 +363,7 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
     });
   }
 
-  Future<String?> _askPassword(String ssid) {
-    final ctrl = TextEditingController(text: WifiNet.isBoardSsid(ssid) ? WifiNet.defaultPass(ssid) : '');
-    return showAppSheet<String>(context, (sheet) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: SheetHeader(
-              eyebrow: 'Red Wi-Fi',
-              title: ssid,
-              detail: WifiNet.isBoardSsid(ssid)
-                  ? 'Es la red que crea el ESP32. Su contraseña de fábrica ya está escrita.'
-                  : 'Escribe la contraseña de esta red.',
-            ),
-          ),
-          const SizedBox(height: 18),
-          Panel(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: ctrl,
-              autofocus: !WifiNet.isBoardSsid(ssid),
-              style: T.body,
-              decoration: const InputDecoration(hintText: 'Contraseña'),
-              onSubmitted: (v) => Navigator.pop(sheet, v),
-            ),
-          ),
-          const SizedBox(height: 18),
-          PillButton('Unirse', expand: true, onTap: () => Navigator.pop(sheet, ctrl.text)),
-        ]),
-      );
-    });
-  }
+  Future<String?> _askPassword(String ssid) => showAppSheet<String>(context, (_) => _PasswordSheet(ssid: ssid));
 
   /// Prueba que la placa conteste en la IP y el puerto escritos.
   Future<void> _testBoard() async {
@@ -418,13 +420,25 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
               const SizedBox(width: 10),
               Expanded(child: Text(p.message, style: T.small)),
             ]),
-            if (p.wifiOff || p.noPermission || p.locationOff) ...[
+            if (p.wifiOff || p.noPermission || p.locationOff || p.blocked) ...[
               const SizedBox(height: 12),
               PillButton(
-                p.wifiOff ? 'Activar el Wi-Fi' : (p.locationOff ? 'Activar ubicación' : 'Dar permiso'),
+                p.wifiOff
+                    ? 'Activar el Wi-Fi'
+                    : p.locationOff
+                        ? 'Activar ubicación'
+                        : p.blocked
+                            ? 'Abrir ajustes de la app'
+                            : 'Dar permiso',
                 small: true,
                 kind: PillKind.secondary,
-                onTap: p.wifiOff ? WifiNet.openSettings : (p.locationOff ? WifiNet.openLocationSettings : _scanWifi),
+                onTap: p.wifiOff
+                    ? WifiNet.openSettings
+                    : p.locationOff
+                        ? WifiNet.openLocationSettings
+                        : p.blocked
+                            ? WifiNet.openAppSettings
+                            : _scanWifi,
               ),
             ],
           ]),
@@ -612,6 +626,84 @@ class _FieldRow extends StatelessWidget {
             onChanged: (_) => onChanged(),
           ),
         ),
+      ]),
+    );
+  }
+}
+
+enum _BleFix { location, permission }
+
+/// Pide la contraseña de una red. La de la placa viene escrita (es la de fábrica); las demás van ocultas.
+class _PasswordSheet extends StatefulWidget {
+  final String ssid;
+  const _PasswordSheet({required this.ssid});
+
+  @override
+  State<_PasswordSheet> createState() => _PasswordSheetState();
+}
+
+class _PasswordSheetState extends State<_PasswordSheet> {
+  late final bool _board = WifiNet.isBoardSsid(widget.ssid);
+  late final _ctrl = TextEditingController(text: _board ? WifiNet.defaultPass(widget.ssid) : '');
+  late bool _hidden = !_board;
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final v = _ctrl.text;
+    if (!WifiNet.validPassword(v)) {
+      setState(() => _error = 'De 8 a 63 letras o números, sin tildes ni ñ.');
+      return;
+    }
+    Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: SheetHeader(
+            eyebrow: 'Red Wi-Fi',
+            title: widget.ssid,
+            detail: _board ? 'Es la red que crea el ESP32. Su contraseña de fábrica ya está escrita.' : 'Escribe la contraseña de esta red.',
+          ),
+        ),
+        const SizedBox(height: 18),
+        Panel(
+          padding: const EdgeInsets.only(left: 16, right: 4),
+          child: Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _ctrl,
+                autofocus: !_board,
+                obscureText: _hidden,
+                style: T.body,
+                decoration: const InputDecoration(hintText: 'Contraseña'),
+                onSubmitted: (_) => _submit(),
+              ),
+            ),
+            IconButton(
+              tooltip: _hidden ? 'Mostrar contraseña' : 'Ocultar contraseña',
+              onPressed: () => setState(() => _hidden = !_hidden),
+              icon: Icon(_hidden ? Ic.eye : Ic.eyeOff, size: 20, color: c.text2),
+            ),
+          ]),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Text(_error!, style: T.small.copyWith(color: c.red))),
+        ],
+        const SizedBox(height: 18),
+        PillButton('Unirse', expand: true, onTap: _submit),
       ]),
     );
   }

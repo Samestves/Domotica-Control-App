@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../models/pins.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
+import 'clave.dart';
 import 'kit.dart';
 
 /// Ruedas en el orden del programa del carrito: DI, TI, DD, TD.
@@ -40,6 +41,8 @@ class _CarroAjustesState extends State<_CarroAjustes> {
   void initState() {
     super.initState();
     _sub = _s.messages.listen((m) {
+      // La placa cancela la prueba si llega otra orden o se desconecta quien la pidió.
+      if (_testing != null && m.kind == 'ERR' && m.value.startsWith('prueba cancelada')) return _endTest();
       if (_testing == null || m.kind != 'OK' || !m.value.startsWith('PRUEBA')) return;
       if (m.value.contains('terminada')) return _endTest();
       if (m.value.startsWith('PRUEBA rueda ')) setState(() => _testing = m.value.substring('PRUEBA rueda '.length));
@@ -114,6 +117,20 @@ class _CarroAjustesState extends State<_CarroAjustes> {
                 padding: const EdgeInsets.only(top: 10),
                 child: Text('Conecta el carrito para probar e invertir las ruedas.', style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
               ),
+            if (on && _s.keyed) ...[
+              const SizedBox(height: 18),
+              RowGroup(children: [
+                ListRow(
+                  icon: Ic.lock,
+                  title: 'Cambiar la clave',
+                  detail: 'De 4 a 8 números. Los otros teléfonos tendrán que escribir la nueva.',
+                  onTap: () {
+                    Navigator.pop(context);
+                    showChangeClaveSheet(context, _s);
+                  },
+                ),
+              ]),
+            ],
           ]),
         );
       },

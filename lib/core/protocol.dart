@@ -27,6 +27,8 @@
 /// la app entiende que esa placa no usa clave.
 library;
 
+import 'dart:convert';
+
 class Msg {
   final String raw;
   final int? pin;
@@ -63,17 +65,35 @@ bool validClave(String c) => RegExp(r'^\d{4,8}$').hasMatch(c);
 /// Quita saltos de línea para que un texto no rompa el protocolo.
 String clean(String s) => s.replaceAll(RegExp(r'[\r\n]'), ' ');
 
-/// Junta trozos de texto y entrega líneas completas.
+/// Junta trozos que llegan de la placa y entrega líneas completas.
+///
+/// Trabaja con bytes y convierte a texto recién con la línea entera: así una «ñ» o una tilde partida entre
+/// dos paquetes de Bluetooth no se rompe, y un byte inválido se muestra como «�» en vez de cortar la conexión.
+/// Una línea de más de [maxLine] bytes (una placa que nunca manda el salto de línea) se descarta entera.
 class LineBuffer {
-  final StringBuffer _buf = StringBuffer();
+  static const maxLine = 1024;
+  final _bytes = <int>[];
+  bool _tooLong = false;
 
-  List<String> add(String chunk) {
-    _buf.write(chunk);
-    final text = _buf.toString();
-    final parts = text.split('\n');
-    _buf
-      ..clear()
-      ..write(parts.removeLast());
-    return parts.map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
+  List<String> addBytes(List<int> chunk) {
+    final out = <String>[];
+    for (final b in chunk) {
+      if (b == 0x0A) {
+        if (!_tooLong) {
+          final line = utf8.decode(_bytes, allowMalformed: true).trim();
+          if (line.isNotEmpty) out.add(line);
+        }
+        _bytes.clear();
+        _tooLong = false;
+      } else if (_bytes.length < maxLine) {
+        _bytes.add(b);
+      } else {
+        _tooLong = true;
+        _bytes.clear();
+      }
+    }
+    return out;
   }
+
+  List<String> add(String chunk) => addBytes(utf8.encode(chunk));
 }

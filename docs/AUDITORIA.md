@@ -20,6 +20,24 @@ razonables pero no se probaron a mano. Nada se probó en la maqueta ni en el car
 casi siempre y la conexión tiene latido, reintentos y confirmación. Pero hay bugs reales, y cuatro de ellos conviene
 arreglarlos antes de presentar porque mueven cosas que nadie pidió mover.
 
+## Estado de los arreglos
+
+| Hallazgo | Estado |
+|---|---|
+| Todo el trabajo fuera de git (22) | Arreglado: commit `626c9ee` |
+| 1. El carrito arranca solo / sigue en segundo plano | Arreglado en la app (Alpha 0.8.9). En el firmware, el «seguro de manejo» está en **carro-0.3**, compilado pero **todavía no cargado** en el carrito |
+| 2. La voz abre puertas y no entiende el «no» | Arreglado en Alpha 0.8.9 (las frases de la tabla son ahora tests) |
+| 3. Doble toque deshace la orden | Arreglado en Alpha 0.8.9 |
+| 4. Reversa y luces del carrito mal mostradas | Arreglado en Alpha 0.8.9 |
+| Prioridad 2 (conexión, voz, Android, firmware) | Arreglado en Alpha 0.9.0, casa-0.7 y carro-0.4 |
+| Prioridad 3 (respaldo de claves, firma) | Respaldo: arreglado. Firma: lista para usar una llave propia (`android/key.properties`); falta crearla |
+| Menores (tildes partidas, demos, contraste, rendimiento, animación, carrito en pantallas chicas) | Arreglados en Alpha 0.9.0 |
+
+Tests: 71 de 71 pasan. Firmwares casa-0.7 y carro-0.4 compilados y revisados, **todavía sin cargar en las placas**.
+**El carrito con carro-0.4 pide clave** (la primera vez la app pide crearla, como la casa).
+Pendiente: cargar los dos firmwares y probar todo en la maqueta y el carrito. La guía del grupo, el README y `docs/FIRMA.md` ya están al día.
+Compromiso conocido: los intentos de clave van por conexión; quien insista puede reconectarse para probar más. Usen claves de 6 a 8 números.
+
 ---
 
 ## Prioridad 1 — Arreglar antes de presentar

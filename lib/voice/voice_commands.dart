@@ -36,7 +36,17 @@ VoiceParse parseCasaCommand(String heard, {bool Function(ControlSpec)? isEnabled
   final text = normalize(heard);
   if (text.isEmpty) return const VoiceParse.fail('No escuché nada.');
 
-  final clauses = splitClauses(text).map(_Clause.read).toList();
+  // Con un «no» o un «menos», hacer la parte que sí se entendió sería peligroso:
+  // «no abra la puerta principal» la abriría. Mejor no mandar nada y pedirlo de otra forma.
+  final words = text.split(' ');
+  if (words.any(_negations.contains)) return const VoiceParse.fail('Dime solo lo que quieres que haga, sin «no».');
+  if (words.any(_exceptions.contains)) return const VoiceParse.fail('Todavía no entiendo «menos» ni «excepto». Dime cuáles sí.');
+
+  var clauses = splitClauses(text).map(_Clause.read).toList();
+  // «me voy a bañar, prende la luz del baño»: lo que no pide nada se ignora.
+  final useful = clauses.where((c) => !c.isChatter).toList();
+  if (useful.isEmpty) return VoiceParse.fail('No sé qué hacer con «$text».');
+  clauses = useful;
   _fillFromNeighbors(clauses);
 
   final parts = <VoiceCommand>[];
@@ -76,6 +86,23 @@ List<String> splitClauses(String normalized) => ' $normalized '
 
 // ---------------------------------------------------------------------------
 
+const _negations = {'no', 'nunca', 'jamas'};
+const _exceptions = {'menos', 'excepto', 'salvo'};
+
+/// Frases de ambiente: valen solo si son toda la orden («me voy», no «me voy a bañar»).
+const _nightPhrases = {
+  'modo noche', 'buenas noches', 'a dormir', 'me voy', 'nos vamos', 'salgo', 'salimos', 'modo fuera',
+  'me voy a dormir', 'nos vamos a dormir', 'me voy de la casa', 'nos vamos de la casa',
+  'activa el modo noche', 'pon el modo noche', 'activa el modo fuera', 'pon el modo fuera',
+};
+const _homePhrases = {
+  'llegue', 'llegamos', 'estoy en casa', 'estamos en casa', 'modo casa', 'estoy aqui',
+  'activa el modo casa', 'pon el modo casa',
+};
+
+/// Palabras de relleno que pueden ir antes o después de una frase de ambiente («ya llegué», «me voy, chao»).
+final _ambientFiller = RegExp(r'^(?:(?:ya|bueno|pues|oye|hola|casa) )+|(?: (?:ya|casa|chao|adios))+$');
+
 enum _Act { on, off, open, close, half, set }
 
 /// Órdenes completas que no dependen de una pieza.
@@ -94,6 +121,10 @@ class _Clause {
   bool all = false; // «todas», «todo»
   bool plural = false; // «las luces», «las puertas»
 
+  /// No pide nada: ni acción, ni pieza, ni lugar («me voy a bañar», «hola casa»).
+  bool get isChatter =>
+      special == null && act == null && kind == null && room == null && number == null && percent == null && !all;
+
   _Clause(this.text) : words = text.split(' ');
 
   bool has(Iterable<String> options) =>
@@ -106,6 +137,10 @@ class _Clause {
     c.percent = c._readPercent();
     c.act = c._readAct();
     c.kind = c._readKind();
+    // «sube todo», «baja la de la cocina»: subir y bajar son de persianas.
+    if (c.kind == null && c.has(const ['sube', 'subir', 'suba', 'suban', 'subo', 'levanta', 'baja', 'bajar', 'baje', 'bajen', 'bajo'])) {
+      c.kind = ControlKind.blind;
+    }
     c.room = c._readRoom();
     c.number = c._readNumber();
     c.all = c.has(const ['todo', 'toda', 'todas', 'todos']);
@@ -114,12 +149,11 @@ class _Clause {
   }
 
   _Special? _readSpecial() {
-    if (has(const ['modo noche', 'buenas noches', 'a dormir', 'me voy', 'nos vamos', 'salgo', 'salimos', 'modo fuera'])) {
-      return _Special.night;
-    }
-    if (has(const ['ya llegue', 'llegue', 'llegamos', 'estoy en casa', 'modo casa', 'ya estoy aqui'])) return _Special.home;
+    final bare = text.replaceAll(_ambientFiller, '');
+    if (_nightPhrases.contains(bare)) return _Special.night;
+    if (_homePhrases.contains(bare)) return _Special.home;
     if (!has(const ['alarma', 'seguridad', 'sirena'])) return null;
-    if (has(const ['desarma', 'desarmar', 'desactiva', 'desactivar', 'apaga', 'apagar', 'quita', 'quitar', 'deten', 'detener', 'para', 'parar', 'calla', 'silencia', 'silenciar'])) {
+    if (has(const ['desarma', 'desarmar', 'desactiva', 'desactivar', 'apaga', 'apagar', 'quita', 'quitar', 'deten', 'detener', 'calla', 'silencia', 'silenciar'])) {
       return _Special.disarm;
     }
     if (has(const ['suena', 'sonar', 'suene', 'dispara', 'disparar', 'pita', 'timbra']) ||
@@ -127,6 +161,8 @@ class _Clause {
       return _Special.sound;
     }
     if (has(const ['arma', 'armar', 'activa', 'activar', 'pon', 'enciende', 'prende', 'conecta'])) return _Special.arm;
+    // «para la alarma» la desarma; en «arma la alarma para la noche» ya ganó «arma», arriba.
+    if (has(const ['para', 'parar'])) return _Special.disarm;
     return _Special.alarmUnclear;
   }
 
@@ -140,24 +176,28 @@ class _Clause {
     return null;
   }
 
+  /// La luz va primero: en «enciende la luz del portón» se habla de una luz, y el portón es el lugar.
+  /// «Entrada» y «principal» son lugares, no piezas.
   ControlKind? _readKind() {
-    if (has(const ['persiana', 'persianas', 'cortina', 'cortinas', 'ventana', 'ventanas'])) return ControlKind.blind;
-    if (has(const ['puerta', 'puertas', 'porton', 'portones', 'entrada'])) return ControlKind.door;
     if (has(const ['luz', 'luces', 'lampara', 'lamparas', 'foco', 'focos', 'bombillo', 'bombilla'])) return ControlKind.light;
+    if (has(const ['persiana', 'persianas', 'cortina', 'cortinas', 'ventana', 'ventanas'])) return ControlKind.blind;
+    if (has(const ['puerta', 'puertas', 'porton', 'portones'])) return ControlKind.door;
     return null;
   }
 
+  /// Los cuartos con nombre van primero: «la puerta del cuarto principal» es la del cuarto.
   String? _readRoom() {
-    if (has(const ['principal', 'entrada', 'frente', 'calle'])) return 'Entrada';
     if (has(const ['porton', 'garaje', 'garage', 'cochera'])) return 'Garaje';
     if (has(const ['cocina'])) return 'Cocina';
     if (has(const ['bano', 'banos'])) return 'Baño';
     if (has(const ['cuarto', 'habitacion', 'dormitorio', 'recamara', 'pieza'])) return 'Cuarto';
     if (has(const ['sala', 'salon', 'living'])) return 'Sala';
+    if (has(const ['principal', 'entrada', 'frente', 'calle'])) return 'Entrada';
     return null;
   }
 
   int? _readNumber() {
+    if (has(const ['las dos', 'los dos', 'ambas', 'ambos'])) return null; // «las dos luces de la sala»
     for (final w in words) {
       if (w == '1' || w == 'uno') return 1;
       if (w == '2' || w == 'dos') return 2;
@@ -190,6 +230,12 @@ class _Clause {
 void _fillFromNeighbors(List<_Clause> clauses) {
   for (var i = 0; i < clauses.length; i++) {
     final c = clauses[i];
+    // «apaga la luz de la sala y la alarma»: la alarma se desarma; «… y prende la alarma» la arma.
+    if (c.special == _Special.alarmUnclear && i > 0) {
+      final act = clauses[i - 1].act;
+      if (act == _Act.off) c.special = _Special.disarm;
+      if (act == _Act.on) c.special = _Special.arm;
+    }
     if (c.special != null) continue;
     final prev = i > 0 && clauses[i - 1].special == null ? clauses[i - 1] : null;
 
@@ -242,7 +288,12 @@ VoiceParse _build(_Clause c, bool Function(ControlSpec) enabled) {
 
   final act = c.act;
   if (act == null) return VoiceParse.fail('No sé qué hacer con «${c.text}».');
-  final kind = c.kind;
+  var kind = c.kind;
+  // «abre el garaje», «cierra la entrada»: si en ese lugar solo hay un tipo de pieza que se abre, es esa.
+  if (kind == null && c.room != null && act != _Act.on && act != _Act.off) {
+    final kinds = casaControls.where((x) => x.room == c.room && x.kind != ControlKind.light).map((x) => x.kind).toSet();
+    if (kinds.length == 1) kind = kinds.single;
+  }
 
   // «cierra todo», «abre todo»: puertas y persianas
   if (kind == null) {
@@ -291,6 +342,7 @@ VoiceParse _ok(Map<int, int> sends, String done) => VoiceParse.ok(VoiceCommand(s
 VoiceParse _allLights(bool on, bool Function(ControlSpec) enabled) {
   final v = on ? 1 : 0;
   final lights = casaControls.where((x) => x.kind == ControlKind.light && enabled(x));
+  if (lights.isEmpty) return const VoiceParse.fail('No hay luces conectadas.');
   return VoiceParse.ok(VoiceCommand(
     sends: {CasaPins.allLights: v},
     expects: {for (final l in lights) l.vpin: v},
@@ -327,7 +379,8 @@ int? _valueFor(ControlKind kind, _Act act, int? percent) {
     case ControlKind.light:
       return switch (act) { _Act.on => 1, _Act.off => 0, _ => null };
     case ControlKind.door:
-      return switch (act) { _Act.open || _Act.on => 1, _Act.close || _Act.off => 0, _ => null };
+      // Encender o apagar nunca mueve una puerta: solo abrir y cerrar.
+      return switch (act) { _Act.open => 1, _Act.close => 0, _ => null };
     case ControlKind.blind:
       return switch (act) {
         _Act.open => CasaPins.blindMax,

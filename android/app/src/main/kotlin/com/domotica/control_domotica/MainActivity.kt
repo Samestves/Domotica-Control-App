@@ -1,6 +1,7 @@
 package com.domotica.control_domotica
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -11,15 +12,18 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 /**
  * Wi‑Fi de verdad para la app:
@@ -30,6 +34,15 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var permisoPendiente: MethodChannel.Result? = null
+
+    // true si Android ya no muestra la pregunta del permiso («No volver a preguntar»): hay que ir a Ajustes.
+    private var permisoBloqueado = false
+
+    // Búsqueda de redes en curso (para limpiarla si la app se cierra a mitad).
+    private var receptorBusqueda: BroadcastReceiver? = null
+
+    // Respuesta pendiente de «conectarRed»: siempre se contesta una vez, aunque se pida otra red o se suelte.
+    private var resultadoRed: MethodChannel.Result? = null
 
     // Red de la placa a la que la app se unió (la suelta al salir o al pedirlo).
     private var redPlaca: Network? = null
@@ -54,17 +67,88 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "ajustesUbicacion" -> {
-                    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                    abrir(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS), Intent(Settings.ACTION_SETTINGS))
                     result.success(null)
                 }
+                "ajustesApp" -> {
+                    abrir(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)),
+                        Intent(Settings.ACTION_SETTINGS),
+                    )
+                    result.success(null)
+                }
+                "permisoBloqueado" -> result.success(permisoBloqueado)
+                else -> result.notImplemented()
+            }
+        }
+        // Actualizaciones de la app (ver lib/core/updater.dart): la descarga la hace Dart; aquí solo se instala.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "control_domotica/app").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "abi" -> result.success(Build.SUPPORTED_ABIS.firstOrNull())
+                "carpetaActualizaciones" -> {
+                    val carpeta = File(cacheDir, "actualizaciones")
+                    carpeta.mkdirs()
+                    result.success(carpeta.absolutePath)
+                }
+                "puedeInstalar" -> result.success(if (Build.VERSION.SDK_INT >= 26) packageManager.canRequestPackageInstalls() else true)
+                "permisoInstalar" -> {
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        abrir(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")), Intent(Settings.ACTION_SECURITY_SETTINGS))
+                    } else {
+                        abrir(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                    }
+                    result.success(null)
+                }
+                "instalarApk" -> instalarApk(call.argument<String>("ruta") ?: "", result)
                 else -> result.notImplemented()
             }
         }
     }
 
+    /// Abre el instalador de Android con el APK descargado. Android pide confirmar y reemplaza la app
+    /// (los dispositivos guardados se conservan, porque la versión nueva está firmada con la misma llave).
+    private fun instalarApk(ruta: String, result: MethodChannel.Result) {
+        val archivo = File(ruta)
+        if (!archivo.exists()) return result.error("sin_archivo", "No se encontró la descarga. Descárgala otra vez.", null)
+        val uri = try {
+            FileProvider.getUriForFile(this, "$packageName.archivos", archivo)
+        } catch (_: IllegalArgumentException) {
+            return result.error("sin_archivo", "La descarga quedó en un lugar que Android no deja abrir.", null)
+        }
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(intent)
+            result.success(true)
+        } catch (_: ActivityNotFoundException) {
+            result.error("sin_instalador", "Este teléfono no tiene el instalador de Android disponible.", null)
+        }
+    }
+
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        receptorBusqueda?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {
+            }
+        }
+        receptorBusqueda = null
+        resultadoRed = null // la app se cierra: ya no hay a quién contestar
         soltarRed()
         super.onDestroy()
+    }
+
+    /// Abre la primera pantalla de Ajustes que exista en este teléfono (algunas marcas quitan algunas).
+    private fun abrir(vararg intents: Intent) {
+        for (i in intents) {
+            try {
+                startActivity(i)
+                return
+            } catch (_: ActivityNotFoundException) {
+            }
+        }
     }
 
     /**
@@ -105,7 +189,10 @@ class MainActivity : FlutterActivity() {
     private fun tienePermisoWifi() = permisosWifi().all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
 
     private fun pedirPermisoWifi(result: MethodChannel.Result) {
-        if (tienePermisoWifi()) return result.success(true)
+        if (tienePermisoWifi()) {
+            permisoBloqueado = false
+            return result.success(true)
+        }
         permisoPendiente?.success(false)
         permisoPendiente = result
         requestPermissions(permisosWifi(), PEDIDO_WIFI)
@@ -114,7 +201,12 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != PEDIDO_WIFI) return
-        permisoPendiente?.success(grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED })
+        val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+        // Negado y sin «explicación» disponible: el usuario marcó «No volver a preguntar» (o lo negó dos veces).
+        permisoBloqueado = !ok && grantResults.isNotEmpty() && permissions.indices.any { i ->
+            grantResults[i] != PackageManager.PERMISSION_GRANTED && !shouldShowRequestPermissionRationale(permissions[i])
+        }
+        permisoPendiente?.success(ok)
         permisoPendiente = null
     }
 
@@ -129,9 +221,12 @@ class MainActivity : FlutterActivity() {
 
         var respondido = false
         lateinit var receptor: BroadcastReceiver
+        lateinit var espera: Runnable
         fun responder() {
             if (respondido) return
             respondido = true
+            handler.removeCallbacks(espera)
+            receptorBusqueda = null
             try {
                 unregisterReceiver(receptor)
             } catch (_: Exception) {
@@ -145,12 +240,14 @@ class MainActivity : FlutterActivity() {
         receptor = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) = responder()
         }
+        espera = Runnable { responder() }
         val filtro = IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receptor, filtro, Context.RECEIVER_EXPORTED) else registerReceiver(receptor, filtro)
+        receptorBusqueda = receptor
 
         // Android limita las búsquedas seguidas: si no deja buscar, se usan las últimas redes que vio.
         @Suppress("DEPRECATION")
-        if (!wm.startScan()) responder() else handler.postDelayed({ responder() }, 8000)
+        if (!wm.startScan()) responder() else handler.postDelayed(espera, 8000)
     }
 
     private fun resultados(wm: WifiManager): List<Map<String, Any>> {
@@ -178,8 +275,12 @@ class MainActivity : FlutterActivity() {
             abrirAjustesWifi()
             return result.error("android_viejo", "En este Android hay que conectarse desde Ajustes → Wi‑Fi.", null)
         }
+        // Antes de soltar la red actual: una contraseña que Android no acepta no debe dejarte sin red.
+        if (clave.isNotEmpty() && (clave.length !in 8..63 || clave.any { it.code !in 32..126 })) {
+            return result.error("clave_invalida", "La contraseña de una red Wi‑Fi tiene de 8 a 63 letras o números, sin tildes ni ñ.", null)
+        }
         if (ssidPlaca == ssid && redPlaca != null) return result.success(true)
-        soltarRed()
+        soltarRed() // contesta «reemplazada» a un pedido anterior que siguiera esperando
         val cm = getSystemService(ConnectivityManager::class.java) ?: return result.error("sin_wifi", "No se pudo usar el Wi‑Fi.", null)
 
         val spec = WifiNetworkSpecifier.Builder().setSsid(ssid).apply { if (clave.isNotEmpty()) setWpa2Passphrase(clave) }.build()
@@ -189,42 +290,39 @@ class MainActivity : FlutterActivity() {
             .setNetworkSpecifier(spec)
             .build()
 
-        var respondido = false
+        // Los avisos llegan en el hilo principal (handler): sin carreras con las variables de abajo.
+        resultadoRed = result
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                if (callbackPlaca !== this) return // es de un pedido viejo que ya se soltó
                 redPlaca = network
                 ssidPlaca = ssid
                 cm.bindProcessToNetwork(network)
-                handler.post {
-                    if (!respondido) {
-                        respondido = true
-                        result.success(true)
-                    }
-                }
+                resultadoRed?.success(true)
+                resultadoRed = null
             }
 
             override fun onUnavailable() {
+                if (callbackPlaca !== this) return
                 callbackPlaca = null
-                handler.post {
-                    if (!respondido) {
-                        respondido = true
-                        result.error("no_conecto", "No se pudo unir a «$ssid». Revisa la contraseña y que la placa esté encendida.", null)
-                    }
-                }
+                resultadoRed?.error("no_conecto", "No se pudo unir a «$ssid». Revisa la contraseña y que la placa esté encendida.", null)
+                resultadoRed = null
             }
 
             override fun onLost(network: Network) {
-                if (network != redPlaca) return
+                if (callbackPlaca !== this || network != redPlaca) return
                 redPlaca = null
                 ssidPlaca = null
                 cm.bindProcessToNetwork(null)
             }
         }
         callbackPlaca = cb
-        cm.requestNetwork(pedido, cb, 30000)
+        cm.requestNetwork(pedido, cb, handler, 30000)
     }
 
     private fun soltarRed() {
+        resultadoRed?.error("reemplazada", "Se canceló la unión a la red de la placa.", null)
+        resultadoRed = null
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
         callbackPlaca?.let {
             try {
@@ -239,8 +337,8 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun abrirAjustesWifi() {
-        val accion = if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
-        startActivity(Intent(accion))
+        if (Build.VERSION.SDK_INT >= 29) abrir(Intent(Settings.Panel.ACTION_WIFI), Intent(Settings.ACTION_WIFI_SETTINGS))
+        else abrir(Intent(Settings.ACTION_WIFI_SETTINGS))
     }
 
     companion object {

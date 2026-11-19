@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/protocol.dart';
 import '../main.dart';
 import '../models/controls.dart';
 import '../models/device.dart';
 import '../state/app_state.dart';
 import 'theme.dart';
 import 'widgets/carro_ajustes.dart';
+import 'widgets/clave.dart';
 import 'widgets/drive_controls.dart';
 import 'widgets/kit.dart';
 import 'widgets/status.dart';
@@ -22,32 +24,94 @@ class CarroPanel extends StatefulWidget {
   State<CarroPanel> createState() => _CarroPanelState();
 }
 
-class _CarroPanelState extends State<CarroPanel> {
+class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
   int _jx = 0, _jy = 0, _throttle = 0, _turret = 0;
-  bool _reverse = false, _lights = false;
   final _lastSent = <int, DateTime>{};
   Session? _session;
   Timer? _keepAlive;
 
+  /// Si la sesión estaba conectada la última vez que miramos (para notar cortes y reconexiones).
+  bool _wasOn = false;
+
+  /// Falso mientras la app está en segundo plano: no se repite ninguna orden.
+  bool _foreground = true;
+
+  /// Avisos de la placa (por ejemplo, «suelta el joystick y el acelerador»).
+  StreamSubscription? _messages;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _session = AppScope.read(context).session(widget.device);
+    final s = AppScope.read(context).session(widget.device);
+    if (s == _session) return;
+    _session?.removeListener(_onSession);
+    _messages?.cancel();
+    _messages = s.messages.listen(_onMessage);
+    _session = s..addListener(_onSession);
+    _wasOn = s.connected;
+    // Al abrir el panel, la placa recibe «quieto» antes de cualquier movimiento.
+    if (s.connected) WidgetsBinding.instance.addPostFrameCallback((_) => _sendNeutral());
   }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _keepAlive = Timer.periodic(CarPins.keepAlive, (_) => _repeat());
+  }
+
+  /// Si se corta la conexión, el acelerador y el joystick vuelven a cero: al reconectar, el carro
+  /// no arranca solo con la orden vieja. Al volver la conexión, la placa recibe «quieto».
+  void _onSession() {
+    final on = _session?.connected ?? false;
+    if (on == _wasOn || !mounted) return;
+    _wasOn = on;
+    if (on) {
+      scheduleMicrotask(_sendNeutral);
+    } else {
+      setState(_zeroControls);
+    }
+  }
+
+  /// La placa puso el seguro (se cortó la señal): la app suelta sus controles y le avisa «quieto».
+  /// Para volver a andar hay que acelerar o mover el joystick otra vez, a propósito.
+  void _onMessage(Msg m) {
+    if (m.kind != 'ERR' || !m.value.startsWith('suelta') || !mounted) return;
+    HapticFeedback.heavyImpact();
+    setState(_zeroControls);
+    _sendNeutral();
+  }
+
+  /// Si la app pasa a segundo plano (Inicio, una llamada, pantalla apagada), el carro frena.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground || !mounted) return;
+    setState(_zeroControls);
+    _sendNeutral();
+  }
+
+  void _zeroControls() {
+    _jx = 0;
+    _jy = 0;
+    _throttle = 0;
+  }
+
+  void _sendNeutral() => _neutral(_session);
+
+  static void _neutral(Session? s) {
+    if (s == null || !s.connected) return;
+    s.send(CarPins.joystick, '0,0', quiet: true);
+    s.send(CarPins.throttle, 0, quiet: true);
   }
 
   /// Mientras el carro anda, repite la orden actual: la placa frena sola si deja de recibirla.
   /// También corrige el último movimiento del joystick si se lo saltó el límite de 90 ms.
   void _repeat() {
     final s = _session;
-    if (s == null || !s.connected) return;
+    if (s == null || !s.connected || !_foreground) return;
     if (_jx != 0 || _jy != 0) s.send(CarPins.joystick, '$_jx,$_jy', quiet: true);
     if (_throttle != 0) s.send(CarPins.throttle, _throttle, quiet: true);
   }
@@ -55,12 +119,13 @@ class _CarroPanelState extends State<CarroPanel> {
   @override
   void dispose() {
     _keepAlive?.cancel();
-    // Al salir: detener el carro y volver a la orientación normal.
+    _messages?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _session?.removeListener(_onSession);
+    // Al salir: detener el carro (justo después, para no redibujar mientras se cierra la pantalla)
+    // y volver a la orientación normal.
     final s = _session;
-    if (s != null && s.connected) {
-      s.send(CarPins.joystick, '0,0', quiet: true);
-      s.send(CarPins.throttle, 0, quiet: true);
-    }
+    scheduleMicrotask(() => _neutral(s));
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -90,153 +155,182 @@ class _CarroPanelState extends State<CarroPanel> {
     final dist = int.tryParse(s.values[CarPins.distance] ?? '');
     final near = dist != null && dist < 20;
     final speed = [_jy.abs(), _throttle].reduce((a, b) => a > b ? a : b);
+    // Reversa y luces: lo que dice la placa (las recuerda aunque se salga del panel).
+    final reverse = s.values[CarPins.reverse] == '1';
+    final lights = s.values[CarPins.lights] == '1';
     final overlay = (c.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark).copyWith(statusBarColor: Colors.transparent);
+
+    // El carrito (desde carro-0.4) pide clave como la casa: hasta tenerla, se muestra la tarjeta.
+    if (showsClaveCard(s)) {
+      return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlay,
+        child: Scaffold(
+          backgroundColor: c.bg,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 18, 0),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                RoundButton(icon: Ic.back, tooltip: 'Volver', size: 40, onTap: () => Navigator.pop(context)),
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: SingleChildScrollView(padding: const EdgeInsets.only(bottom: 12), child: ClaveCard(session: s)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 40),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
       child: Scaffold(
         backgroundColor: c.bg,
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 18, 12),
-            child: Row(children: [
-              // Izquierda: volver, nombre y joystick
-              SizedBox(
-                width: 206,
-                child: Column(children: [
-                  Row(children: [
-                    RoundButton(icon: Ic.back, tooltip: 'Volver', size: 40, onTap: () => Navigator.pop(context)),
-                    const SizedBox(width: 10),
+          child: LayoutBuilder(builder: (context, box) {
+            // En teléfonos chicos (640 × 360) las columnas de los lados se angostan y la torreta se achica.
+            final side = (box.maxWidth * 0.27).clamp(168.0, 206.0);
+            final compact = box.maxWidth - 2 * side - 60 < 330;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 18, 12),
+              child: Row(children: [
+                // Izquierda: volver, nombre y joystick
+                SizedBox(
+                  width: side,
+                  child: Column(children: [
+                    Row(children: [
+                      RoundButton(icon: Ic.back, tooltip: 'Volver', size: 40, onTap: () => Navigator.pop(context)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Eyebrow('Auto Robot'),
+                          const SizedBox(height: 2),
+                          Text(widget.device.name, style: T.callout, maxLines: 2),
+                        ]),
+                      ),
+                      RoundButton(icon: Ic.wheels, tooltip: 'Ruedas', size: 40, onTap: () => showCarroAjustes(context, s)),
+                    ]),
                     Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Eyebrow('Auto Robot'),
-                        const SizedBox(height: 2),
-                        Text(widget.device.name, style: T.callout, maxLines: 2),
+                      child: Center(
+                        child: Joystick(
+                          size: side < 190 ? side - 8 : 176,
+                          enabled: on,
+                          onChanged: (x, y) {
+                            setState(() {
+                              _jx = x;
+                              _jy = y;
+                            });
+                            _sendThrottled(s, CarPins.joystick, '$x,$y', force: x == 0 && y == 0);
+                          },
+                        ),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(width: 14),
+                // Centro: estado, telemetría, torreta y mensajes
+                Expanded(
+                  child: Column(children: [
+                    Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      Expanded(child: _Telemetry(icon: Ic.speed, label: 'Velocidad', value: '${reverse ? '-' : ''}$speed %')),
+                      const SizedBox(width: 8),
+                      Expanded(child: _Telemetry(icon: Ic.distance, label: 'Obstáculo', value: dist == null ? '—' : '$dist cm', alert: near)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _Telemetry(icon: Ic.steering, label: 'Dirección', value: _jx == 0 ? 'Recto' : (_jx < 0 ? 'Izq. ${-_jx}' : 'Der. $_jx')),
+                      ),
+                    ]),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: Row(children: [
+                        // La torreta aparece solo si la placa dice que tiene una (envía V21 al conectar).
+                        if (s.values.containsKey(CarPins.turret)) ...[
+                          Panel(
+                            padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
+                            child: Row(children: [
+                              Dial360(
+                                value: _turret,
+                                size: compact ? 84 : 104,
+                                enabled: on,
+                                onChanged: (v) {
+                                  setState(() => _turret = v);
+                                  _sendThrottled(s, CarPins.turret, v);
+                                },
+                              ),
+                              if (!compact) ...[
+                                const SizedBox(width: 8),
+                                const Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Eyebrow('Torreta'),
+                                  SizedBox(height: 4),
+                                  Text('Giro 360°', style: T.callout),
+                                ]),
+                              ],
+                            ]),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        Expanded(child: _MiniLog(session: s)),
                       ]),
                     ),
-                    RoundButton(icon: Ic.wheels, tooltip: 'Ruedas', size: 40, onTap: () => showCarroAjustes(context, s)),
                   ]),
-                  Expanded(
-                    child: Center(
-                      child: Joystick(
-                        enabled: on,
-                        onChanged: (x, y) {
-                          setState(() {
-                            _jx = x;
-                            _jy = y;
-                          });
-                          _sendThrottled(s, CarPins.joystick, '$x,$y', force: x == 0 && y == 0);
-                        },
-                      ),
+                ),
+                const SizedBox(width: 14),
+                // Derecha: acelerador y botones
+                SizedBox(
+                  width: side,
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Throttle(
+                      value: _throttle,
+                      enabled: on,
+                      onChanged: (v) {
+                        setState(() => _throttle = v);
+                        _sendThrottled(s, CarPins.throttle, v, force: v == 0);
+                      },
                     ),
-                  ),
-                ]),
-              ),
-              const SizedBox(width: 14),
-              // Centro: estado, telemetría, torreta y mensajes
-              Expanded(
-                child: Column(children: [
-                  Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
-                  const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(child: _Telemetry(icon: Ic.speed, label: 'Velocidad', value: '${_reverse ? '-' : ''}$speed %')),
-                    const SizedBox(width: 8),
-                    Expanded(child: _Telemetry(icon: Ic.distance, label: 'Obstáculo', value: dist == null ? '—' : '$dist cm', alert: near)),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: _Telemetry(icon: Ic.steering, label: 'Dirección', value: _jx == 0 ? 'Recto' : (_jx < 0 ? 'Izq. ${-_jx}' : 'Der. $_jx')),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        _DriveButton(
+                          label: 'Reversa',
+                          icon: Ic.reverse,
+                          active: reverse,
+                          activeColor: c.amber,
+                          onTap: on ? () => s.send(CarPins.reverse, reverse ? 0 : 1) : null,
+                        ),
+                        const SizedBox(height: 8),
+                        _DriveButton(
+                          label: 'Luces',
+                          icon: Ic.headlights,
+                          active: lights,
+                          onTap: on ? () => s.send(CarPins.lights, lights ? 0 : 1) : null,
+                        ),
+                        const SizedBox(height: 8),
+                        _DriveButton(
+                          label: 'Bocina',
+                          icon: Ic.horn,
+                          onTap: on
+                              ? () {
+                                  HapticFeedback.mediumImpact();
+                                  s.send(CarPins.horn, 1, remember: false);
+                                }
+                              : null,
+                        ),
+                        const SizedBox(height: 8),
+                        _DriveButton(label: 'Freno', icon: Ic.brake, active: true, activeColor: c.red, onTap: on ? () => _brake(s) : null),
+                      ]),
                     ),
                   ]),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: Row(children: [
-                      // La torreta aparece solo si la placa dice que tiene una (envía V21 al conectar).
-                      if (s.values.containsKey(CarPins.turret)) ...[
-                        Panel(
-                          padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
-                          child: Row(children: [
-                            Dial360(
-                              value: _turret,
-                              enabled: on,
-                              onChanged: (v) {
-                                setState(() => _turret = v);
-                                _sendThrottled(s, CarPins.turret, v);
-                              },
-                            ),
-                            const SizedBox(width: 8),
-                            const Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Eyebrow('Torreta'),
-                              SizedBox(height: 4),
-                              Text('Giro 360°', style: T.callout),
-                            ]),
-                          ]),
-                        ),
-                        const SizedBox(width: 10),
-                      ],
-                      Expanded(child: _MiniLog(session: s)),
-                    ]),
-                  ),
-                ]),
-              ),
-              const SizedBox(width: 14),
-              // Derecha: acelerador y botones
-              SizedBox(
-                width: 206,
-                child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  Throttle(
-                    value: _throttle,
-                    enabled: on,
-                    onChanged: (v) {
-                      setState(() => _throttle = v);
-                      _sendThrottled(s, CarPins.throttle, v, force: v == 0);
-                    },
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      _DriveButton(
-                        label: 'Reversa',
-                        icon: Ic.reverse,
-                        active: _reverse,
-                        activeColor: c.amber,
-                        onTap: on
-                            ? () {
-                                setState(() => _reverse = !_reverse);
-                                s.send(CarPins.reverse, _reverse ? 1 : 0);
-                              }
-                            : null,
-                      ),
-                      const SizedBox(height: 8),
-                      _DriveButton(
-                        label: 'Luces',
-                        icon: Ic.headlights,
-                        active: _lights,
-                        onTap: on
-                            ? () {
-                                setState(() => _lights = !_lights);
-                                s.send(CarPins.lights, _lights ? 1 : 0);
-                              }
-                            : null,
-                      ),
-                      const SizedBox(height: 8),
-                      _DriveButton(
-                        label: 'Bocina',
-                        icon: Ic.horn,
-                        onTap: on
-                            ? () {
-                                HapticFeedback.mediumImpact();
-                                s.send(CarPins.horn, 1, remember: false);
-                              }
-                            : null,
-                      ),
-                      const SizedBox(height: 8),
-                      _DriveButton(label: 'Freno', icon: Ic.brake, active: true, activeColor: c.red, onTap: on ? () => _brake(s) : null),
-                    ]),
-                  ),
-                ]),
-              ),
-            ]),
-          ),
+                ),
+              ]),
+            );
+          }),
         ),
       ),
     );

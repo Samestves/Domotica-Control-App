@@ -9,7 +9,9 @@ import '../core/ble_link.dart';
 import '../core/demo_link.dart';
 import '../core/link.dart';
 import '../core/protocol.dart';
+import '../core/updater.dart';
 import '../core/wifi_link.dart';
+import '../core/wifi_net.dart';
 import '../models/device.dart';
 import '../models/pins.dart';
 
@@ -84,6 +86,13 @@ class Session extends ChangeNotifier {
   String? _pendingClave;
   Timer? _claveTimer;
 
+  /// true mientras se espera la respuesta a «Cambiar la clave» (solo entonces se avisa «Clave cambiada»).
+  bool _changingClave = false;
+
+  /// Cambia cada vez que el usuario desconecta: un intento de conexión viejo que termina tarde lo nota y se cierra.
+  int _generation = 0;
+  Future<void>? _opening;
+
   Session(this.device, {DeviceLink Function(SavedDevice)? linkFor, this.onDeviceChanged})
       : _linkFor = linkFor ?? _defaultLink;
 
@@ -135,9 +144,13 @@ class Session extends ChangeNotifier {
   Future<void> disconnect() async {
     _wantConnected = false;
     _retries = 0;
+    _generation++;
+    _opening = null;
     _retryTimer?.cancel();
     _stopHeartbeat();
     await _link?.disconnect();
+    // Si era la última placa por Wi-Fi, el teléfono vuelve a su Wi-Fi de siempre.
+    if (device.transport == Transport.wifi) await WifiNet.releaseIfUnused();
     notifyListeners();
   }
 
@@ -160,19 +173,35 @@ class Session extends ChangeNotifier {
     _heartbeatTimer = null;
   }
 
-  Future<void> _open() async {
+  /// Abre la conexión. Si ya hay un intento en marcha (doble toque en «Conectar»), se espera ese mismo.
+  Future<void> _open() {
+    final running = _opening;
+    if (running != null) return running;
+    final f = _openNow(_generation);
+    _opening = f;
+    f.whenComplete(() {
+      if (identical(_opening, f)) _opening = null;
+    });
+    return f;
+  }
+
+  Future<void> _openNow(int generation) async {
     final current = _link?.state;
     if (current == LinkState.connected || current == LinkState.connecting) return;
     await _teardown();
+    if (generation != _generation) return; // el usuario canceló mientras se cerraba la anterior
     final link = _linkFor(device);
     _link = link;
     _subs.add(link.states.listen(_onState));
     _subs.add(link.lines.listen(_onLine));
     notifyListeners();
     await link.connect();
-    if (_link != link) return; // se canceló o se reemplazó mientras conectaba
-    if (!_wantConnected && linked) {
-      await link.disconnect(); // el usuario canceló mientras conectaba
+    if (_link != link) {
+      await link.dispose(); // la reemplazó otro intento: esta queda huérfana y se cierra
+      return;
+    }
+    if (generation != _generation || !_wantConnected) {
+      if (linked) await link.disconnect(); // el usuario canceló mientras conectaba
       return;
     }
     if (linked) {
@@ -189,8 +218,8 @@ class Session extends ChangeNotifier {
       _stopHeartbeat();
       _clearPending();
     }
-    if (s == LinkState.error && _wantConnected && _retries < retryDelays.length) {
-      _retryTimer?.cancel();
+    // Un reintento a la vez: si ya hay uno esperando, otro aviso de error no gasta otro intento.
+    if (s == LinkState.error && _wantConnected && !retrying && _retries < retryDelays.length) {
       _retryTimer = Timer(retryDelays[_retries++], _open);
     }
     notifyListeners();
@@ -207,6 +236,7 @@ class Session extends ChangeNotifier {
   /// Cambia la clave estando ya dentro. La placa responde AUTH:OK y la app guarda la nueva.
   void changeClave(String c) {
     _pendingClave = c;
+    _changingClave = true;
     claveMessage = null;
     _addLog(false, 'CLAVE:${'•' * c.length}');
     _link?.sendLine('CLAVE:$c');
@@ -249,11 +279,12 @@ class Session extends ChangeNotifier {
           device.clave = p;
           onDeviceChanged?.call();
         }
-        if (clave == ClaveState.ok) {
-          claveMessage = 'Clave cambiada';
-        } else {
+        if (clave != ClaveState.ok) {
           _ready();
+        } else if (_changingClave) {
+          claveMessage = 'Clave cambiada';
         }
+        _changingClave = false;
       case 'NUEVA':
         _forgetClave();
         clave = ClaveState.create;
@@ -274,6 +305,11 @@ class Session extends ChangeNotifier {
       case 'PIDE':
         _forgetClave();
         clave = ClaveState.ask;
+      default:
+        // Una versión del programa que responde algo que esta app no conoce: no se queda «Conectando» para siempre.
+        _changingClave = false;
+        clave = ClaveState.ask;
+        claveMessage = 'La placa respondió «$value», que esta versión de la app no entiende.';
     }
   }
 
@@ -298,6 +334,7 @@ class Session extends ChangeNotifier {
     keyed = false;
     claveMessage = null;
     _pendingClave = null;
+    _changingClave = false;
   }
 
   /// La app es la fuente de verdad de los pines: al conectar, envía a la placa
@@ -333,13 +370,18 @@ class Session extends ChangeNotifier {
 
   /// Envía un valor a un pin virtual y lo recuerda para mostrarlo en el panel.
   /// Con [confirm], el control queda «enviando» hasta que la placa responda con ese pin.
+  ///
+  /// Una orden [quiet] que no cambia nada (por ejemplo, la repetición del acelerador cada 200 ms) no avisa a la
+  /// pantalla: si no, toda la app se redibujaría varias veces por segundo sin necesidad.
   void send(int pin, Object value, {bool remember = true, bool quiet = false, bool confirm = false}) {
     final line = pinMsg(pin, value);
-    if (remember) values[pin] = value.toString();
+    final text = value.toString();
+    final changed = remember && values[pin] != text;
+    if (remember) values[pin] = text;
     if (!quiet) _addLog(false, line);
     if (confirm) expect([pin]);
     _link?.sendLine(line);
-    notifyListeners();
+    if (!quiet || changed || confirm) notifyListeners();
   }
 
   // ---------- Confirmación de la placa ----------
@@ -419,16 +461,41 @@ class Session extends ChangeNotifier {
 
 class AppState extends ChangeNotifier {
   static const _key = 'devices_v1';
+  static const _backupKey = 'devices_v1_respaldo';
   final List<SavedDevice> devices = [];
+
+  /// Dispositivos guardados que esta versión no sabe leer (por ejemplo, de una versión más nueva de la app).
+  /// No se muestran, pero se vuelven a guardar tal cual para no perderlos.
+  final List<Object?> _unreadable = [];
   final Map<String, Session> _sessions = {};
 
+  /// Para los tests: conexiones simuladas en vez de Bluetooth o Wi-Fi.
+  final DeviceLink Function(SavedDevice)? linkFor;
+  AppState({this.linkFor});
+
   Session session(SavedDevice d) => _sessions.putIfAbsent(d.id, () {
-        final s = Session(d, onDeviceChanged: save);
+        final s = Session(d, linkFor: linkFor, onDeviceChanged: save);
         s.addListener(notifyListeners);
         return s;
       });
 
   int get connectedCount => _sessions.values.where((s) => s.connected).length;
+
+  /// Versión nueva publicada en GitHub (null si no hay, o si todavía no se revisó).
+  AppRelease? update;
+
+  void setUpdate(AppRelease? r) {
+    update = r;
+    notifyListeners();
+  }
+
+  /// Al abrir la app: revisa en segundo plano si hay una versión nueva. Sin internet no pasa nada
+  /// (se puede buscar a mano en Ajustes).
+  Future<void> checkForUpdateQuietly() async {
+    try {
+      setUpdate(await Updater.check());
+    } catch (_) {}
+  }
 
   static const _showPinsKey = 'ui_show_pins';
 
@@ -455,22 +522,41 @@ class AppState extends ChangeNotifier {
     await prefs.setString(_themeKey, m.name);
   }
 
+  /// Lee lo guardado. Cada dispositivo se lee por separado: si uno está dañado o es de una versión más nueva,
+  /// los demás se cargan igual y ese se conserva sin tocar.
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
-    showPins = prefs.getBool(_showPinsKey) ?? false;
-    theme.value = ThemeMode.values.asNameMap()[prefs.getString(_themeKey)] ?? ThemeMode.system;
-    devices.clear();
-    if (raw != null) {
+    T? read<T>(T? Function() f) {
       try {
-        final list = jsonDecode(raw) as List<dynamic>;
-        devices.addAll(list.map((e) => SavedDevice.fromJson(e as Map<String, dynamic>)));
+        return f();
       } catch (_) {
-        // Si los datos guardados están dañados, empezamos de cero.
+        return null; // un ajuste guardado con otro tipo: se usa el valor por defecto
       }
     }
-    if (devices.isEmpty) {
-      // Primer uso: dos placas demo para que la app no arranque vacía.
+
+    final raw = read(() => prefs.getString(_key));
+    showPins = read(() => prefs.getBool(_showPinsKey)) ?? false;
+    theme.value = ThemeMode.values.asNameMap()[read(() => prefs.getString(_themeKey))] ?? ThemeMode.system;
+    devices.clear();
+    _unreadable.clear();
+    if (raw != null) {
+      List<dynamic>? list;
+      try {
+        list = jsonDecode(raw) as List<dynamic>;
+      } catch (_) {
+        // Todo el texto está dañado: se guarda una copia aparte antes de empezar de cero.
+        await prefs.setString(_backupKey, raw);
+      }
+      for (final e in list ?? const []) {
+        try {
+          devices.add(SavedDevice.fromJson(e as Map<String, dynamic>));
+        } catch (_) {
+          _unreadable.add(e);
+        }
+      }
+    }
+    if (raw == null) {
+      // Primer uso: dos placas demo para que la app no arranque vacía. Si el usuario las borra, no vuelven.
       devices.addAll([
         SavedDevice(id: 'demo-casa', name: 'Casa (demo)', profile: Profile.casa, transport: Transport.demo),
         SavedDevice(id: 'demo-carro', name: 'Auto Robot (demo)', profile: Profile.carro, transport: Transport.demo),
@@ -482,7 +568,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(devices.map((d) => d.toJson()).toList()));
+    await prefs.setString(_key, jsonEncode([...devices.map((d) => d.toJson()), ..._unreadable]));
   }
 
   Future<void> add(SavedDevice d) async {
@@ -498,13 +584,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> remove(SavedDevice d) async {
+    // Primero sale de la lista: así ninguna pantalla vuelve a crear su sesión mientras se desconecta.
+    devices.removeWhere((x) => x.id == d.id);
     final s = _sessions.remove(d.id);
     if (s != null) {
       s.removeListener(notifyListeners);
       await s.disconnect();
       s.dispose();
     }
-    devices.removeWhere((x) => x.id == d.id);
     await save();
     notifyListeners();
   }

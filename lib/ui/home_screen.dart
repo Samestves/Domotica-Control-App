@@ -14,19 +14,35 @@ import 'theme.dart';
 import 'widgets/app_scaffold.dart';
 import 'widgets/kit.dart';
 import 'widgets/status.dart';
+import 'widgets/update_sheet.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  static Future<void> open(BuildContext context, SavedDevice d) async {
-    final s = AppScope.read(context).session(d);
-    if (!s.linked && !s.busy) s.connect();
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => d.profile == Profile.casa ? CasaPanel(device: d) : CarroPanel(device: d),
-    ));
+  /// true mientras se abre una pantalla: un doble toque no abre dos (dos paneles del carrito se pisarían la orientación).
+  static bool _opening = false;
+
+  static Future<void> _push(BuildContext context, Widget screen) async {
+    if (_opening) return;
+    _opening = true;
+    try {
+      final done = Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+      await Future<void>.delayed(const Duration(milliseconds: 450)); // lo que dura la transición
+      _opening = false;
+      await done;
+    } finally {
+      _opening = false;
+    }
   }
 
-  static void _add(BuildContext context) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddDeviceScreen()));
+  static Future<void> open(BuildContext context, SavedDevice d) async {
+    if (_opening) return;
+    final s = AppScope.read(context).session(d);
+    if (!s.linked && !s.busy) s.connect();
+    await _push(context, d.profile == Profile.casa ? CasaPanel(device: d) : CarroPanel(device: d));
+  }
+
+  static void _add(BuildContext context) => _push(context, const AddDeviceScreen());
 
   @override
   Widget build(BuildContext context) {
@@ -52,6 +68,7 @@ class HomeScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
           sliver: SliverList.list(children: [
             for (final s in alerts) ...[_AlertBanner(session: s), const SizedBox(height: 12)],
+            if (app.update != null) ...[UpdateBanner(release: app.update!), const SizedBox(height: 12)],
             if (app.devices.isEmpty) _EmptyState(onAdd: () => _add(context)),
             for (final d in app.devices) ...[_DeviceCard(device: d), const SizedBox(height: 12)],
             const SizedBox(height: 28),
@@ -242,6 +259,17 @@ class _SettingsSheet extends StatelessWidget {
         const SizedBox(height: 18),
         RowGroup(children: [
           ListRow(
+            icon: Ic.download,
+            title: 'Buscar actualización',
+            detail: app.update == null ? 'Tienes $appVersion' : 'Hay una nueva: ${app.update!.title}',
+            trailing: Icon(Ic.chevronRight, size: 18, color: context.c.text3),
+            onTap: () {
+              final found = app.update;
+              Navigator.pop(context);
+              showUpdateSheet(context, release: found);
+            },
+          ),
+          ListRow(
             icon: Ic.info,
             title: 'Acerca de',
             detail: '$appVersion · compilación $appBuild',
@@ -331,26 +359,30 @@ void _showDeviceOptions(BuildContext context, Session s) {
           child: SheetHeader(eyebrow: '${d.profile.label} · ${d.subtitle}', title: d.name),
         ),
         const SizedBox(height: 20),
-        RowGroup(children: [
-          ListRow(
-            icon: s.linked || s.busy ? Ic.unlink : Ic.link,
-            title: s.linked ? 'Desconectar' : (s.busy ? 'Cancelar la conexión' : 'Conectar'),
-            onTap: () {
-              Navigator.pop(sheet);
-              s.linked || s.busy ? s.disconnect() : s.connect();
-            },
-          ),
-          ListRow(
-            icon: Ic.trash,
-            title: 'Eliminar dispositivo',
-            titleColor: c.red,
-            onTap: () async {
-              Navigator.pop(sheet);
-              final ok = await _confirmDelete(context, d);
-              if (ok && context.mounted) AppScope.read(context).remove(d);
-            },
-          ),
-        ]),
+        // Se redibuja si la conexión cambia con la hoja abierta (por ejemplo, se acaban los reintentos).
+        ListenableBuilder(
+          listenable: s,
+          builder: (_, _) => RowGroup(children: [
+            ListRow(
+              icon: s.linked || s.busy ? Ic.unlink : Ic.link,
+              title: s.linked ? 'Desconectar' : (s.busy ? 'Cancelar la conexión' : 'Conectar'),
+              onTap: () {
+                Navigator.pop(sheet);
+                s.linked || s.busy ? s.disconnect() : s.connect();
+              },
+            ),
+            ListRow(
+              icon: Ic.trash,
+              title: 'Eliminar dispositivo',
+              titleColor: c.red,
+              onTap: () async {
+                Navigator.pop(sheet);
+                final ok = await _confirmDelete(context, d);
+                if (ok && context.mounted) AppScope.read(context).remove(d);
+              },
+            ),
+          ]),
+        ),
       ]),
     );
   });

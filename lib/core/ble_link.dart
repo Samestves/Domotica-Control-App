@@ -70,7 +70,7 @@ class BleLink extends DeviceLink {
       _rx = rx;
       await tx.setNotifyValue(true);
       _notifySub = tx.onValueReceived.listen((bytes) {
-        for (final l in _buf.add(utf8.decode(bytes, allowMalformed: true))) {
+        for (final l in _buf.addBytes(bytes)) {
           emitLine(l);
         }
       });
@@ -112,7 +112,7 @@ class BleLink extends DeviceLink {
   Future<void> sendLine(String line) async {
     final rx = _rx;
     final dev = _dev;
-    if (rx == null || dev == null) return;
+    if (rx == null || dev == null || state != LinkState.connected) return;
     final data = utf8.encode('${clean(line)}\n');
     final noResp = rx.properties.writeWithoutResponse;
     final chunk = (dev.mtuNow - 3).clamp(20, 500);
@@ -122,7 +122,8 @@ class BleLink extends DeviceLink {
         await rx.write(data.sublist(i, end), withoutResponse: noResp);
       }
     } catch (e) {
-      setState(LinkState.error, 'No se pudo enviar por Bluetooth.');
+      // Si ya se sabe que se cayó (o el usuario cerró), no hace falta otro aviso.
+      if (!_closing && state == LinkState.connected) setState(LinkState.error, 'No se pudo enviar por Bluetooth.');
     }
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/protocol.dart';
+import '../../models/device.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
 import 'kit.dart';
@@ -9,7 +10,7 @@ import 'kit.dart';
 /// true mientras el panel debe mostrar la tarjeta de la clave en vez de dejar usar los controles.
 bool showsClaveCard(Session s) => s.needsClave || (s.linked && s.keyed && s.clave == ClaveState.checking);
 
-/// Tarjeta para escribir la clave de la casa, o crearla la primera vez.
+/// Tarjeta para escribir la clave de la placa (casa o carrito), o crearla la primera vez.
 class ClaveCard extends StatefulWidget {
   final Session session;
   const ClaveCard({super.key, required this.session});
@@ -43,20 +44,24 @@ class _ClaveCardState extends State<ClaveCard> {
     final c = context.c;
     final checking = _s.clave == ClaveState.checking;
     final locked = _s.clave == ClaveState.locked;
+    final car = _s.device.profile == Profile.carro;
+    final what = car ? 'el carrito' : 'la casa';
+    final of = car ? 'del carrito' : 'de la casa';
+    final thisOne = car ? 'Este carrito' : 'Esta casa';
 
     return Panel(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Icon(_create ? Ic.lockOpen : Ic.lock, size: 40, color: c.text),
         const SizedBox(height: 16),
-        Eyebrow(_create ? 'Primera vez' : 'Clave de la casa'),
+        Eyebrow(_create ? 'Primera vez' : 'Clave $of'),
         const SizedBox(height: 6),
-        Text(_create ? 'Crea la clave de la casa' : 'Esta casa tiene clave', style: T.title),
+        Text(_create ? 'Crea la clave $of' : '$thisOne tiene clave', style: T.title),
         const SizedBox(height: 8),
         Text(
           _create
-              ? 'Elige de 4 a 8 números. Cada teléfono nuevo la pedirá antes de poder controlar la casa. Anótala.'
-              : 'Escríbela para controlar la casa. Este teléfono la recordará.',
+              ? 'Elige de 4 a 8 números. Cada teléfono nuevo la pedirá antes de poder controlar $what. Anótala.'
+              : 'Escríbela para controlar $what. Este teléfono la recordará.',
           style: T.small.copyWith(color: c.text2),
         ),
         const SizedBox(height: 20),
@@ -73,7 +78,9 @@ class _ClaveCardState extends State<ClaveCard> {
         ),
         const SizedBox(height: 16),
         Text(
-          '¿La olvidaron? Mantén presionado el botón BOOT del ESP32 por 5 segundos: las luces parpadean y la casa queda sin clave.',
+          car
+              ? '¿La olvidaron? Mantén presionado el botón BOOT del ESP32 del carrito por 5 segundos: queda sin clave.'
+              : '¿La olvidaron? Mantén presionado el botón BOOT del ESP32 por 5 segundos: las luces parpadean y la casa queda sin clave.',
           style: T.small.copyWith(color: c.text3),
         ),
       ]),

@@ -64,7 +64,7 @@ class Palette extends ThemeExtension<Palette> {
     line2: Color(0xFF30333A),
     text: Color(0xFFF0F0FA),
     text2: Color(0xFF9AA0A9),
-    text3: Color(0xFF5A5F67),
+    text3: Color(0xFF6E737C), // ~4,2:1 sobre negro (antes 3,3:1)
     inverse: Color(0xFFF0F0FA),
     onInverse: Color(0xFF000000),
     green: Color(0xFF3DDC97),
@@ -83,7 +83,7 @@ class Palette extends ThemeExtension<Palette> {
     line2: Color(0xFFCDD0D6),
     text: Color(0xFF0A0B0D),
     text2: Color(0xFF5F646C),
-    text3: Color(0xFFA3A7AE),
+    text3: Color(0xFF767B83), // ~4,1:1 sobre blanco (antes 2,4:1)
     inverse: Color(0xFF0A0B0D),
     onInverse: Color(0xFFFFFFFF),
     green: Color(0xFF119A4F),

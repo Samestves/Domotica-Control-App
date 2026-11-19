@@ -14,6 +14,63 @@ void main() {
     return r.command!;
   }
 
+  group('Frases peligrosas (auditoría del 18-nov)', () {
+    test('pedir una luz nunca mueve una puerta', () {
+      expect(parseCasaCommand('enciende la luz de la entrada').problem, 'En la entrada no hay luz.');
+      expect(cmd('enciende la luz del portón').sends, {15: 1});
+      expect(parseCasaCommand('enciende la puerta principal').problem, isNotNull);
+      expect(parseCasaCommand('apaga la puerta del baño').problem, isNotNull);
+    });
+
+    test('«principal» solo es la entrada si no se nombra otro cuarto', () {
+      expect(cmd('abre la puerta del cuarto principal').sends, {4: 1});
+      expect(cmd('abre la puerta principal').sends, {1: 1});
+    });
+
+    test('con «no» o «menos» no se manda nada', () {
+      for (final f in [
+        'no abra la puerta principal',
+        'no apagues la luz',
+        'apaga la luz de la sala, no la de la cocina',
+        'abre todas las puertas menos la principal',
+        'cierra todo excepto el portón',
+      ]) {
+        expect(parseCasaCommand(f).command, isNull, reason: f);
+      }
+      expect(parseCasaCommand('no abra la puerta principal').problem, 'Dime solo lo que quieres que haga, sin «no».');
+      expect(cmd('buenas noches').sends[CasaPins.armed], 1, reason: '«noches» no es «no»');
+    });
+
+    test('las frases de ambiente valen solo si son toda la orden', () {
+      expect(cmd('me voy a bañar, prende la luz del baño').sends, {13: 1});
+      expect(cmd('ya llegué enciende la luz del garaje').sends, {15: 1});
+      expect(cmd('me voy').sends[CasaPins.armed], 1);
+      expect(cmd('bueno, ya me voy').sends[CasaPins.armed], 1);
+      expect(cmd('ya llegué').sends, {CasaPins.armed: 0, 10: 1, 11: 1});
+      expect(parseCasaCommand('me voy a bañar').problem, isNotNull);
+    });
+
+    test('alarma: «para la noche» arma y «para la alarma» desarma', () {
+      expect(cmd('arma la alarma para la noche').sends, {CasaPins.armed: 1});
+      expect(cmd('para la alarma').sends, {CasaPins.armed: 0});
+      expect(cmd('apaga la luz de la sala y la alarma').sends, {10: 0, 11: 0, CasaPins.armed: 0});
+    });
+
+    test('subir y bajar son de persianas; el garaje se abre con su portón', () {
+      expect(cmd('sube todo').sends, {5: 180, 6: 180, 7: 180, 8: 180});
+      expect(cmd('baja todo').sends, {5: 0, 6: 0, 7: 0, 8: 0});
+      expect(cmd('cierra todo').sends.keys, unorderedEquals([0, 1, 2, 3, 4, 5, 6, 7, 8]), reason: 'cerrar sí incluye puertas');
+      expect(cmd('abre el garaje').sends, {0: 1});
+      expect(cmd('abre la entrada').sends, {1: 1});
+      expect(parseCasaCommand('abre la sala').problem, isNotNull, reason: 'en la sala hay puerta y persiana: pregunta');
+    });
+
+    test('«las dos luces de la sala» son las dos', () {
+      expect(cmd('enciende las dos luces de la sala').sends, {10: 1, 11: 1});
+      expect(cmd('enciende la luz dos de la sala').sends, {11: 1});
+    });
+  });
+
   group('Frases', () {
     test('puertas', () {
       expect(cmd('Abre la puerta principal').sends, {1: 1});
@@ -170,11 +227,49 @@ void main() {
       await s.disconnect();
     });
 
+    test('un aviso de la placa que no es de esta orden no la hace fallar', () async {
+      final d = SavedDevice(id: 'e', name: 'Casa', profile: Profile.casa, transport: Transport.ble);
+      final link = _EchoLink(noise: 'ERR:sensor de la puerta 4 sin respuesta');
+      final s = Session(d, linkFor: (_) => link);
+      await s.connect();
+      await Future<void>.delayed(Session.claveTimeout + const Duration(milliseconds: 100));
+      expect(await runVoiceCommand(s, cmd('abre la puerta principal')), isNull, reason: 'el ERR no habla de V1');
+
+      link.noise = 'ERR:V1 desactivado';
+      expect(await runVoiceCommand(s, cmd('abre la puerta principal')), 'La casa respondió: V1 desactivado');
+      await s.disconnect();
+    });
+
+    test('si no hay luces conectadas, «apaga todas las luces» lo dice en vez de fingir que lo hizo', () {
+      final r = parseCasaCommand('apaga todas las luces', isEnabled: (c) => c.kind != ControlKind.light);
+      expect(r.problem, 'No hay luces conectadas.');
+    });
+
     test('sin conexión no envía nada', () async {
       final d = SavedDevice(id: 'o', name: 'Casa', profile: Profile.casa, transport: Transport.demo);
       expect(await runVoiceCommand(Session(d), cmd('abre la puerta principal')), 'La casa no está conectada.');
     });
   });
+}
+
+/// Una placa que primero manda un aviso ([noise]) y después confirma cada pin que recibe.
+class _EchoLink extends DeviceLink {
+  String noise;
+  _EchoLink({required this.noise});
+
+  @override
+  Future<void> connect() async => setState(LinkState.connected);
+
+  @override
+  Future<void> disconnect() async => setState(LinkState.disconnected);
+
+  @override
+  Future<void> sendLine(String line) async {
+    if (line == 'PING') return emitLine('PONG');
+    if (!line.startsWith('V')) return;
+    emitLine(noise);
+    if (!noise.contains(line.split(':').first)) emitLine(line); // confirma si el aviso no era sobre este pin
+  }
 }
 
 /// Una placa conectada que nunca contesta.

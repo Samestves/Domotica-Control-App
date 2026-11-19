@@ -23,10 +23,28 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <!-- Actualizar la app desde la propia app (descarga el APK de GitHub y abre el instalador de Android) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Sin respaldo en la nube ni copia a otro teléfono: la clave de la casa y la contraseña Wi‑Fi
+         se guardan en el teléfono y no deben salir de él. -->
     <application
         android:label="Control Domótica"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:targetApi="31">
+        <!-- Deja que el instalador de Android lea el APK descargado (solo la carpeta de actualizaciones). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.archivos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/archivos" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"

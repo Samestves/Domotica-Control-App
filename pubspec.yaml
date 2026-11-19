@@ -1,9 +1,9 @@
 name: control_domotica
-description: "App para controlar la maqueta domÃ³tica y el carro robot por Bluetooth o Wi-Fi."
+description: "App para controlar la maqueta domótica y el carro robot por Bluetooth o Wi-Fi."
 publish_to: 'none'
 
 # version: nombre+nÃºmero de compilaciÃ³n. Mantener igual a lib/version.dart.
-version: 0.8.8+18
+version: 0.9.1+21
 
 environment:
   sdk: ^3.13.4
