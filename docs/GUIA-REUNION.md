@@ -2,25 +2,59 @@
 
 ## Dónde estamos
 
-- **App:** Alpha 0.9.2. Pasó una auditoría completa del código (ver [AUDITORIA.md](AUDITORIA.md)) y 84 pruebas automáticas.
-  Desde la 0.9.1 se actualiza sola desde GitHub (ver [ACTUALIZACIONES.md](ACTUALIZACIONES.md)).
+- **App:** Alpha 0.9.5. Pasó una auditoría completa del código (ver [AUDITORIA.md](AUDITORIA.md)) y 87 pruebas automáticas.
+  Se actualiza sola desde GitHub (ver [ACTUALIZACIONES.md](ACTUALIZACIONES.md)).
+- **Página para instalar el programa en el ESP32:** <https://samestves.github.io/Domotica-Control-App/>
+  (Chrome o Edge en una computadora, sin Arduino). Ver [Cargar un programa nuevo](#cargar-un-programa-nuevo-en-el-esp32).
 - **Casa:** el ESP32 del grupo tiene nuestro programa, con el cableado de su documento «Conexiones GPIO».
   Está **probado por Bluetooth con el Redmi** con la versión `alpha-0.6`: luces, puertas, persianas y alarma responden.
   En la placa suelta solo se ve «Luz Sala 1», porque es el LED azul del propio ESP32 (GPIO 2).
-- **Versión nueva de la casa, `casa-0.7`:** compilada y revisada, **todavía sin cargar ni probar en la placa**.
+- **`casa-0.7`** (servos en un pin cada uno): es la que tiene hoy la página de instalación. **Todavía sin probar en la placa.**
+- **`casa-0.8`** (servos por el **módulo PCA9685**, como pidieron): compilada y revisada, **todavía sin probar**.
+  Se sube a la página cuando tengan el módulo conectado: si la instalan con los servos todavía en sus pines, las puertas
+  y persianas no se mueven.
 - **Carrito:** tiene `carro-0.2`. La versión nueva, `carro-0.4`, está compilada y revisada, **todavía sin cargar**.
   Ojo: `carro-0.4` **pide clave**, así que necesita la app 0.9.0 o más nueva (las anteriores no saben pedirla).
 - Falta probar todo **conectado a la maqueta** y al carrito con sus motores.
 
-| Pieza | Pin virtual | GPIO |
+Pines de la casa con `casa-0.8`:
+
+| Pieza | Pin virtual | Dónde va |
 |---|---|---|
-| Portón garaje · Puerta principal · Puerta salón · Puerta baño · Puerta cuarto | V0 · V1 · V2 · V3 · V4 | 13 · 14 · 15 · 16 · 17 |
-| Persiana sala · Persiana cuarto · Persiana cocina 1 · Persiana cocina 2 | V5 · V6 · V7 · V8 | 18 · 19 · 21 · 22 |
-| Sirena (buzzer activo) | V9 | 27 |
-| Luz sala 1 · Luz sala 2 · Luz cocina · Luz baño · Luz cuarto · Luz garaje | V10 a V15 | 2 · 4 · 5 · 12 · 25 · 26 |
+| Portón garaje · Puerta principal · Puerta salón · Puerta baño · Puerta cuarto | V0 · V1 · V2 · V3 · V4 | PCA9685, canales 0 · 1 · 2 · 3 · 4 |
+| Persiana sala · Persiana cuarto · Persiana cocina 1 · Persiana cocina 2 | V5 · V6 · V7 · V8 | PCA9685, canales 5 · 6 · 7 · 8 |
+| Módulo PCA9685 (SDA · SCL) | — | GPIO 21 · 22 |
+| Sirena (buzzer activo) | V9 | GPIO 27 |
+| Luz sala 1 · Luz sala 2 · Luz cocina · Luz baño · Luz cuarto · Luz garaje | V10 a V15 | GPIO 2 · 4 · 5 · 12 · 25 · 26 |
 | Todas las luces · Seguridad armada · Avisos | V16 · V17 · V18 | — |
 
-Son los mismos números que usaban en Blynk.
+Son los mismos pines virtuales que usaban en Blynk: cada servo va en el canal **con su mismo número**. Los canales 9 a 15
+y los GPIO 13 a 19 quedan libres.
+
+Con `casa-0.7` (sin el módulo), los servos van directo a los GPIO 13 · 14 · 15 · 16 · 17 (puertas) y 18 · 19 · 21 · 22 (persianas).
+
+## Módulo PCA9685 (desde `casa-0.8`)
+
+Es una placa que genera los pulsos de hasta 16 servos. El ESP32 le habla con **dos cables** y el módulo hace el resto.
+
+| Módulo | Va a |
+|---|---|
+| VCC | 3V3 del ESP32 |
+| GND | GND del ESP32 |
+| SDA | GPIO 21 |
+| SCL | GPIO 22 |
+| Bornera verde (V+ y GND) | Fuente de 5 V para los servos (**nunca** el 5 V del ESP32) |
+
+Cada servo se enchufa en su canal (fila de 3 pines: GND, V+ y señal), con el cable marrón o negro hacia el borde
+marcado GND. Una sola fuente alcanza: la placa mueve **los servos de a uno**, con 150 ms entre uno y otro, así que nunca
+tiran corriente todos a la vez.
+
+Si el módulo no responde (cable suelto, sin VCC), la app muestra error al mover una puerta o persiana, y la placa lo vuelve
+a buscar cada 2 segundos. Las luces y la alarma siguen funcionando. Al conectarlo bien, el Monitor Serie (o «Detalles
+técnicos» en la página de instalación) dice **«Modulo PCA9685 listo (SDA 21, SCL 22)»**.
+
+Al pasar de `casa-0.7` a `casa-0.8` **no se pierde nada**: la clave, la seguridad, las luces y lo que tenían en Invertir o
+No conectado se conservan. Solo cada servo pasa a su canal.
 
 **Aviso sobre el GPIO 12 (luz del baño):** el ESP32 lee ese pin al encenderse. Si el módulo de relé lo deja en 3,3 V
 al arrancar, la placa no enciende. Si les pasa, en la app mantengan presionada la luz del baño y cámbienla al GPIO 23,
@@ -88,16 +122,19 @@ Usa el reconocimiento de voz de Google del teléfono: normalmente necesita inter
 
 ## Probar con la maqueta
 
-1. Conecta el ESP32 a la maqueta. Los servos van a una **fuente externa de 5 V y al menos 3 A**, con la tierra unida a un GND del ESP32.
+1. Conecta el ESP32 a la maqueta. Los servos van a una **fuente externa de 5 V y al menos 3 A** (con `casa-0.8`, en la
+   bornera verde del PCA9685), con la tierra unida a un GND del ESP32.
 2. Abre **Casa Domotica** en la app y escribe la clave. Arriba debe decir **Conectado**.
 3. Menú ⋮ → **Probar salidas una por una**. Cada luz, puerta y persiana se mueve en orden (con `casa-0.7` la alarma y los
    mensajes siguen funcionando mientras tanto).
 4. Si algo no coincide:
-   - **Se activa otra cosa:** mantén presionado el control y cambia el GPIO.
+   - **Se activa otra cosa:** mantén presionado el control y cambia el GPIO (en puertas y persianas, con `casa-0.8` y la
+     app 0.9.5, el **canal del PCA9685**; o muevan el servo de canal).
    - **Una luz funciona al revés:** activa **Invertir**.
    - **Una puerta o persiana gira hacia el lado contrario:** activa **Invertir** en ella.
    - **Una pieza no existe:** apaga **Conectado en la maqueta** (desde `casa-0.7`, una puerta desconectada ya no dispara la alarma).
    - **El ESP32 se reinicia al mover servos:** les falta su propia fuente de 5 V.
+   - **Ninguna puerta ni persiana se mueve (con `casa-0.8`):** revisen los 4 cables del módulo y la fuente de la bornera verde.
 
 Los ajustes que hagas desde la app quedan guardados en la placa y en el teléfono. Desde `casa-0.7` la placa no deja poner dos
 piezas en el mismo GPIO, y si se reinicia recuerda si la alarma estaba armada.
@@ -135,7 +172,8 @@ Pines (los mismos de la guía de armado):
 
 Si lo cablean distinto, los pines se cambian por el monitor serie sin cargar nada de nuevo, por ejemplo `RUEDA:DI:32,33,25`, `CFG:V23:23:0:1` o `SENSOR:21,34` para un sensor de distancia HC‑SR04 (su ECHO necesita un divisor de voltaje a 3,3 V). `PINES` muestra lo que está usando y `FABRICA` vuelve a los de la tabla. Todo está explicado al inicio de `carro_esp32.ino`.
 
-Para cargarlo de nuevo, esta placa **no entra sola en modo carga**: mantén presionado **BOOT** mientras dice «Connecting…».
+Para cargarlo de nuevo, lo más fácil es la [página de instalación](#cargar-un-programa-nuevo-en-el-esp32) (botón **Auto Robot**).
+Esta placa **no entra sola en modo carga**: mantén presionado **BOOT** cuando la página lo pida (o mientras dice «Connecting…»).
 **Antes de cargar `carro-0.4`, actualicen la app a 0.9.0 en todos los teléfonos** (si no, no podrán crear la clave).
 
 ```powershell
@@ -146,21 +184,31 @@ Para volver a la versión anterior, sin clave: `-Version carro-0.2`.
 
 ## Cargar un programa nuevo en el ESP32
 
-Conecta el ESP32 por USB. En el Administrador de dispositivos aparece como **Silicon Labs CP210x (COM3)**.
-La placa de la casa entra sola en modo carga; si se queda en «Connecting…», mantén presionado **BOOT** hasta que empiece a escribir.
-**Ojo con la casa:** mantener BOOT 5 segundos **mientras el programa corre** borra la clave. Para cargar, presiónenlo solo
-cuando diga «Connecting…».
+**La forma más fácil, sin instalar nada:** la página <https://samestves.github.io/Domotica-Control-App/>.
 
-La forma más fácil es cargar una versión ya compilada:
+1. Desenchufen la fuente y conecten **solo el cable USB** del ESP32 a la computadora.
+2. Abran la página en **Chrome o Edge** (Firefox y Safari no sirven) y toquen **Casa domótica** o **Auto Robot**.
+3. Elijan la placa en la lista que abre Chrome (solo aparecen las placas ESP32) y toquen **Conectar**.
+4. Esperen a que el círculo llegue al 100 %. La página comprueba lo que escribió y, al final, que la placa arranca y responde.
+
+Si la placa no aparece en la lista, la página explica qué hacer: probar otro cable (muchos cables solo cargan, no pasan datos)
+o instalar el driver del chip USB (CP210x o CH340), con el enlace directo.
+Si se queda esperando la placa (pasa con el carrito), la página pide mantener **BOOT** presionado y volver a intentar.
+**Ojo con la casa:** mantener BOOT 5 segundos **mientras el programa corre** borra la clave. Presiónenlo solo cuando la página lo pida.
+
+Desde la computadora del proyecto también se puede cargar una versión ya compilada. En el Administrador de dispositivos el
+ESP32 aparece como **Silicon Labs CP210x (COM3)**:
 
 ```powershell
-.\tool\cargar_esp32.ps1 -Version casa-0.7 -Puerto COM3
+.\tool\cargar_esp32.ps1 -Version casa-0.8 -Puerto COM3
 ```
 
-Para compilar y cargar el programa de `firmware/casa_esp32` desde el código (Bluetooth y Wi‑Fi juntos necesitan el esquema de memoria **Huge APP**; en el Arduino IDE: *Herramientas → Partition Scheme → Huge APP*):
+Para compilar y cargar el programa de `firmware/casa_esp32` desde el código (`casa-0.8` usa el esquema de memoria
+**Minimal SPIFFS**, que deja lugar para actualizar por Wi‑Fi más adelante; en el Arduino IDE: *Herramientas → Partition
+Scheme → Minimal SPIFFS*; `casa-0.7` usaba **Huge APP**):
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\arduino-cli\arduino-cli.exe" compile --upload -p COM3 --fqbn esp32:esp32:esp32:PartitionScheme=huge_app firmware\casa_esp32
+& "$env:LOCALAPPDATA\Programs\arduino-cli\arduino-cli.exe" compile --upload -p COM3 --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs firmware\casa_esp32
 ```
 
 Para probar sin teléfono, escribe mensajes como `V10:1` en el monitor serie (el cable USB no necesita clave):
@@ -172,6 +220,12 @@ Para probar sin teléfono, escribe mensajes como `V10:1` en el monitor serie (el
 ## Volver atrás
 
 Si algo deja de funcionar después de un cambio, el ESP32 de la casa se puede devolver a un estado conocido:
+
+- **A `casa-0.7`, con los servos directo en sus pines (sin el módulo PCA9685):**
+
+  ```powershell
+  .\tool\cargar_esp32.ps1 -Version casa-0.7 -Puerto COM3
+  ```
 
 - **A la versión probada con clave y Wi‑Fi propio (antes de la auditoría):**
 
@@ -203,7 +257,7 @@ El respaldo de Blynk no está en el proyecto porque contiene sus claves de Wi‑
 
 - El panel está hecho para esta maqueta. Si agregan piezas, hay que sumarlas al programa y a la app.
 - Los pines se cambian desde la app, pero **el tipo de cada control no**: una luz no se puede convertir en servo.
-- Para **intercambiar** los GPIO de dos piezas, pasen primero una de ellas a un GPIO libre (la placa no deja dos piezas en el mismo pin).
+- Para **intercambiar** los GPIO (o canales) de dos piezas, pasen primero una de ellas a uno libre (la placa no deja dos piezas en el mismo).
 - La fotorresistencia (LDR) y las luces exteriores están en la maqueta, pero no tienen pin asignado todavía.
 - El carrito todavía no se ha probado con sus motores: primero con las ruedas en el aire.
 - La casa acepta un teléfono por Bluetooth y otro por Wi‑Fi, y los dos pueden controlarla a la vez. El carrito, uno manejando.
