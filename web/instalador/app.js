@@ -4,7 +4,8 @@
 // 4) la reinicia, espera su saludo «== Casa Domotica (casa-0.7) ==» y le pregunta PING, que responde PONG.
 //
 // #prueba en la dirección simula una placa (sin USB) para revisar la página: #prueba-otra (la placa tiene el
-// programa de la otra), #prueba-boot (no entra sola en modo de carga), #prueba-error y #prueba-mudo.
+// programa de la otra), #prueba-boot (no entra sola en modo de carga), #prueba-error, #prueba-mudo y
+// #prueba-nada (no aparece ninguna placa en la lista).
 import { ESPLoader, Transport } from './lib/esptool-js-0.7.1.js';
 import { ICONS } from './icons.js';
 
@@ -16,6 +17,18 @@ const BANNER = /==\s*([^=\n]+?)\s*\(((casa|carro)-[\w.]+)\)\s*==/g;
 // Mismos parámetros que tool/cargar_esp32.ps1 (y que Arduino): el resultado es idéntico.
 const FLASH = { flashMode: 'dio', flashFreq: '80m', flashSize: '4MB', eraseAll: false, compress: true };
 const BAUD = 460800;
+
+// Chips USB de las placas ESP32: la lista de Chrome muestra solo estos (no los puertos Bluetooth ni otros).
+const USB_CHIPS = [
+  { usbVendorId: 0x10c4 }, // Silicon Labs CP210x
+  { usbVendorId: 0x1a86 }, // WCH CH340 / CH9102
+  { usbVendorId: 0x0403 }, // FTDI
+  { usbVendorId: 0x303a }, // Espressif (USB propio)
+];
+
+const SCREENS = ['home', 'nobrowser', 'work', 'end', 'boot', 'help'];
+const PHASES = ['find', 'write', 'verify', 'boot'];
+const RING = 2 * Math.PI * 76;
 
 let manifest = null;
 let board = null;
@@ -35,81 +48,89 @@ function paintIcons(root = document) {
   });
 }
 
-// ---------- Registro para «Detalles técnicos» ----------
+// ---------- Registro para «Ver detalles técnicos» ----------
 const lines = [];
 function log(text) {
   lines.push(String(text).replace(/\s+$/, ''));
-  const pre = $('log');
-  pre.textContent = lines.join('\n');
-  pre.scrollTop = pre.scrollHeight;
+  $('log').textContent = lines.join('\n');
 }
 
-// ---------- Pantalla ----------
-function show(id, on = true) { $(id).hidden = !on; }
-function only(...ids) { for (const id of ['setup', 'run', 'ask', 'manual', 'result']) show(id, ids.includes(id)); }
-
-function step(name, state, detail) {
-  const li = document.querySelector(`.step[data-step="${name}"]`);
-  li.dataset.state = state;
-  const mark = li.querySelector('.mark');
-  mark.innerHTML = state === 'done'
-    ? icon('check-circle-fill', 22, 'var(--green)')
-    : state === 'fail'
-      ? icon('x-circle-fill', 22, 'var(--red)')
-      : '<span class="dot"></span>';
-  if (state === 'done' || state === 'fail') mark.firstElementChild?.classList.add('pop');
-  if (detail !== undefined) li.querySelector('.detail').textContent = detail;
+// ---------- Pantallas ----------
+function screen(id) {
+  for (const s of SCREENS) $(s).hidden = s !== id;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function resetSteps() {
-  for (const s of ['find', 'write', 'verify', 'boot']) step(s, 'wait', '');
-  document.querySelector('.step[data-step="write"] .title').textContent = `Instalar ${board.version}`;
-  show('progress', false);
-  progress(0);
+function phase(name, title, detail = '') {
+  $('phase').textContent = title;
+  $('phase-detail').textContent = detail;
+  const i = PHASES.indexOf(name);
+  document.querySelectorAll('.dots i').forEach((d, j) => {
+    d.className = j < i ? 'done' : j === i ? 'on' : '';
+  });
 }
 
-function progress(frac) {
-  const p = Math.max(0, Math.min(1, frac));
-  $('pct').textContent = `${Math.round(p * 100)} %`;
-  $('bar').style.width = `${(p * 100).toFixed(1)}%`;
+/// El anillo: girando mientras espera (null), o lleno según el avance (0 a 1).
+function ring(frac) {
+  const spin = frac === null;
+  $('ring').classList.toggle('spin', spin);
+  $('arc').style.strokeDashoffset = String(spin ? RING * 0.72 : RING * (1 - Math.max(0, Math.min(1, frac))));
+  $('pct').textContent = spin ? '' : `${Math.round(frac * 100)}%`;
 }
 
-function renderChoices() {
-  const box = $('choices');
+function renderTiles() {
+  const box = $('tiles');
   box.innerHTML = '';
   for (const b of manifest.boards) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'choice';
-    btn.setAttribute('role', 'radio');
-    btn.setAttribute('aria-checked', String(b === board));
-    btn.tabIndex = b === board ? 0 : -1;
-    btn.innerHTML = `${icon(b.icon, 28)}<span style="display:grid;gap:6px"><span class="callout">${b.name}</span><span class="ver">${b.version}</span></span>`;
-    btn.addEventListener('click', () => pick(b));
-    btn.addEventListener('keydown', (e) => {
+    const t = document.createElement('button');
+    t.type = 'button';
+    t.className = 'tile';
+    t.setAttribute('role', 'radio');
+    t.setAttribute('aria-checked', String(b === board));
+    t.tabIndex = b === board ? 0 : -1;
+    t.innerHTML = `${icon(b.icon, 40)}<span><b>${b.name}</b><small>${b.version}</small></span>`;
+    t.addEventListener('click', () => pick(b));
+    t.addEventListener('keydown', (e) => {
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
       e.preventDefault();
-      const i = manifest.boards.indexOf(board);
-      const next = manifest.boards[(i + (e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1) + manifest.boards.length) % manifest.boards.length];
+      const n = manifest.boards.length;
+      const next = manifest.boards[(manifest.boards.indexOf(board) + (/Left|Up/.test(e.key) ? -1 : 1) + n) % n];
       pick(next);
-      box.querySelectorAll('.choice')[manifest.boards.indexOf(next)].focus();
+      box.children[manifest.boards.indexOf(next)].focus();
     });
-    box.appendChild(btn);
+    box.appendChild(t);
   }
-  $('notes').innerHTML = board.notes.map((n, i) => `<li data-n="${String(i + 1).padStart(2, '0')}">${n}</li>`).join('');
-  $('start-label').textContent = `Conectar e instalar ${board.version}`;
+  $('go').textContent = board.id === 'casa' ? 'Instalar en la casa' : 'Instalar en el carrito';
 }
 
 function pick(b) {
   board = b;
   try { localStorage.setItem('placa', b.id); } catch (_) {}
-  renderChoices();
+  renderTiles();
 }
 
-function backToSetup() {
+function home() {
   writing = false;
-  only('setup');
-  $('lead').hidden = false;
+  screen('home');
+}
+
+function end(kind, title, text, main, second) {
+  writing = false;
+  const icons = { good: 'check-circle-fill', warn: 'warning-circle-fill', bad: 'x-circle-fill' };
+  $('end-badge').className = `badge ${kind}`;
+  $('end-badge').innerHTML = icon(icons[kind], 92);
+  $('end-title').textContent = title;
+  $('end-text').textContent = text;
+  $('end-main').textContent = main[0];
+  $('end-main').onclick = main[1];
+  $('end-second').hidden = !second;
+  if (second) {
+    $('end-second').textContent = second[0];
+    $('end-second').onclick = second[1];
+  }
+  $('end-details').hidden = kind === 'good';
+  $('end-details').open = false;
+  screen('end');
 }
 
 // ---------- Hablar con la placa por el cable (115200, como el Monitor Serie) ----------
@@ -122,7 +143,7 @@ function parseBanner(text) {
 // Reinicia la placa normalmente y escucha lo que dice al arrancar. Con [expect], espera ese saludo;
 // con [ping], después le escribe PING y espera PONG.
 async function listen({ ms, expect = null, ping = false }) {
-  if (TEST) return fakeListen({ expect, ping });
+  if (TEST) return fakeListen({ expect });
   await port.open({ baudRate: 115200 });
   let text = '';
   let pong = false;
@@ -181,6 +202,10 @@ async function download() {
   return out;
 }
 
+class WrongChip extends Error {
+  constructor(name) { super(`Esta placa es un ${name}, no un ESP32 como los de la casa y el carrito.`); }
+}
+
 async function flash(files, mode, verified) {
   if (TEST) return fakeFlash(files, mode, verified);
   const transport = new Transport(port, false);
@@ -194,11 +219,11 @@ async function flash(files, mode, verified) {
   };
   const loader = new ESPLoader({ transport, baudrate: BAUD, romBaudrate: 115200, terminal, debugLogging: false });
   try {
-    const chip = await loader.main(mode);
-    log(`Chip: ${chip}`);
+    log(`Chip: ${await loader.main(mode)}`);
     if (loader.chip.CHIP_NAME !== 'ESP32') throw new WrongChip(loader.chip.CHIP_NAME);
-    step('write', 'doing', 'Escribiendo en la memoria…');
-    startProgress(files);
+    phase('write', 'Instalando');
+    phaseDetailSize(files);
+    ring(0);
     const sizes = files.map((f) => f.data.length);
     const total = sizes.reduce((a, b) => a + b, 0);
     await loader.writeFlash({
@@ -206,36 +231,38 @@ async function flash(files, mode, verified) {
       fileArray: files.map((f) => ({ data: f.data, address: f.address })),
       reportProgress: (i, written, size) => {
         const before = sizes.slice(0, i).reduce((a, b) => a + b, 0);
-        progress((before + sizes[i] * (size ? written / size : 0)) / total);
+        ring((before + sizes[i] * (size ? written / size : 0)) / total);
       },
       calculateMD5Hash: (image) => SparkMD5.ArrayBuffer.hash(image.buffer.slice(image.byteOffset, image.byteOffset + image.byteLength)),
     });
-    progress(1);
+    ring(1);
     await loader.after('no_reset_stub'); // el reinicio lo hace listen(), mientras escucha
   } finally {
     try { await transport.disconnect(); } catch (_) {}
   }
 }
 
-class WrongChip extends Error {
-  constructor(name) { super(`Esta placa es un ${name}, no un ESP32 como los de la casa y el carrito.`); }
-}
-
-function startProgress(files) {
+function phaseDetailSize(files) {
   const mb = files.reduce((a, f) => a + f.data.length, 0) / 1048576;
-  $('pct-detail').textContent = `de ${mb.toFixed(1).replace('.', ',')} MB`;
-  show('progress');
+  $('phase-detail').textContent = `${board.version} · ${mb.toFixed(1).replace('.', ',')} MB`;
 }
 
 // ---------- El recorrido completo ----------
-async function start() {
+async function choosePort(all = false) {
+  if (TEST) {
+    if (location.hash === '#prueba-nada') throw new DOMException('No port selected by the user.', 'NotFoundError');
+    return {};
+  }
+  return navigator.serial.requestPort(all ? {} : { filters: USB_CHIPS });
+}
+
+async function start(all = false) {
   if (writing) return;
-  if (!TEST) {
-    try {
-      port = await navigator.serial.requestPort();
-    } catch (_) {
-      return; // cerró la ventana sin elegir
-    }
+  try {
+    port = await choosePort(all);
+  } catch (_) {
+    screen('help'); // cerró la lista: casi siempre porque la placa no aparecía
+    return;
   }
   lines.length = 0;
   log(`Instalador · ${board.name} ${board.version} · ${new Date().toLocaleString('es')}`);
@@ -244,30 +271,23 @@ async function start() {
 
 async function install(mode) {
   writing = true;
-  only('run');
-  $('lead').hidden = true;
-  $('run-eyebrow').textContent = `Instalando ${board.version} · ${board.name}`;
-  show('keep');
-  resetSteps();
+  screen('work');
+  $('ask').hidden = true;
 
   // 1 · Qué programa tiene ahora. En modo manual ya espera el programa nuevo: no se reinicia.
   if (mode === 'default_reset') {
-    step('find', 'doing', 'Reiniciando la placa para ver qué programa tiene…');
+    phase('find', 'Buscando la placa');
+    ring(null);
     let current = null;
     try {
       current = parseBanner((await listen({ ms: 3000 })).text);
     } catch (e) {
-      return fail('find', portProblem(e), e);
+      return fail(portProblem(e), e);
     }
-    if (current && current.kind !== board.id) {
-      step('find', 'doing', `Tiene ${current.version}.`);
-      if (!(await ask(current))) return backToSetup();
+    if (current) {
+      $('phase-detail').textContent = `Tiene ${current.version}`;
+      if (current.kind !== board.id && !(await ask(current))) return home();
     }
-    step('find', 'done', current
-      ? (current.version === board.version ? `Ya tiene ${current.version}: se reinstala igual.` : `Tiene ${current.version}. Se cambia por ${board.version}.`)
-      : 'Encontrada. No dijo qué programa tiene, así que seguimos.');
-  } else {
-    step('find', 'done', 'En modo de carga, lista para recibir el programa.');
   }
 
   // 2 y 3 · Escribir y comprobar la huella
@@ -275,27 +295,31 @@ async function install(mode) {
   try {
     files = await download();
   } catch (e) {
-    return fail('write', 'No se pudo descargar el programa. Revisa el internet y vuelve a cargar la página.', e);
+    return fail('No se pudo descargar el programa. Revisa el internet.', e);
   }
-  step('write', 'doing', 'Conectando con el cargador del ESP32…');
+  phase('write', 'Conectando');
+  ring(null);
   const verified = { n: 0 };
   try {
     await flash(files, mode, verified);
   } catch (e) {
-    if (e instanceof WrongChip) return fail('write', e.message, e);
-    if (/md5|does not match/i.test(String(e))) {
-      step('write', 'done', 'Escrito.');
-      return fail('verify', 'Lo escrito no coincide con el archivo. Prueba otro cable u otro puerto USB e intenta de nuevo.', e);
+    if (e instanceof WrongChip) return fail(e.message, e);
+    if (/md5|does not match/i.test(String(e))) return fail('Lo escrito no coincidió. Prueba otro cable o puerto USB.', e);
+    if (/connect|timeout|timed out|sync|no serial data/i.test(String(e))) {
+      log(`No entró sola en modo de carga: ${e && e.message ? e.message : e}`);
+      writing = false;
+      screen('boot');
+      return;
     }
-    if (/connect|timeout|timed out|sync|no serial data/i.test(String(e))) return needManual(e);
-    return fail('write', portProblem(e), e);
+    return fail(portProblem(e), e);
   }
-  step('write', 'done', `${board.version} quedó escrito en la memoria.`);
-  if (verified.n < files.length) return fail('verify', 'No se pudo comprobar la huella de todo lo escrito. Intenta de nuevo.');
-  step('verify', 'done', `La huella de las ${files.length} partes coincide con los archivos.`);
+  phase('verify', 'Comprobando', 'Que quedó idéntico');
+  if (verified.n < files.length) return fail('No se pudo comprobar lo escrito.');
+  await sleep(500);
 
   // 4 · Arrancar y saludar
-  step('boot', 'doing', 'Reiniciando y escuchando a la placa…');
+  phase('boot', 'Arrancando', 'Esperando que responda');
+  ring(null);
   let heard = { text: '', pong: false };
   try {
     heard = await listen({ ms: 9000, expect: board.version, ping: true });
@@ -303,131 +327,62 @@ async function install(mode) {
     log(`No se pudo escuchar: ${e}`);
   }
   const now = parseBanner(heard.text);
-  writing = false;
-  show('keep', false);
   if (now && now.version === board.version) {
-    step('boot', 'done', heard.pong ? `Arrancó con ${now.version} y respondió.` : `Arrancó con ${now.version}.`);
-    return result('good', {
-      eyebrow: 'Instalada y comprobada',
-      title: `Listo: tiene ${board.version}`,
-      text: `${board.short} arrancó con ${board.version}${heard.pong ? ' y respondió' : ''}. Ya puedes desconectar el USB y volver a enchufar la fuente de la maqueta.`,
-      primary: ['Instalar en otra placa', backToSetup],
-    });
+    return end('good', '¡Listo!', `${board.short} ya tiene ${board.version}. Puedes desconectar el USB.`, ['Terminar', home]);
   }
-  step('boot', 'fail', 'Quedó escrita, pero no la escuché arrancar.');
-  return result('warn', {
-    eyebrow: 'Escrita, sin confirmar',
-    title: 'Quedó escrita, pero no la escuché',
-    text: 'La huella coincide con el archivo, así que el programa quedó bien escrito. Desconecta el USB, vuelve a conectarlo y revisa en la app que la placa aparezca. Si no, manda una foto de «Detalles técnicos».',
-    primary: ['Volver al inicio', backToSetup],
-  });
+  return end('warn', 'Quedó instalada', 'Pero no la escuché responder. Desconecta y vuelve a conectar el USB.', ['Terminar', home]);
 }
 
 function portProblem(e) {
   const s = String(e && e.message ? e.message : e);
-  if (/failed to open|access denied|in use|busy|already open/i.test(s)) {
-    return 'La placa está ocupada por otro programa (Arduino, el Monitor Serie u otra pestaña). Ciérralo e intenta de nuevo.';
-  }
-  if (/lost|disconnect|not found|NetworkError/i.test(s)) return 'Se desconectó el USB. Vuelve a conectarlo e intenta de nuevo.';
-  return 'Algo falló al hablar con la placa. Desconecta y vuelve a conectar el USB, e intenta de nuevo.';
+  if (/failed to open|access denied|in use|busy|already open/i.test(s)) return 'La placa está ocupada. Cierra Arduino o el Monitor Serie.';
+  if (/lost|disconnect|not found|NetworkError/i.test(s)) return 'Se desconectó el USB. Vuelve a conectarlo.';
+  return 'No pudo hablar con la placa. Desconecta y vuelve a conectar el USB.';
 }
 
-function fail(stepName, message, e) {
-  writing = false;
-  show('keep', false);
+function fail(message, e) {
   if (e) log(`Error: ${e && e.message ? e.message : e}`);
-  step(stepName, 'fail', message);
-  return result('bad', {
-    eyebrow: 'No se pudo instalar',
-    title: 'Algo salió mal',
-    text: `${message} La placa no se dañó: se puede intentar las veces que haga falta.`,
-    primary: ['Intentar de nuevo', () => install('default_reset')],
-    secondary: ['Volver al inicio', backToSetup],
-  });
-}
-
-function result(kind, { eyebrow, title, text, primary, secondary }) {
-  const icons = { good: ['check-circle-fill', 'var(--green)'], warn: ['warning-circle-fill', 'var(--amber)'], bad: ['x-circle-fill', 'var(--red)'] };
-  const [name, color] = icons[kind];
-  $('result-icon').innerHTML = icon(name, 56, color);
-  $('result-icon').classList.remove('pop');
-  void $('result-icon').offsetWidth;
-  $('result-icon').classList.add('pop');
-  $('result-eyebrow').textContent = eyebrow;
-  $('result-eyebrow').style.color = color;
-  $('result-title').textContent = title;
-  $('result-text').textContent = text;
-  const again = $('again');
-  again.textContent = primary[0];
-  again.onclick = primary[1];
-  let second = $('again2');
-  if (secondary) {
-    if (!second) {
-      second = document.createElement('button');
-      second.id = 'again2';
-      second.type = 'button';
-      second.className = 'pill wide';
-      again.parentElement.appendChild(second);
-    }
-    second.textContent = secondary[0];
-    second.onclick = secondary[1];
-    second.hidden = false;
-  } else if (second) {
-    second.hidden = true;
-  }
-  show('run');
-  show('result');
-  $('result').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  end('bad', 'No se pudo', `${message} La placa no se dañó.`, ['Intentar de nuevo', () => install('default_reset')], ['Volver', home]);
 }
 
 function ask(current) {
-  const what = (k) => (k === 'carro' ? 'del carrito' : 'de la casa');
-  $('ask-text').textContent = `Esta placa tiene el programa ${what(current.kind)} (${current.version}), pero elegiste ${board.name}. Si sigues, deja de funcionar como ${current.kind === 'carro' ? 'carrito' : 'casa'}.`;
+  const was = current.kind === 'carro' ? 'el carrito' : 'la casa';
+  $('ask-text').textContent = `Esta placa es ${was} (${current.version}). ¿Cambiarla por ${board.id === 'carro' ? 'el carrito' : 'la casa'}?`;
   $('ask-yes').textContent = `Sí, instalar ${board.version}`;
-  show('ask');
+  $('ask').hidden = false;
   return new Promise((resolve) => {
-    $('ask-yes').onclick = () => { show('ask', false); resolve(true); };
-    $('ask-no').onclick = () => { show('ask', false); resolve(false); };
+    $('ask-yes').onclick = () => { $('ask').hidden = true; resolve(true); };
+    $('ask-no').onclick = () => { $('ask').hidden = true; resolve(false); };
   });
-}
-
-function needManual(e) {
-  log(`No entró sola en modo de carga: ${e && e.message ? e.message : e}`);
-  step('write', 'fail', 'La placa no entró sola en modo de carga.');
-  show('manual');
-  $('manual').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  $('manual-retry').onclick = () => { show('manual', false); install('no_reset'); };
-  $('manual-cancel').onclick = backToSetup;
-  writing = false;
-  show('keep', false);
 }
 
 // ---------- Simulación (#prueba) ----------
 async function fakeListen({ expect }) {
-  await sleep(900);
+  await sleep(1000);
   const other = board.id === 'casa' ? ['Carrito 4x4', 'carro-0.4'] : ['Casa Domotica', 'casa-0.7'];
   const same = board.id === 'casa' ? ['Casa Domotica', 'casa-0.6'] : ['Carrito 4x4', 'carro-0.3'];
+  let text;
   if (!expect) {
     const [name, ver] = location.hash === '#prueba-otra' ? other : same;
-    const text = `rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\n== ${name} (${ver}) ==\nBluetooth listo\n`;
-    log(text.trim().split('\n').map((l) => `│ ${l}`).join('\n'));
-    return { text, pong: false };
+    text = `rst:0x1 (POWERON_RESET)\n== ${name} (${ver}) ==\nBluetooth listo\n`;
+  } else if (location.hash === '#prueba-mudo') {
+    text = '';
+  } else {
+    await sleep(1000);
+    text = `== ${board.id === 'casa' ? 'Casa Domotica' : 'Carrito 4x4'} (${board.version}) ==\nBluetooth listo\nPONG\n`;
   }
-  if (location.hash === '#prueba-mudo') return { text: '', pong: false };
-  await sleep(1200);
-  const text = `== ${board.id === 'casa' ? 'Casa Domotica' : 'Carrito 4x4'} (${board.version}) ==\nBluetooth listo\nPONG\n`;
-  log(text.trim().split('\n').map((l) => `│ ${l}`).join('\n'));
-  return { text, pong: true };
+  log(text ? text.trim().split('\n').map((l) => `│ ${l}`).join('\n') : '│ (la placa no dijo nada)');
+  return { text, pong: text.includes('PONG') };
 }
 
 async function fakeFlash(files, mode, verified) {
   await sleep(900);
   if (location.hash === '#prueba-boot' && mode === 'default_reset') throw new Error('Failed to connect with the device');
-  step('write', 'doing', 'Escribiendo en la memoria…');
-  startProgress(files);
-  for (let i = 0; i <= 50; i++) {
-    progress(i / 50);
-    await sleep(70);
+  phase('write', 'Instalando');
+  phaseDetailSize(files);
+  for (let i = 0; i <= 60; i++) {
+    ring(i / 60);
+    await sleep(60);
   }
   if (location.hash === '#prueba-error') throw new Error('MD5 of file does not match data in flash!');
   for (const f of files) log(`Wrote ${f.data.length} bytes at 0x${f.address.toString(16)}\nHash of data verified.`);
@@ -437,33 +392,34 @@ async function fakeFlash(files, mode, verified) {
 // ---------- Arranque ----------
 async function init() {
   paintIcons();
-  show('test-banner', TEST);
-  $('copy-log').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(lines.join('\n')); $('copy-log').lastChild.textContent = 'Copiado'; } catch (_) {}
-  });
-  $('copy-link').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(location.href.split('#')[0]); $('copy-link').lastChild.textContent = 'Enlace copiado'; } catch (_) {}
-  });
+  $('test-banner').hidden = !TEST;
   window.addEventListener('beforeunload', (e) => { if (writing) e.preventDefault(); });
+  $('copy-log').onclick = async () => {
+    try { await navigator.clipboard.writeText(lines.join('\n')); $('copy-log').textContent = 'Copiado'; } catch (_) {}
+  };
+  $('copy-link').onclick = async () => {
+    try { await navigator.clipboard.writeText(location.href.split('#')[0]); $('copy-link').textContent = 'Enlace copiado'; } catch (_) {}
+  };
+  $('go').onclick = () => start();
+  $('help-open').onclick = () => screen('help');
+  $('help-retry').onclick = () => start();
+  $('help-all').onclick = () => start(true);
+  $('help-back').onclick = home;
+  $('boot-retry').onclick = () => install('no_reset');
+  $('boot-cancel').onclick = home;
 
   try {
     manifest = await (await fetch('placas.json', { cache: 'no-store' })).json();
-  } catch (e) {
-    $('lead').textContent = 'No se pudo cargar la lista de versiones. Revisa el internet y vuelve a cargar la página.';
-    show('setup', false);
+  } catch (_) {
+    $('home').innerHTML = '<h1>Sin conexión</h1><p class="big" style="color:var(--text2)">Revisa el internet y vuelve a cargar la página.</p>';
     return;
   }
   let saved = null;
   try { saved = localStorage.getItem('placa'); } catch (_) {}
   board = manifest.boards.find((b) => b.id === saved) || manifest.boards[0];
-  renderChoices();
-  $('versions').textContent = `Versiones publicadas: ${manifest.boards.map((b) => b.version).join(' · ')} · actualizado el ${manifest.updated}.`;
-
-  if (!('serial' in navigator) && !TEST) {
-    show('unsupported');
-    $('start').disabled = true;
-  }
-  $('start').addEventListener('click', start);
+  renderTiles();
+  $('footer').textContent = `${manifest.boards.map((b) => b.version).join(' · ')} · herramienta oficial de Espressif`;
+  if (!('serial' in navigator) && !TEST) screen('nobrowser');
 }
 
 init();
