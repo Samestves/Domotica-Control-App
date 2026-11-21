@@ -73,6 +73,11 @@ void main() {
     expect(gpioProblem(24, output: true), isNotNull); // no existe
     expect(gpioProblem(1, output: true), isNotNull); // cable USB (Monitor Serie)
     expect(gpioProblem(3, output: true), isNotNull);
+    expect(gpioProblem(21, output: true), isNotNull, reason: 'SDA del módulo PCA9685');
+    expect(gpioProblem(22, output: true), isNotNull, reason: 'SCL del módulo PCA9685');
+    expect(channelProblem(0), isNull);
+    expect(channelProblem(15), isNull);
+    expect(channelProblem(16), isNotNull);
     // Contraseñas Wi-Fi que Android acepta (si no, se perdería la red actual con un error en inglés).
     expect(WifiNet.validPassword('carrito4x4'), isTrue);
     expect(WifiNet.validPassword(''), isTrue, reason: 'red abierta');
@@ -83,11 +88,32 @@ void main() {
 
   test('al conectar envía los pines guardados a la placa', () async {
     final d = SavedDevice(id: 'd', name: 'Casa', profile: Profile.casa, transport: Transport.demo);
-    d.pins[1] = const PinConfig(22, inverted: false);
+    d.pins[10] = const PinConfig(23, inverted: true); // una luz: su GPIO
+    d.pins[4] = const PinConfig(9, inverted: false, pca: true); // una puerta: 100 + su canal del PCA9685
     final s = Session(d);
     await s.connect();
     await Future<void>.delayed(const Duration(milliseconds: 200));
-    expect(s.log.map((l) => l.text), containsAll(['CFG:V1:22:0:1', 'OK:V1:22:0:1', 'SYNC']));
+    expect(s.log.map((l) => l.text), containsAll(['CFG:V10:23:1:1', 'CFG:V4:109:0:1', 'SYNC']));
+    await s.disconnect();
+  });
+
+  test('un servo guardado con un GPIO (antes de casa-0.8) pasa a su canal, sin perder invertir ni activar', () async {
+    final d = SavedDevice(id: 'v', name: 'Casa', profile: Profile.casa, transport: Transport.demo);
+    d.pins[1] = const PinConfig(14, inverted: true, enabled: false); // la puerta principal, guardada en casa-0.7
+    final door = casaSpec(1)!;
+    final p = door.pinsFor(d);
+    expect((p.pca, p.gpio, p.inverted, p.enabled), (true, 1, true, false));
+    expect(p.code, 101);
+    expect(casaSpec(10)!.pinsFor(d).pca, isFalse, reason: 'las luces siguen en su GPIO');
+    final back = SavedDevice.fromJson((d..pins[4] = const PinConfig(9, inverted: false, pca: true)).toJson());
+    expect(back.pins[4]!.pca, isTrue);
+    expect(back.pins[1]!.pca, isFalse);
+
+    final s = Session(d);
+    await s.connect();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(s.log.map((l) => l.text), contains('CFG:V1:101:1:0'), reason: 'la placa recibe el canal, no el GPIO viejo');
+    expect(s.log.map((l) => l.text), isNot(contains('CFG:V1:14:1:0')));
     await s.disconnect();
   });
 
@@ -359,7 +385,12 @@ void main() {
     test('el mapa de pines coincide con su documento de conexiones', () {
       final all = [...casaControls, casaSiren];
       expect(all.map((c) => c.vpin).toSet(), {for (var v = 0; v <= 15; v++) v});
-      expect(all.map((c) => c.gpio).toSet().length, all.length, reason: 'dos controles en el mismo GPIO');
+      final direct = all.where((c) => !c.onPca).toList();
+      final servos = all.where((c) => c.onPca).toList();
+      expect(direct.map((c) => c.gpio).toSet().length, direct.length, reason: 'dos luces en el mismo GPIO');
+      expect(servos.map((c) => c.gpio).toSet().length, servos.length, reason: 'dos servos en el mismo canal');
+      expect(servos.every((c) => c.gpio == c.vpin), isTrue, reason: 'cada servo va en el canal con su número');
+      expect(direct.any((c) => c.gpio == 21 || c.gpio == 22), isFalse, reason: 'el 21 y el 22 son del PCA9685');
       expect(casaControls.firstWhere((c) => c.vpin == 10).gpio, 2); // Luz sala 1 = LED azul de la placa
       expect(casaRooms, ['Entrada', 'Sala', 'Cocina', 'Baño', 'Cuarto', 'Garaje']);
     });

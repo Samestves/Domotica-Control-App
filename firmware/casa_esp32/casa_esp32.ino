@@ -1,11 +1,10 @@
 /*
-  Casa Domótica · programa para el ESP32 de la maqueta · versión casa-0.7
+  Casa Domótica · programa para el ESP32 de la maqueta · versión casa-0.8
   ----------------------------------------------------------------------
   Recibe mensajes de la app (por Bluetooth LE, Wi-Fi o el Monitor Serie) y mueve
   las salidas de la maqueta. También avisa a la app de cada cambio y de la alarma.
 
-  Los pines virtuales son LOS MISMOS que usaba el grupo en Blynk, así que su
-  documento «Conexiones GPIO» sigue valiendo:
+  Los pines virtuales son LOS MISMOS que usaba el grupo en Blynk:
 
     V0..V4    puertas (servo): 1 = abrir (90°), 0 = cerrar (0°)
               V0 garaje · V1 principal · V2 salón · V3 baño · V4 cuarto
@@ -18,15 +17,29 @@
     V17       seguridad: 1 = armada, 0 = desarmada (se recuerda aunque la placa se reinicie)
     V18       avisos de texto (de la placa a la app)
 
+  Servos en el módulo PCA9685 (desde casa-0.8):
+    El ESP32 le habla al módulo por dos cables: GPIO 21 = SDA y GPIO 22 = SCL (más 3V3 a VCC y GND).
+    Cada puerta y persiana va en el canal del módulo con su MISMO número de pin virtual:
+      canal 0 portón · 1 principal · 2 salón · 3 baño · 4 cuarto · 5 persiana sala · 6 persiana cuarto
+      canal 7 persiana cocina 1 · 8 persiana cocina 2 (quedan libres del 9 al 15)
+    Los servos comen de la bornera verde del módulo (V+), con una fuente de 5 V; nunca del ESP32.
+    Se mueven de a uno, con 150 ms entre uno y otro: así el pico de corriente es el de un solo servo
+    y alcanza una sola fuente para todo, incluso al encender o con varias órdenes juntas.
+    Si el módulo no responde, las órdenes a los servos contestan ERR y la placa lo vuelve a buscar
+    cada 2 s; cuando aparece, cada servo vuelve a su posición.
+
   Seguridad (igual que en su versión de Blynk): con la seguridad armada, si el garaje
   o la puerta principal quedan abiertos 20 s, suena la sirena y las luces parpadean.
   Una puerta marcada como «no conectada» (desactivada) cuenta como cerrada.
 
   Otros mensajes:
     CFG:V10:2:0:1   V10 pasa al GPIO 2, sin invertir (0) y activado (1). Se guarda en la placa.
+    CFG:V4:104:0:1  puertas y persianas: 100 + el canal del PCA9685 (aquí, canal 4).
+                    Si para un servo llega un número menor que 100 (lo que mandaba una app vieja,
+                    un GPIO), el canal no cambia: solo se aplican invertir y activar.
                     En puertas y persianas, invertir = el servo gira al lado contrario.
-                    Se rechazan los GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria) y uno que ya
-                    use otro canal activo. El GPIO que se deja queda apagado o con el servo suelto.
+                    Se rechazan los GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria), 21 y 22 (el módulo
+                    PCA9685) y un GPIO o canal que ya use otra salida activa. El que se deja queda en reposo.
     SYNC            la placa responde con el estado actual de todo
     TEST            mueve cada salida una por una para ver qué es cada cosa (ERR si ya hay una en curso)
     PING            la placa responde PONG
@@ -53,32 +66,33 @@
   recibe «ERR:ya hay otro telefono conectado por Wi-Fi» y se cierra. Si el actual lleva más
   de 6 s sin mandar nada (la app manda PING cada 3 s), se cierra el actual y entra el nuevo.
 
-  Cambios de casa-0.7 (respecto de alpha-0.6):
-    - Intentos de clave por conexión (antes eran de toda la placa) y corte a los 15 s por Bluetooth.
-    - Por Wi-Fi ya no se expulsa al teléfono conectado, y escribirle nunca frena la placa.
-    - TEST ya no congela la placa: la alarma y el parpadeo siguen funcionando mientras corre.
-    - Lo que quedó a medias de un teléfono (o un AUTH viejo) no pasa al siguiente.
-    - Si se pierden letras de una orden (cola llena), se descarta la orden entera.
-    - Números estrictos en las órdenes V y en CFG; CFG revisa GPIO repetidos y del Monitor Serie.
-    - La seguridad armada se guarda y vuelve a quedar armada después de un reinicio.
-    - Watchdog: si el programa se queda colgado 5 s, la placa se reinicia sola.
+  Cambios de casa-0.8 (respecto de casa-0.7):
+    - Las 5 puertas y las 4 persianas van por el módulo PCA9685 (GPIO 21 y 22), no por un pin cada una.
+      Quedan libres los GPIO 13 a 19. Las luces y la sirena siguen en sus pines.
+    - Los servos se mueven de a uno (150 ms entre uno y otro), para que alcance una sola fuente.
+    - Lo guardado de casa-0.7 se conserva (clave, seguridad, luces, invertir y activar). Solo el pin
+      guardado de cada servo se deja: ahora su lugar es su canal del módulo.
+    - Memoria dividida en dos espacios de programa (Minimal SPIFFS), para poder actualizar por Wi-Fi
+      más adelante. La clave y los ajustes están en otra zona y no se borran al cambiar.
+    - Ya no usa la librería ESP32Servo: el módulo genera los pulsos.
 
   Pines de arranque: la luz del baño (V13) está en el GPIO 12, que el ESP32 lee al encender.
   Si lo que tiene conectado lo sube a 3,3 V en ese momento, el ESP32 no arranca. Se deja así
   porque es el cableado del grupo; si pasa eso, muévanla al GPIO 23, 32 o 33 desde la app
   (mantener presionado el control) o con CFG:V13:23:0:1. La placa también lo avisa por Serie.
 
-  Librerías: ESP32Servo (Kevin Harrington).
-  Placa: "ESP32 Dev Module" con Partition Scheme "Huge APP" (Bluetooth y Wi-Fi juntos no caben en la normal).
+  Librerías: ninguna aparte de las del ESP32 (Wire y Preferences vienen incluidas).
+  Placa: "ESP32 Dev Module" con Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)":
+    arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs firmware/casa_esp32
 */
 
 #include <Arduino.h>
 #include <Preferences.h>
-#include <ESP32Servo.h>
+#include <Wire.h>
 
 // ============ CONFIGURACIÓN ============
 #define DEVICE_NAME  "Casa Domotica"
-#define FW_VERSION   "casa-0.7"
+#define FW_VERSION   "casa-0.8"
 #define USE_BLE      1        // 1 = conectar por Bluetooth LE
 #define USE_WIFI     1        // 1 = conectar también por Wi-Fi
 #define WIFI_PROPIA  1        // 1 = el ESP32 crea su propia red · 0 = se une a la red de abajo
@@ -95,7 +109,7 @@ enum Kind { K_DOOR, K_BLIND, K_SIREN, K_LIGHT };
 
 struct Channel {
   uint8_t vpin;      // pin virtual (el mismo número que en Blynk)
-  int8_t  gpio;      // pin físico del ESP32
+  int8_t  pin;       // puertas y persianas: canal del PCA9685 (0 a 15) · luces y sirena: GPIO del ESP32
   Kind    kind;
   bool    inverted;  // luces y sirena: se activan con señal baja (relés). Servos: giran al lado contrario
   bool    enabled;   // false = no está conectado en la maqueta
@@ -103,18 +117,18 @@ struct Channel {
   int16_t value;     // puertas 0/1, persianas 0..180, luces y sirena 0/1
 };
 
-// Cableado de la maqueta, según «Conexiones GPIO - Casa Domótica con ESP32».
-// Se puede corregir desde la app sin volver a cargar el programa.
+// Cableado de la maqueta. Puertas y persianas: el canal del módulo PCA9685 es su mismo pin virtual.
+// Luces y sirena: según «Conexiones GPIO - Casa Domótica con ESP32». Todo se puede corregir desde la app.
 Channel ch[] = {
-  {0,  13, K_DOOR,  false, true, "Porton garaje",     0},
-  {1,  14, K_DOOR,  false, true, "Puerta principal",  0},
-  {2,  15, K_DOOR,  false, true, "Puerta salon",      0},
-  {3,  16, K_DOOR,  false, true, "Puerta bano",       0},
-  {4,  17, K_DOOR,  false, true, "Puerta cuarto",     0},
-  {5,  18, K_BLIND, false, true, "Persiana sala",     0},
-  {6,  19, K_BLIND, false, true, "Persiana cuarto",   0},
-  {7,  21, K_BLIND, false, true, "Persiana cocina 1", 0},
-  {8,  22, K_BLIND, false, true, "Persiana cocina 2", 0},
+  {0,   0, K_DOOR,  false, true, "Porton garaje",     0},
+  {1,   1, K_DOOR,  false, true, "Puerta principal",  0},
+  {2,   2, K_DOOR,  false, true, "Puerta salon",      0},
+  {3,   3, K_DOOR,  false, true, "Puerta bano",       0},
+  {4,   4, K_DOOR,  false, true, "Puerta cuarto",     0},
+  {5,   5, K_BLIND, false, true, "Persiana sala",     0},
+  {6,   6, K_BLIND, false, true, "Persiana cuarto",   0},
+  {7,   7, K_BLIND, false, true, "Persiana cocina 1", 0},
+  {8,   8, K_BLIND, false, true, "Persiana cocina 2", 0},
   {9,  27, K_SIREN, false, true, "Sirena",            0},
   {10,  2, K_LIGHT, false, true, "Luz sala 1",        0},   // GPIO 2 = LED azul de la placa
   {11,  4, K_LIGHT, false, true, "Luz sala 2",        0},
@@ -132,8 +146,20 @@ const unsigned long GRACE_MS = 20000;   // tiempo para desarmar antes de que sue
 const unsigned long FLASH_MS = 200;     // parpadeo de las luces con la alarma
 const char* PREFS_NS = "casa2";
 
-Servo servos[N];
 Preferences prefs;
+
+// Módulo PCA9685: genera los pulsos de los 16 servos; el ESP32 le habla por I2C.
+const uint8_t PCA_ADDR = 0x40;               // sin soldar A0..A5
+const int PCA_SDA = 21, PCA_SCL = 22;
+const uint32_t SERVO_HZ = 50;                // un pulso cada 20 ms
+const uint32_t SERVO_MIN_US = 500, SERVO_MAX_US = 2400;   // 0° y 180°: los mismos de casa-0.7
+const unsigned long PCA_RETRY_MS = 2000;     // si no responde, se vuelve a buscar cada 2 s
+const unsigned long SERVO_GAP_MS = 150;      // pausa entre un servo y el siguiente
+bool pcaOk = false;
+unsigned long pcaTriedAt = 0;
+uint32_t servoDue = 0;                       // servos con un movimiento pendiente (un bit por canal de ch)
+unsigned long lastServoMove = 0;
+int servoNext = 0;                           // por dónde sigue la ronda, para que ninguno espere siempre
 
 bool armed = false, sounding = false, flashOn = false;
 bool savedArmed = false;                // lo guardado en la placa: se escribe solo cuando cambia
@@ -168,12 +194,20 @@ Channel* findCh(int vpin) {
   for (int i = 0; i < N; i++) if (ch[i].vpin == vpin) return &ch[i];
   return nullptr;
 }
-int indexOf(Channel* c) { return c - ch; }
+int indexOf(const Channel* c) { return c - ch; }
 bool isServo(const Channel& c) { return c.kind == K_DOOR || c.kind == K_BLIND; }
 
-// Canal activo que ya usa este GPIO (sin contar a `except`), o nullptr.
+// Luz o sirena activa que ya usa este GPIO (sin contar a `except`), o nullptr. Los servos no usan GPIO.
 Channel* gpioOwner(int gpio, const Channel* except) {
-  for (int i = 0; i < N; i++) if (&ch[i] != except && ch[i].enabled && ch[i].gpio == gpio) return &ch[i];
+  for (int i = 0; i < N; i++)
+    if (&ch[i] != except && ch[i].enabled && !isServo(ch[i]) && ch[i].pin == gpio) return &ch[i];
+  return nullptr;
+}
+
+// Servo activo que ya usa este canal del PCA9685 (sin contar a `except`), o nullptr.
+Channel* pcaOwner(int channel, const Channel* except) {
+  for (int i = 0; i < N; i++)
+    if (&ch[i] != except && ch[i].enabled && isServo(ch[i]) && ch[i].pin == channel) return &ch[i];
   return nullptr;
 }
 
@@ -200,19 +234,101 @@ void resetConn(Src src) {
 void notice(const String& text) { sendLine("V" + String(VPIN_NOTICE) + ":" + text); }
 void report(const Channel& c) { sendLine("V" + String(c.vpin) + ":" + String(c.value)); }
 
-// Mismas reglas que gpioProblem() en la app, más los GPIO 1 y 3. Devuelve el problema, o nullptr si el GPIO sirve.
+// Mismas reglas que gpioProblem() en la app. Devuelve el problema, o nullptr si el GPIO sirve.
 const char* gpioProblem(int gpio, bool output) {
   if (gpio < 0 || gpio > 39) return "no existe (0 a 39)";
   if (gpio == 1 || gpio == 3) return "lo usa el Monitor Serie (cable USB)";
+  if (gpio == PCA_SDA || gpio == PCA_SCL) return "lo usa el modulo PCA9685 (SDA y SCL)";
   if (gpio >= 6 && gpio <= 11) return "lo usa la memoria de la placa";
   if (gpio == 20 || gpio == 24 || (gpio >= 28 && gpio <= 31)) return "no existe en el ESP32";
   if (output && gpio >= 34) return "solo sirve como entrada";
   return nullptr;
 }
 
+// ---------- Módulo PCA9685: los servos ----------
+int servoAngle(const Channel& c);   // más abajo, en Salidas
+
+bool pcaWrite8(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(PCA_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
+// Prepara el módulo para servos: 50 Hz y salidas tótem. false si no responde (sin cables o sin módulo).
+bool pcaInit() {
+  Wire.beginTransmission(PCA_ADDR);
+  if (Wire.endTransmission() != 0) return false;
+  const uint8_t prescale = (uint8_t)(25000000UL / (4096UL * SERVO_HZ) - 1);   // 121: reloj interno de 25 MHz
+  bool ok = pcaWrite8(0x00, 0x10)          // MODE1: dormido, para poder cambiar la frecuencia
+            && pcaWrite8(0xFE, prescale)   // PRE_SCALE
+            && pcaWrite8(0x01, 0x04)       // MODE2: salidas tótem (las que usan los servos)
+            && pcaWrite8(0x00, 0x20);      // MODE1: despierto y con auto-incremento
+  delayMicroseconds(600);                  // el oscilador tarda 500 µs en arrancar
+  return ok;
+}
+
+// Pulso de un canal, en 4096 pasos por período: sube en `on` y baja en `off`. off = 4096: sin pulsos.
+bool pcaSet(int channel, uint16_t on, uint16_t off) {
+  Wire.beginTransmission(PCA_ADDR);
+  Wire.write(0x06 + 4 * channel);          // LEDn_ON_L; con auto-incremento siguen ON_H, OFF_L y OFF_H
+  Wire.write(on & 0xFF);
+  Wire.write(on >> 8);
+  Wire.write(off & 0xFF);
+  Wire.write(off >> 8);
+  return Wire.endTransmission() == 0;
+}
+
+// Ángulo (0..180) a pasos del pulso: 500 µs = 102 pasos, 2400 µs = 491 pasos.
+uint16_t pulseTicks(int angle) {
+  uint32_t us = SERVO_MIN_US + (SERVO_MAX_US - SERVO_MIN_US) * (uint32_t)constrain(angle, 0, 180) / 180;
+  return (uint16_t)(us * 4096UL * SERVO_HZ / 1000000UL);
+}
+
+// Canal sin pulsos: el servo queda suelto y no hace fuerza.
+void pcaRelease(int channel) { pcaSet(channel, 0, 4096); }
+
+void queueServo(const Channel& c) { servoDue |= 1UL << indexOf(&c); }
+
+// true si el módulo responde. Si no, lo vuelve a buscar (como mucho cada 2 s) y, si aparece,
+// manda cada servo a su posición.
+bool pcaReady() {
+  if (pcaOk) return true;
+  unsigned long now = millis();
+  if (pcaTriedAt != 0 && now - pcaTriedAt < PCA_RETRY_MS) return false;
+  pcaTriedAt = now | 1;
+  pcaOk = pcaInit();
+  if (pcaOk) {
+    Serial.println("Modulo PCA9685 encontrado: los servos vuelven a su posicion.");
+    for (int i = 0; i < N; i++) if (isServo(ch[i]) && ch[i].enabled) queueServo(ch[i]);
+  }
+  return pcaOk;
+}
+
+// Un servo a la vez, con SERVO_GAP_MS entre uno y otro: el pico de corriente es el de uno solo.
+void loopServos(unsigned long now) {
+  if (servoDue == 0 || now - lastServoMove < SERVO_GAP_MS || !pcaReady()) return;
+  for (int k = 0; k < N; k++) {
+    int i = (servoNext + k) % N;
+    if (!(servoDue & (1UL << i))) continue;
+    servoDue &= ~(1UL << i);
+    Channel& c = ch[i];
+    if (!c.enabled) continue;
+    servoNext = i + 1;
+    if (!pcaSet(c.pin, 0, pulseTicks(servoAngle(c)))) {
+      servoDue |= 1UL << i;   // se reintenta cuando el módulo vuelva
+      pcaOk = false;
+      Serial.println("El modulo PCA9685 dejo de responder: revisa SDA (21), SCL (22) y su alimentacion.");
+      return;
+    }
+    lastServoMove = now;
+    return;
+  }
+}
+
 // ---------- Salidas ----------
 void writeDigital(const Channel& c, bool on) {
-  if (c.enabled) digitalWrite(c.gpio, (on != c.inverted) ? HIGH : LOW);
+  if (c.enabled) digitalWrite(c.pin, (on != c.inverted) ? HIGH : LOW);
 }
 
 // Ángulo real del servo. Invertido = montado al revés: usa el ángulo opuesto (180 - ángulo).
@@ -224,34 +340,35 @@ int servoAngle(const Channel& c) {
 // Lleva una salida a su valor guardado. Con la alarma sonando, las luces las maneja el parpadeo.
 void applyOutput(Channel& c) {
   if (!c.enabled) return;
-  if (isServo(c)) { servos[indexOf(&c)].write(servoAngle(c)); return; }
+  if (isServo(c)) { queueServo(c); return; }   // lo mueve loopServos(), de a uno
   if (c.kind == K_LIGHT && sounding) return;
   writeDigital(c, c.value == 1);
 }
 
-// Prepara el pin de un canal y lo deja en su valor actual.
+// Prepara la salida de un canal y la deja en su valor actual. Un servo desactivado queda suelto.
 void setupChannel(Channel& c) {
-  int i = indexOf(&c);
-  if (isServo(c) && servos[i].attached()) servos[i].detach();
-  if (!c.enabled) return;
   if (isServo(c)) {
-    servos[i].setPeriodHertz(50);
-    servos[i].attach(c.gpio, 500, 2400);
-  } else {
-    pinMode(c.gpio, OUTPUT);
+    if (c.enabled) queueServo(c);
+    else if (pcaOk) pcaRelease(c.pin);
+    return;
   }
+  if (!c.enabled) return;
+  pinMode(c.pin, OUTPUT);
   applyOutput(c);
 }
 
-// Deja en reposo el GPIO que este canal deja de usar (con su configuración de antes), si ningún
+// Deja en reposo el pin que este canal deja de usar (con su configuración de antes), si ningún
 // otro canal activo lo usa. Luces y sirena: apagadas, LOW (HIGH si el canal era invertido, porque
-// en un relé activo en bajo LOW lo encendería). Servos: soltados y sin pulsos, no hacen fuerza.
-void releaseGpio(Channel& c) {
-  if (gpioOwner(c.gpio, &c)) return;
-  int i = indexOf(&c);
-  if (isServo(c) && servos[i].attached()) servos[i].detach();
-  pinMode(c.gpio, OUTPUT);
-  digitalWrite(c.gpio, (!isServo(c) && c.inverted) ? HIGH : LOW);
+// en un relé activo en bajo LOW lo encendería). Servos: su canal del módulo sin pulsos, no hacen fuerza.
+void releasePin(Channel& c) {
+  if (isServo(c)) {
+    servoDue &= ~(1UL << indexOf(&c));
+    if (!pcaOwner(c.pin, &c) && pcaOk) pcaRelease(c.pin);
+    return;
+  }
+  if (gpioOwner(c.pin, &c)) return;
+  pinMode(c.pin, OUTPUT);
+  digitalWrite(c.pin, c.inverted ? HIGH : LOW);
 }
 
 void setValue(Channel& c, int value) {
@@ -344,11 +461,16 @@ void loopFlash(unsigned long now) {
 }
 
 // ---------- Configuración guardada ----------
+// Puertas y persianas guardan su canal del PCA9685 en «c». Lo que casa-0.7 guardó para ellas en «g»
+// era un GPIO, que ya no sirve: se deja, y quedan en su canal de fábrica. Invertir y activar se conservan.
+const char* pinKey(const Channel& c) { return isServo(c) ? "c" : "g"; }
+
 void loadConfig() {
   prefs.begin(PREFS_NS, true);
   for (int i = 0; i < N; i++) {
     String k = "v" + String(ch[i].vpin);
-    ch[i].gpio = prefs.getChar((k + "g").c_str(), ch[i].gpio);
+    int8_t saved = prefs.getChar((k + pinKey(ch[i])).c_str(), ch[i].pin);
+    if (!isServo(ch[i]) || (saved >= 0 && saved <= 15)) ch[i].pin = saved;
     ch[i].inverted = prefs.getBool((k + "i").c_str(), ch[i].inverted);
     ch[i].enabled = prefs.getBool((k + "e").c_str(), ch[i].enabled);
   }
@@ -358,7 +480,7 @@ void loadConfig() {
 void saveConfig(const Channel& c) {
   prefs.begin(PREFS_NS, false);
   String k = "v" + String(c.vpin);
-  prefs.putChar((k + "g").c_str(), c.gpio);
+  prefs.putChar((k + pinKey(c)).c_str(), c.pin);
   prefs.putBool((k + "i").c_str(), c.inverted);
   prefs.putBool((k + "e").c_str(), c.enabled);
   prefs.end();
@@ -376,14 +498,21 @@ void warnPins() {
   for (int i = 0; i < N; i++) {
     Channel& c = ch[i];
     if (!c.enabled) continue;
-    String who = "Aviso: V" + String(c.vpin) + " " + c.name + " usa el GPIO " + String(c.gpio);
-    if (c.gpio == 12)
+    if (isServo(c)) {
+      Channel* twin = pcaOwner(c.pin, &c);
+      if (twin && twin > &c)
+        Serial.println("Aviso: V" + String(c.vpin) + " " + c.name + " y V" + String(twin->vpin) + " " + twin->name +
+                       " usan el mismo canal " + String(c.pin) + " del PCA9685. Cambia uno desde la app.");
+      continue;
+    }
+    String who = "Aviso: V" + String(c.vpin) + " " + c.name + " usa el GPIO " + String(c.pin);
+    if (c.pin == 12)
       Serial.println(who + ", un pin de arranque: si lo que tiene conectado lo sube a 3,3 V al encender, "
                      "el ESP32 no arranca. Si pasa eso, muevelo al GPIO 23, 32 o 33 desde la app (CFG:V"
                      + String(c.vpin) + ":23:" + String(c.inverted ? 1 : 0) + ":1).");
-    const char* problem = gpioProblem(c.gpio, true);
+    const char* problem = gpioProblem(c.pin, true);
     if (problem) Serial.println(who + ": " + problem + ". Cambialo desde la app.");
-    Channel* other = gpioOwner(c.gpio, &c);
+    Channel* other = gpioOwner(c.pin, &c);
     if (other && other > &c) Serial.println(who + ", igual que V" + String(other->vpin) + " " + other->name + ". Cambia uno desde la app.");
   }
 }
@@ -466,7 +595,7 @@ void loopResetButton(unsigned long now) {
     if (++blinkStep >= 6) { blinkStep = -1; restoreLights(); }
     else for (int i = 0; i < N; i++) if (ch[i].kind == K_LIGHT) writeDigital(ch[i], blinkStep % 2 == 0);
   }
-  for (int i = 0; i < N; i++) if (ch[i].enabled && ch[i].gpio == BOOT_PIN) return;   // el pin se usa para otra cosa
+  for (int i = 0; i < N; i++) if (ch[i].enabled && !isServo(ch[i]) && ch[i].pin == BOOT_PIN) return;   // el pin se usa para otra cosa
   if (digitalRead(BOOT_PIN) == HIGH) { pressStart = 0; done = false; return; }
   if (pressStart == 0) pressStart = now | 1;
   if (done || now - pressStart < RESET_HOLD_MS) return;
@@ -505,9 +634,11 @@ void loopTest(unsigned long now) {
     while (testIndex < N && !ch[testIndex].enabled) testIndex++;
     if (testIndex >= N) { testIndex = -1; sendLine("OK:TEST terminado"); return; }
     Channel& c = ch[testIndex];
-    sendLine("OK:TEST V" + String(c.vpin) + " " + c.name + " GPIO " + String(c.gpio));
+    sendLine("OK:TEST V" + String(c.vpin) + " " + c.name + (isServo(c) ? " canal " : " GPIO ") + String(c.pin));
     if (isServo(c)) {
-      servos[testIndex].write(90); testWait = 700;
+      if (pcaReady()) pcaSet(c.pin, 0, pulseTicks(90));
+      lastServoMove = now;   // la pausa entre servos también cuenta para la prueba
+      testWait = 700;
     } else {
       writeDigital(c, true); testWait = c.kind == K_SIREN ? 200 : 700;
     }
@@ -526,7 +657,7 @@ void loopTest(unsigned long now) {
   testAt = now;
 }
 
-// CFG:V<pin>:<gpio>:<invertido>[:<activado>]
+// CFG:V<pin>:<gpio, o 100 + canal del PCA9685>:<invertido>[:<activado>]
 void handleConfig(const String& line) {
   int a = line.indexOf(':', 5);
   int b = a < 0 ? -1 : line.indexOf(':', a + 1);
@@ -534,25 +665,37 @@ void handleConfig(const String& line) {
   int e = line.indexOf(':', b + 1);
 
   // Todo tiene que ser número (antes «abc» valía 0, es decir, GPIO 0). Invertir y activar: 0 o 1.
-  int vpin, gpio, inv, on = 1;
-  bool ok = parseIntStrict(line.substring(5, a), vpin) && parseIntStrict(line.substring(a + 1, b), gpio) &&
+  int vpin, code, inv, on = 1;
+  bool ok = parseIntStrict(line.substring(5, a), vpin) && parseIntStrict(line.substring(a + 1, b), code) &&
             parseIntStrict(line.substring(b + 1, e < 0 ? line.length() : e), inv) && inv <= 1 &&
             (e < 0 || (parseIntStrict(line.substring(e + 1), on) && on <= 1));
   Channel* c = ok ? findCh(vpin) : nullptr;
   if (!c) { sendLine("ERR:CFG " + line); return; }
   bool inverted = inv == 1, enabled = on == 1;
 
-  const char* problem = gpioProblem(gpio, true);
-  if (problem) { sendLine("ERR:GPIO " + String(gpio) + " " + problem); return; }
-  // Dos salidas activas en el mismo GPIO se pisarían: se rechaza y se dice cuál lo tiene.
-  Channel* other = enabled ? gpioOwner(gpio, c) : nullptr;
-  if (other) { sendLine("ERR:GPIO " + String(gpio) + " ya lo usa V" + String(other->vpin) + " " + other->name); return; }
+  int pin;
+  if (isServo(*c)) {
+    // Puertas y persianas: 100 + canal del PCA9685. Un número menor (un GPIO, de una app anterior)
+    // no cambia el canal: solo se aplican invertir y activar.
+    if (code > 115) { sendLine("ERR:canal " + String(code - 100) + " no existe en el PCA9685 (0 a 15)"); return; }
+    pin = code >= 100 ? code - 100 : c->pin;
+    // Dos servos activos en el mismo canal se pisarían: se rechaza y se dice cuál lo tiene.
+    Channel* other = enabled ? pcaOwner(pin, c) : nullptr;
+    if (other) { sendLine("ERR:canal " + String(pin) + " ya lo usa V" + String(other->vpin) + " " + other->name); return; }
+  } else {
+    pin = code;
+    const char* problem = gpioProblem(pin, true);
+    if (problem) { sendLine("ERR:GPIO " + String(pin) + " " + problem); return; }
+    // Dos salidas activas en el mismo GPIO se pisarían: se rechaza y se dice cuál lo tiene.
+    Channel* other = enabled ? gpioOwner(pin, c) : nullptr;
+    if (other) { sendLine("ERR:GPIO " + String(pin) + " ya lo usa V" + String(other->vpin) + " " + other->name); return; }
+  }
 
-  bool changed = c->gpio != gpio || c->inverted != inverted || c->enabled != enabled;
+  bool changed = c->pin != pin || c->inverted != inverted || c->enabled != enabled;
   if (changed) {
-    if (c->enabled && (c->gpio != gpio || !enabled)) releaseGpio(*c);   // el pin anterior queda en reposo
+    if (c->enabled && (c->pin != pin || !enabled)) releasePin(*c);   // el pin o canal anterior queda en reposo
     bool wasOn = c->value != 0;
-    c->gpio = gpio; c->inverted = inverted; c->enabled = enabled;
+    c->pin = pin; c->inverted = inverted; c->enabled = enabled;
     // Desactivado = cerrado / apagado: así una puerta «no conectada» no dispara la alarma.
     // La sirena no: su valor dice si la alarma está sonando, aunque no tenga sirena conectada.
     if (!enabled && c->kind != K_SIREN) c->value = 0;
@@ -560,7 +703,7 @@ void handleConfig(const String& line) {
     saveConfig(*c);
     if (!enabled && c->kind != K_SIREN && wasOn) report(*c);
   }
-  sendLine("OK:V" + String(c->vpin) + " GPIO " + String(gpio) + (inverted ? " inv" : "") + (enabled ? "" : " off"));
+  sendLine("OK:V" + String(c->vpin) + (isServo(*c) ? " canal " : " GPIO ") + String(pin) + (inverted ? " inv" : "") + (enabled ? "" : " off"));
 }
 
 void handleLine(Src src, String line) {
@@ -598,6 +741,11 @@ void handleLine(Src src, String line) {
 
   Channel* c = findCh(vpin);
   if (!c) { sendLine("ERR:V" + String(vpin) + " no existe"); return; }
+  if (isServo(*c) && c->enabled && !pcaReady()) {
+    // Sin el módulo, el servo no se movería: no se confirma, para que la app no muestre algo que no pasó.
+    sendLine("ERR:V" + String(vpin) + " sin el modulo PCA9685: revisa SDA (21), SCL (22) y su alimentacion");
+    return;
+  }
   if (!c->enabled) {
     // Desactivado cuenta como cerrado / apagado: pedirle 0 solo lo confirma; otro valor es un error.
     if (value == 0) report(*c);
@@ -881,8 +1029,13 @@ void setup() {
   delay(200);
   Serial.println("\n== " DEVICE_NAME " (" FW_VERSION ") ==");
 
-  for (int t = 0; t < 4; t++) ESP32PWM::allocateTimer(t);
-  for (int i = 0; i < N; i++) if (isServo(ch[i])) setupChannel(ch[i]);
+  Wire.begin(PCA_SDA, PCA_SCL);
+  pcaOk = pcaInit();
+  pcaTriedAt = millis() | 1;
+  Serial.println(pcaOk ? "Modulo PCA9685 listo (SDA 21, SCL 22): los servos se mueven de a uno."
+                       : "No encuentro el modulo PCA9685 (SDA 21, SCL 22): los servos no se van a mover. "
+                         "Revisa sus cables y su alimentacion; la placa lo vuelve a buscar sola.");
+  for (int i = 0; i < N; i++) if (isServo(ch[i])) setupChannel(ch[i]);   // a su posición, de a uno
 
 #if USE_BLE
   setupBle();
@@ -912,6 +1065,7 @@ void loop() {
   unsigned long now = millis();
   loopSecurity(now);
   loopFlash(now);
+  loopServos(now);
   loopTest(now);
   loopResetButton(now);
 }

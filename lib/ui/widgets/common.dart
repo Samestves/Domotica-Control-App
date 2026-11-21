@@ -36,7 +36,8 @@ class MessageConsole extends StatelessWidget {
   }
 }
 
-/// Abre la hoja para cambiar a qué GPIO va un control, si está invertido y si existe en la maqueta.
+/// Abre la hoja para cambiar a qué pin va un control (GPIO, o canal del PCA9685 en puertas y persianas),
+/// si está invertido y si existe en la maqueta.
 Future<void> showPinSheet(BuildContext context, Session session, ControlSpec spec) {
   final app = AppScope.read(context);
   return showAppSheet<void>(context, (_) => _PinSheet(session: session, spec: spec, onSaved: app.saveChanges));
@@ -60,6 +61,7 @@ class _PinSheetState extends State<_PinSheet> {
 
   ControlSpec get _spec => widget.spec;
   Session get _session => widget.session;
+  bool get _pca => _spec.onPca;
 
   @override
   void initState() {
@@ -78,16 +80,16 @@ class _PinSheetState extends State<_PinSheet> {
 
   Future<void> _save() async {
     final g = int.tryParse(_gpio.text.trim());
-    final problem = g == null ? 'Escribe un número.' : gpioProblem(g);
+    final problem = g == null ? 'Escribe un número.' : (_pca ? channelProblem(g) : gpioProblem(g));
     if (problem != null) {
       setState(() => _error = problem);
       return;
     }
-    await _apply(PinConfig(g!, inverted: _inverted, enabled: _enabled), custom: true);
+    await _apply(PinConfig(g!, inverted: _inverted, enabled: _enabled, pca: _pca), custom: true);
   }
 
   Future<void> _reset() async {
-    await _apply(PinConfig(_spec.gpio, inverted: _spec.inverted, enabled: _spec.enabled), custom: false);
+    await _apply(PinConfig(_spec.gpio, inverted: _spec.inverted, enabled: _spec.enabled, pca: _pca), custom: false);
   }
 
   /// Guarda el ajuste en la app, lo envía a la placa y cierra la hoja.
@@ -95,7 +97,7 @@ class _PinSheetState extends State<_PinSheet> {
     final pins = _session.device.pins;
     custom ? pins[_spec.vpin] = p : pins.remove(_spec.vpin);
     await widget.onSaved();
-    _session.sendRaw(cfgMsg(_spec.vpin, p.gpio, inverted: p.inverted, enabled: p.enabled));
+    _session.sendRaw(cfgMsg(_spec.vpin, p.code, inverted: p.inverted, enabled: p.enabled));
     if (mounted) Navigator.pop(context);
   }
 
@@ -114,7 +116,7 @@ class _PinSheetState extends State<_PinSheet> {
           child: SheetHeader(
             eyebrow: '${_spec.room} · pin virtual V${_spec.vpin}',
             title: _spec.label,
-            detail: 'De fábrica va en el GPIO ${_spec.gpio}.',
+            detail: _pca ? 'De fábrica va en el canal ${_spec.gpio} del módulo PCA9685.' : 'De fábrica va en el GPIO ${_spec.gpio}.',
           ),
         ),
         const SizedBox(height: 20),
@@ -122,7 +124,7 @@ class _PinSheetState extends State<_PinSheet> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(children: [
-              const Expanded(child: Text('GPIO del ESP32', style: T.body)),
+              Expanded(child: Text(_pca ? 'Canal del PCA9685' : 'GPIO del ESP32', style: T.body)),
               SizedBox(
                 width: 80,
                 child: TextField(
@@ -152,7 +154,7 @@ class _PinSheetState extends State<_PinSheet> {
         PillButton(connected ? 'Guardar y enviar' : 'Guardar', expand: true, onTap: _save),
         if (custom) ...[
           const SizedBox(height: 10),
-          PillButton('Volver al GPIO ${_spec.gpio}', kind: PillKind.secondary, expand: true, onTap: _reset),
+          PillButton(_pca ? 'Volver al canal ${_spec.gpio}' : 'Volver al GPIO ${_spec.gpio}', kind: PillKind.secondary, expand: true, onTap: _reset),
         ],
         if (!connected)
           Padding(
@@ -165,9 +167,9 @@ class _PinSheetState extends State<_PinSheet> {
   }
 }
 
-/// «V10 · GPIO 2»: pin virtual y físico de un control, para el modo técnico.
+/// «V10 · GPIO 2» o «V4 · canal 4»: pin virtual y físico de un control, para el modo técnico.
 String pinLabel(SavedDevice d, ControlSpec s) {
   final p = s.pinsFor(d);
   if (!p.enabled) return 'V${s.vpin} · sin conectar';
-  return 'V${s.vpin} · GPIO ${p.gpio}${p.inverted ? ' · inv' : ''}';
+  return 'V${s.vpin} · ${p.pca ? 'canal' : 'GPIO'} ${p.gpio}${p.inverted ? ' · inv' : ''}';
 }

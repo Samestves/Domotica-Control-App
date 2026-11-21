@@ -17,16 +17,22 @@ extension ProfileLabel on Profile {
       };
 }
 
-/// Ajuste de un control: a qué GPIO va, si está invertido y si está conectado en la maqueta.
+/// Ajuste de un control: a qué pin va, si está invertido y si está conectado en la maqueta.
+/// Luces y sirena: [gpio] es el GPIO del ESP32. Puertas y persianas ([pca]): es el canal del módulo PCA9685
+/// (desde casa-0.8). Un ajuste de servo guardado antes de eso no tiene [pca] y su GPIO ya no sirve.
 class PinConfig {
   final int gpio;
   final bool inverted;
   final bool enabled;
-  const PinConfig(this.gpio, {required this.inverted, this.enabled = true});
+  final bool pca;
+  const PinConfig(this.gpio, {required this.inverted, this.enabled = true, this.pca = false});
 
-  Map<String, dynamic> toJson() => {'g': gpio, 'i': inverted, 'e': enabled};
-  factory PinConfig.fromJson(Map<String, dynamic> j) =>
-      PinConfig(j['g'] as int, inverted: j['i'] as bool? ?? false, enabled: j['e'] as bool? ?? true);
+  /// Lo que viaja en CFG: el GPIO, o 100 + el canal del PCA9685.
+  int get code => pca ? 100 + gpio : gpio;
+
+  Map<String, dynamic> toJson() => {'g': gpio, 'i': inverted, 'e': enabled, if (pca) 'p': true};
+  factory PinConfig.fromJson(Map<String, dynamic> j) => PinConfig(j['g'] as int,
+      inverted: j['i'] as bool? ?? false, enabled: j['e'] as bool? ?? true, pca: j['p'] as bool? ?? false);
 }
 
 /// Una placa guardada en el teléfono.

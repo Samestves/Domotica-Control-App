@@ -1,13 +1,11 @@
 /// Versión que se muestra en la app. Mantener igual a `version` en pubspec.yaml.
-const appVersion = 'Alpha 0.9.4';
-const appBuild = 24;
+const appVersion = 'Alpha 0.9.5';
+const appBuild = 25;
 
 /// Qué trae esta versión. La app lo muestra una vez al abrirla después de actualizar (y en Ajustes → Acerca de),
 /// y tool/publicar.ps1 lo usa como descripción de la Release en GitHub. Una frase corta por punto.
 const appNews = [
-  'Inicio más limpio: toca una tarjeta para entrar, mantenla presionada para ver sus opciones y agrega placas al final de la lista.',
-  'Ahora se puede cambiar el nombre de un dispositivo desde sus opciones.',
-  'En la casa, las luces y puertas se prenden tocando su tarjeta, y la seguridad avisa si una entrada quedó abierta antes de armar.',
-  'En el carrito, la distancia al obstáculo es una barra que se llena y se pone roja al acercarse.',
-  'Al agregar un dispositivo, el nombre es opcional. El registro de mensajes queda en el modo técnico.',
+  'Lista para la casa con el módulo PCA9685 (casa-0.8): en puertas y persianas, la hoja de pines pide el canal del módulo.',
+  'Los ajustes viejos de los servos pasan solos a su canal, sin perder invertir ni activar.',
+  'Los GPIO 21 y 22 quedan reservados para el módulo (SDA y SCL).',
 ];

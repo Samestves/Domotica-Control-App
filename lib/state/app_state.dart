@@ -12,8 +12,8 @@ import '../core/protocol.dart';
 import '../core/updater.dart';
 import '../core/wifi_link.dart';
 import '../core/wifi_net.dart';
+import '../models/controls.dart';
 import '../models/device.dart';
-import '../models/pins.dart';
 import '../version.dart';
 
 class LogLine {
@@ -384,8 +384,12 @@ class Session extends ChangeNotifier {
 
   /// La app es la fuente de verdad de los pines: al conectar, envía a la placa
   /// todos los ajustes guardados, aunque se hayan hecho sin conexión.
+  /// En la casa, un servo guardado con un GPIO (antes de casa-0.8) se envía con su canal del PCA9685.
   void _pushPinConfig() {
-    device.pins.forEach((vpin, p) => sendRaw(cfgMsg(vpin, p.gpio, inverted: p.inverted, enabled: p.enabled)));
+    device.pins.forEach((vpin, saved) {
+      final p = (device.profile == Profile.casa ? casaSpec(vpin)?.pinsFor(device) : null) ?? saved;
+      sendRaw(cfgMsg(vpin, p.code, inverted: p.inverted, enabled: p.enabled));
+    });
   }
 
   void _onLine(String line) {
