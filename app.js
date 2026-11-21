@@ -88,7 +88,7 @@ function renderTiles() {
     t.setAttribute('role', 'radio');
     t.setAttribute('aria-checked', String(b === board));
     t.tabIndex = b === board ? 0 : -1;
-    t.innerHTML = `${icon(b.icon, 40)}<span><b>${b.name}</b><small>${b.version}</small></span>`;
+    t.innerHTML = `${icon(b.icon, 60)}<span><b>${b.name}</b><small>${b.version}</small></span>`;
     t.addEventListener('click', () => pick(b));
     t.addEventListener('keydown', (e) => {
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
