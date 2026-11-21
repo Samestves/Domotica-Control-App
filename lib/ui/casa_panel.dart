@@ -65,7 +65,7 @@ class _CasaPanelState extends State<CasaPanel> {
     _maybeAlert(s);
 
     return AppScaffold(
-      eyebrow: 'Casa · ${widget.device.transport.label}',
+      eyebrow: widget.device.subtitle,
       title: widget.device.name,
       subtitle: ConnectionBar(session: s),
       actions: [_Menu(session: s, showPins: showPins, onShowPins: app.setShowPins)],
@@ -77,9 +77,7 @@ class _CasaPanelState extends State<CasaPanel> {
             children: showsClaveCard(s)
                 ? [ClaveCard(session: s)]
                 : [
-                    HouseSummary(session: s),
-                    const SizedBox(height: 12),
-                    AllLightsRow(session: s),
+                    Panel(padding: EdgeInsets.zero, child: AllLightsRow(session: s)),
                     const SizedBox(height: 12),
                     SecurityCard(session: s),
                     SectionHeader(
@@ -88,7 +86,7 @@ class _CasaPanelState extends State<CasaPanel> {
                         onTap: () => setState(() => allOpen ? _open.clear() : _open.addAll(rooms)),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Eyebrow(allOpen ? 'Cerrar todas' : 'Abrir todas', color: c.text),
+                          child: Eyebrow(allOpen ? 'Plegar todas' : 'Ver todas', color: c.text),
                         ),
                       ),
                     ),
@@ -96,8 +94,11 @@ class _CasaPanelState extends State<CasaPanel> {
                       RoomCard(session: s, room: room, expanded: _open.contains(room), onToggle: () => _toggleRoom(room), showPins: showPins),
                       const SizedBox(height: 10),
                     ],
-                    const SectionHeader('Registro'),
-                    MessageConsole(session: s),
+                    // Lo técnico (los mensajes con la placa) solo en el modo técnico: el panel queda para usar la casa.
+                    if (showPins) ...[
+                      const SectionHeader('Registro'),
+                      MessageConsole(session: s),
+                    ],
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                       child: Text('Mantén presionado un control para cambiar su pin, invertirlo o marcarlo como no conectado.',

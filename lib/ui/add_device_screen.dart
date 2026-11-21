@@ -120,8 +120,11 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
   static bool _isBoard(ScanResult r) =>
       r.advertisementData.serviceUuids.map((u) => u.str128.toLowerCase()).any((u) => u == BleUuids.nus || u == BleUuids.hm10);
 
+  /// Nombre si lo dejan vacío: el del tipo de panel.
+  String get _defaultName => _profile == Profile.casa ? 'Casa domótica' : 'Auto Robot';
+
+  /// El nombre es opcional: lo único que hace falta es saber cómo llegar a la placa.
   bool get _valid {
-    if (_name.text.trim().isEmpty) return false;
     return switch (_transport) {
       Transport.ble => _picked != null,
       Transport.wifi => RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(_ip.text.trim()) && int.tryParse(_port.text) != null,
@@ -134,7 +137,7 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
     _saving = true;
     final d = SavedDevice(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
-      name: _name.text.trim(),
+      name: _name.text.trim().isEmpty ? _defaultName : _name.text.trim(),
       profile: _profile,
       transport: _transport,
       board: _transport == Transport.demo ? 'Demo' : _board,
@@ -156,24 +159,12 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
     return AppScaffold(
-      eyebrow: 'Agregar',
       title: 'Nuevo dispositivo',
       bottomBar: PillButton('Guardar dispositivo', expand: true, onTap: _valid ? _save : null),
       slivers: [
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           sliver: SliverList.list(children: [
-            const SectionHeader('Nombre'),
-            Panel(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                controller: _name,
-                style: T.body,
-                decoration: const InputDecoration(hintText: 'Ej.: Casa de la feria'),
-                textCapitalization: TextCapitalization.sentences,
-                onChanged: (_) => setState(() {}),
-              ),
-            ),
             const SectionHeader('Panel'),
             Segmented<Profile>(
               value: _profile,
@@ -216,6 +207,22 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
                   ),
                 ],
             },
+            // Al final: casi siempre ya viene escrito con el nombre de la placa elegida.
+            const SectionHeader('Nombre'),
+            Panel(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: _name,
+                style: T.body,
+                decoration: InputDecoration(hintText: _defaultName),
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
+              child: Text('Opcional. Si lo dejas vacío, se llama «$_defaultName».', style: T.small.copyWith(color: c.text2)),
+            ),
           ]),
         ),
       ],

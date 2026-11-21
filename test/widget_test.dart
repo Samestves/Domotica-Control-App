@@ -14,6 +14,7 @@ import 'package:control_domotica/ui/credits_screen.dart';
 import 'package:control_domotica/ui/widgets/carro_ajustes.dart';
 import 'package:control_domotica/ui/widgets/casa_tiles.dart';
 import 'package:control_domotica/ui/widgets/drive_controls.dart';
+import 'package:control_domotica/ui/widgets/kit.dart';
 import 'package:control_domotica/ui/widgets/status.dart';
 import 'package:control_domotica/version.dart';
 import 'package:flutter/material.dart';
@@ -666,11 +667,12 @@ void main() {
 
     testWidgets('la reversa y las luces se leen de la placa al entrar al panel', (t) async {
       final (_, s, links) = await openPanel(t);
-      expect(find.text('0 %'), findsOneWidget);
+      final reversa = find.bySemanticsLabel('Reversa');
+      expect(t.getSemantics(reversa), isSemantics(isToggled: false));
       links.single.emitLine('V${CarPins.reverse}:1'); // la placa recuerda la reversa de antes
       await t.pump();
       await t.pump(); // la línea llega después del primer cuadro
-      expect(find.text('-0 %'), findsOneWidget, reason: 'la velocidad muestra marcha atrás');
+      expect(t.getSemantics(reversa), isSemantics(isToggled: true), reason: 'el botón muestra la marcha atrás que recuerda la placa');
 
       await t.tap(find.bySemanticsLabel('Reversa'));
       await t.pump();
@@ -765,9 +767,11 @@ void main() {
     expect(find.text('Dispositivos'), findsWidgets); // título grande y el de la barra
     expect(find.text('Casa (demo)'), findsOneWidget);
     expect(find.text('Auto Robot (demo)'), findsOneWidget);
-    expect(find.byTooltip('Agregar dispositivo'), findsOneWidget, reason: 'un solo botón para agregar, arriba');
+    expect(find.text('Agregar dispositivo'), findsOneWidget, reason: 'un solo lugar para agregar, al final de la lista');
+    expect(find.byTooltip('Agregar dispositivo'), findsNothing, reason: 'arriba solo queda Ajustes');
     expect(find.byTooltip('Ajustes'), findsOneWidget);
-    expect(find.byTooltip('Abrir'), findsNWidgets(2), reason: 'cada placa tiene su flecha para entrar');
+    expect(find.byIcon(Ic.chevronRight), findsNWidgets(2), reason: 'cada tarjeta muestra que se puede abrir');
+    expect(find.text('Mantén presionada una tarjeta para ver sus opciones.'), findsOneWidget);
     expect(find.text('CONECTAR'), findsWidgets, reason: 'cada placa desconectada tiene su botón');
   });
 
@@ -837,6 +841,75 @@ void main() {
     await t.pump();
     await t.pump(const Duration(seconds: 1));
     expect(find.text('Clave cambiada'), findsNothing);
+    await t.runAsync(s.disconnect);
+    await t.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('el nombre de un dispositivo se cambia desde sus opciones y queda guardado', (t) async {
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(800, 1400);
+    addTearDown(t.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final app = AppState();
+    await app.load();
+    await t.pumpWidget(ControlApp(state: app));
+    await t.pump();
+
+    await t.longPress(find.text('Casa (demo)'));
+    await t.pump();
+    await t.pump(const Duration(seconds: 1));
+    await t.tap(find.text('Cambiar nombre'));
+    await t.pump();
+    await t.pump(const Duration(seconds: 1));
+    await t.enterText(find.byType(TextField), 'Maqueta del grupo');
+    await t.pump();
+    await t.tap(find.text('GUARDAR NOMBRE'));
+    await t.pump();
+    await t.pump(const Duration(seconds: 1));
+
+    expect(find.text('Maqueta del grupo'), findsOneWidget);
+    expect(find.text('Casa (demo)'), findsNothing);
+    final again = AppState();
+    await again.load();
+    expect(again.devices.map((d) => d.name), contains('Maqueta del grupo'));
+  });
+
+  testWidgets('la tarjeta de seguridad avisa si la puerta principal está abierta antes de armar', (t) async {
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(800, 1400);
+    addTearDown(t.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final app = AppState();
+    await app.load();
+    final casa = app.devices.firstWhere((d) => d.profile == Profile.casa);
+    final s = app.session(casa);
+    await t.runAsync(() async {
+      await s.connect();
+      s.send(CasaPins.mainDoor, 1);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await t.pumpWidget(ControlApp(state: app, home: Scaffold(body: ListenableBuilder(listenable: s, builder: (_, _) => SecurityCard(session: s)))));
+    await t.pump();
+    expect(find.text('La puerta principal está abierta. Si la armas así, la sirena suena en 20 s.'), findsOneWidget);
+
+    await t.runAsync(() async {
+      s.send(CasaPins.mainDoor, 0);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await t.pump();
+    expect(find.text('Ármala para vigilar el garaje y la puerta principal.'), findsOneWidget);
+
+    // Armar y desarmar: la placa avisa «Seguridad desarmada», que solo repite el título y no se muestra.
+    await t.runAsync(() async {
+      s.send(CasaPins.armed, 1);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      s.send(CasaPins.armed, 0);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await t.pump();
+    expect(s.values[CasaPins.notice], 'Seguridad desarmada');
+    expect(find.text('Seguridad desarmada'), findsNothing);
+    expect(find.text('Ármala para vigilar el garaje y la puerta principal.'), findsOneWidget);
     await t.runAsync(s.disconnect);
     await t.pump(const Duration(seconds: 1));
   });

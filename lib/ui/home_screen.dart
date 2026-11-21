@@ -80,7 +80,6 @@ class _HomeScreenState extends State<HomeScreen> {
         Eyebrow(connected == 0 ? 'Ninguno conectado' : '$connected de ${app.devices.length} conectados', color: connected > 0 ? c.green : c.text2),
       ]),
       actions: [
-        RoundButton(icon: Ic.plus, tooltip: 'Agregar dispositivo', size: 40, onTap: () => HomeScreen._add(context)),
         RoundButton(icon: Ic.settings, tooltip: 'Ajustes', size: 40, onTap: () => showSettingsSheet(context)),
       ],
       slivers: [
@@ -91,16 +90,13 @@ class _HomeScreenState extends State<HomeScreen> {
             if (app.update != null) ...[UpdateBanner(release: app.update!), const SizedBox(height: 12)],
             if (app.devices.isEmpty) _EmptyState(onAdd: () => HomeScreen._add(context)),
             for (final d in app.devices) ...[_DeviceCard(device: d), const SizedBox(height: 12)],
-            const SizedBox(height: 28),
-            Center(
-              child: Tap(
-                onTap: () => showAppSheet<void>(context, (_) => const _AboutSheet()),
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Eyebrow('Control Domótica · $appVersion', color: c.text3),
-                ),
+            if (app.devices.isNotEmpty) _AddCard(onTap: () => HomeScreen._add(context)),
+            if (app.devices.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                child: Text('Mantén presionada una tarjeta para ver sus opciones.',
+                    style: T.small.copyWith(color: c.text3), textAlign: TextAlign.center),
               ),
-            ),
           ]),
         ),
       ],
@@ -127,26 +123,26 @@ class _DeviceCard extends StatelessWidget {
         padding: EdgeInsets.zero,
         border: k == Conn.connected ? c.line2 : null,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // Arriba: qué es y la flecha para entrar. Toda esta parte abre el panel.
+          // Arriba: qué es. Toda la tarjeta abre el panel; la flecha solo lo indica.
           Semantics(
             button: true,
             label: 'Abrir ${device.name}',
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
+              padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
               child: Row(children: [
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
                       Icon(profileIcon(device.profile), size: 16, color: c.text2),
                       const SizedBox(width: 8),
-                      Flexible(child: Eyebrow('${device.profile.label} · ${device.transport == Transport.demo ? 'Demo' : device.transport.label}')),
+                      Flexible(child: Eyebrow(device.subtitle)),
                     ]),
                     const SizedBox(height: 8),
                     Text(device.name, style: T.title.copyWith(fontSize: 24)),
                   ]),
                 ),
                 const SizedBox(width: 12),
-                RoundButton(icon: Ic.chevronRight, tooltip: 'Abrir', size: 40, filled: k == Conn.connected, onTap: () => HomeScreen.open(context, device)),
+                Icon(Ic.chevronRight, size: 20, color: k == Conn.connected ? c.text : c.text3),
               ]),
             ),
           ),
@@ -189,6 +185,33 @@ class _DeviceCard extends StatelessWidget {
       if (s.values[CasaPins.armed] == '1') 'alarma armada',
     ];
     return parts.isEmpty ? 'Todo apagado y cerrado' : parts.join(' · ');
+  }
+}
+
+/// Al final de la lista: un lugar punteado para otra placa, en vez de un «+» suelto arriba que compite con Ajustes.
+class _AddCard extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AddCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Semantics(
+      button: true,
+      label: 'Agregar dispositivo',
+      excludeSemantics: true,
+      child: Tap(
+        onTap: onTap,
+        child: DashedPanel(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Ic.plus, size: 20, color: c.text2),
+            const SizedBox(width: 10),
+            Text('Agregar dispositivo', style: T.callout.copyWith(color: c.text2)),
+          ]),
+        ),
+      ),
+    );
   }
 }
 
@@ -256,7 +279,7 @@ class _SettingsSheet extends StatelessWidget {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: SheetHeader(eyebrow: 'Control Domótica', title: 'Ajustes')),
+        const Padding(padding: EdgeInsets.symmetric(horizontal: 4), child: SheetHeader(title: 'Ajustes')),
         const SectionHeader('Apariencia', padding: EdgeInsets.fromLTRB(4, 24, 4, 10)),
         Segmented<ThemeMode>(
           value: app.themeMode,
@@ -266,7 +289,7 @@ class _SettingsSheet extends StatelessWidget {
         ),
         const SectionHeader('Modo técnico', padding: EdgeInsets.fromLTRB(4, 24, 4, 10)),
         RowGroup(
-          footer: 'Muestra en cada control su pin virtual y el GPIO del ESP32.',
+          footer: 'Muestra en cada control su pin virtual y el GPIO del ESP32, y el registro de mensajes con la placa.',
           children: [
             ListRow(
               icon: Ic.pins,
@@ -281,7 +304,7 @@ class _SettingsSheet extends StatelessWidget {
           ListRow(
             icon: Ic.download,
             title: 'Buscar actualización',
-            detail: app.update == null ? 'Tienes $appVersion' : 'Hay una nueva: ${app.update!.title}',
+            detail: app.update == null ? 'Se revisa sola al abrir la app' : 'Hay una nueva: ${app.update!.title}',
             trailing: Icon(Ic.chevronRight, size: 18, color: context.c.text3),
             onTap: () {
               final found = app.update;
@@ -372,8 +395,6 @@ class _AboutSheetState extends State<_AboutSheet> {
             },
           ),
         ]),
-        const SizedBox(height: 14),
-        Text('Mantén presionado un dispositivo para ver sus opciones.', style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
       ]),
     );
   }
@@ -402,6 +423,14 @@ void _showDeviceOptions(BuildContext context, Session s) {
               onTap: () {
                 Navigator.pop(sheet);
                 s.linked || s.busy ? s.disconnect() : s.connect();
+              },
+            ),
+            ListRow(
+              icon: Ic.edit,
+              title: 'Cambiar nombre',
+              onTap: () {
+                Navigator.pop(sheet);
+                showAppSheet<void>(context, (_) => _RenameSheet(device: d));
               },
             ),
             // Solo un teléfono conectado que ya entró con la clave actual puede cambiarla. Si este teléfono tiene la
@@ -435,6 +464,61 @@ void _showDeviceOptions(BuildContext context, Session s) {
       ]),
     );
   });
+}
+
+/// Hoja para cambiar el nombre de un dispositivo.
+class _RenameSheet extends StatefulWidget {
+  final SavedDevice device;
+  const _RenameSheet({required this.device});
+
+  @override
+  State<_RenameSheet> createState() => _RenameSheetState();
+}
+
+class _RenameSheetState extends State<_RenameSheet> {
+  late final _name = TextEditingController(text: widget.device.name);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final n = _name.text.trim();
+    if (n.isEmpty) return;
+    HapticFeedback.lightImpact();
+    widget.device.name = n;
+    AppScope.read(context).saveChanges();
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: SheetHeader(eyebrow: widget.device.subtitle, title: 'Cambiar nombre'),
+        ),
+        const SizedBox(height: 20),
+        Panel(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextField(
+            controller: _name,
+            autofocus: true,
+            style: T.body,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) => _save(),
+          ),
+        ),
+        const SizedBox(height: 20),
+        PillButton('Guardar nombre', expand: true, onTap: _name.text.trim().isEmpty ? null : _save),
+      ]),
+    );
+  }
 }
 
 Future<bool> _confirmDelete(BuildContext context, SavedDevice d) async {

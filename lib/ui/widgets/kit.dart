@@ -31,6 +31,7 @@ class Ic {
   static const eye = IconData(0xe220, fontFamily: 'PhosphorLight') /* eye */;
   static const download = IconData(0xe20c, fontFamily: 'PhosphorLight') /* downloadSimple */;
   static const eyeOff = IconData(0xe224, fontFamily: 'PhosphorLight') /* eyeSlash */;
+  static const edit = IconData(0xe3b4, fontFamily: 'PhosphorLight') /* pencilSimple */;
   static const lockOpen = IconData(0xe306, fontFamily: 'PhosphorLight') /* lockOpen */;
   static const terminal = IconData(0xeae8, fontFamily: 'PhosphorLight') /* terminalWindow */;
   static const pins = IconData(0xe610, fontFamily: 'PhosphorLight') /* cpu */;
@@ -146,6 +147,43 @@ class Panel extends StatelessWidget {
       child: child,
     );
   }
+}
+
+/// Contorno punteado: un lugar vacío que se puede llenar («Agregar dispositivo»).
+class DashedPanel extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double radius;
+  const DashedPanel({super.key, required this.child, this.padding = const EdgeInsets.all(16), this.radius = R.card});
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        painter: _DashPainter(context.c.line2, radius),
+        child: Padding(padding: padding, child: child),
+      );
+}
+
+class _DashPainter extends CustomPainter {
+  final Color color;
+  final double radius;
+  _DashPainter(this.color, this.radius);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()..addRRect(RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)).deflate(0.6));
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    for (final m in path.computeMetrics()) {
+      for (var d = 0.0; d < m.length; d += 9) {
+        canvas.drawPath(m.extractPath(d, d + 5), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashPainter old) => old.color != color || old.radius != radius;
 }
 
 /// Etiqueta pequeña en mayúsculas.
@@ -303,17 +341,19 @@ class RoundButton extends StatelessWidget {
 }
 
 /// Resumen en columnas separadas por líneas finas, como las cifras de Starlink.
+/// [footer] va debajo, en la misma tarjeta, separado por una línea (por ejemplo, un interruptor general).
 class StatStrip extends StatelessWidget {
   final List<(String value, String label, Color? color)> items;
-  const StatStrip({super.key, required this.items});
+  final Widget? footer;
+  const StatStrip({super.key, required this.items, this.footer});
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Panel(
+    final strip = Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: IntrinsicHeight(
-        child: Row(children: [
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           for (final (i, (value, label, color)) in items.indexed) ...[
             if (i > 0) const Hairline(vertical: true),
             Expanded(
@@ -329,6 +369,13 @@ class StatStrip extends StatelessWidget {
           ],
         ]),
       ),
+    );
+    return Panel(
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        strip,
+        if (footer != null) ...[const Hairline(), footer!],
+      ]),
     );
   }
 }

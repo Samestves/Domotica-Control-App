@@ -75,32 +75,9 @@ Widget _confirmMark(Session s, int pin, Color color, Palette c, {required bool o
   return AnimatedSwitcher(duration: const Duration(milliseconds: 180), child: child);
 }
 
-/// Cifras de la casa: cuántas luces, puertas y persianas están activas.
-class HouseSummary extends StatelessWidget {
-  final Session session;
-  const HouseSummary({super.key, required this.session});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    (String, Color) count(ControlKind k) {
-      final all = casaControls.where((x) => x.kind == k && x.isEnabledOn(session.device)).toList();
-      final n = all.where((x) => isOn(session, x)).length;
-      return ('$n/${all.length}', n > 0 ? c.text : c.text3);
-    }
-
-    final lights = count(ControlKind.light);
-    final doors = count(ControlKind.door);
-    final blinds = count(ControlKind.blind);
-    return StatStrip(items: [
-      (lights.$1, 'Luces', lights.$2),
-      (doors.$1, 'Puertas', doors.$2),
-      (blinds.$1, 'Persianas', blinds.$2),
-    ]);
-  }
-}
-
 /// Todas las luces en un solo interruptor: si hay alguna encendida, lo apaga todo; si no, lo enciende todo.
+/// Debajo dice cuántas hay encendidas. Las puertas abiertas las dice la tarjeta de seguridad, donde importan,
+/// y cada habitación dice lo suyo: no hace falta un resumen de cifras aparte.
 class AllLightsRow extends StatelessWidget {
   final Session session;
   const AllLightsRow({super.key, required this.session});
@@ -133,12 +110,11 @@ class AllLightsRow extends StatelessWidget {
       label: 'Todas las luces',
       child: Tap(
         onTap: usable ? () => _all(anyOn ? 0 : 1) : null,
-        scale: 0.98,
-        child: Panel(
-          border: anyOn ? c.line2 : null,
-          padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+        scale: 1,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 14, 12),
           child: Row(children: [
-            _swapIcon(anyOn ? Ic.lightOn : Ic.light, 26, anyOn ? c.text : c.text2),
+            _swapIcon(anyOn ? Ic.lightOn : Ic.light, 24, anyOn ? c.text : c.text2),
             const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -200,8 +176,24 @@ class _SecurityCardState extends State<SecurityCard> with SingleTickerProviderSt
     if (!sounding && _pulse.isAnimating) _pulse.stop();
 
     final title = sounding ? 'Alarma sonando' : (armed ? 'Armada' : 'Desarmada');
-    final description = notice ??
-        (armed ? 'Si el garaje o la puerta principal quedan abiertos 20 s, suena la sirena.' : 'Ármala para vigilar el garaje y la puerta principal.');
+    // Las dos entradas que vigila la alarma: si alguna está abierta, se dice aquí, antes de armar.
+    final open = casaControls
+        .where((x) => (x.vpin == CasaPins.mainDoor || x.isGarage) && x.isEnabledOn(s.device) && isOn(s, x))
+        .toList();
+    final openText = open.isEmpty
+        ? null
+        : open.length > 1
+            ? 'La puerta principal y el portón del garaje están abiertos.'
+            : (open.single.isGarage ? 'El portón del garaje está abierto.' : 'La puerta principal está abierta.');
+    // Un aviso de la placa que solo repite el título («Seguridad desarmada») no se muestra.
+    final news = notice == null || RegExp(r'^seguridad (armada|desarmada)\.?$', caseSensitive: false).hasMatch(notice.trim()) ? null : notice;
+    // Primero lo que pasa ahora: la alarma, una entrada abierta; después el último aviso de la placa.
+    final description = sounding
+        ? (_cause(notice, true) ?? 'Se abrió una entrada vigilada.')
+        : openText != null
+            ? (armed ? '$openText Si sigue así 20 s, suena la sirena.' : '$openText Si la armas así, la sirena suena en 20 s.')
+            : (news ?? (armed ? 'Si el garaje o la puerta principal quedan abiertos 20 s, suena la sirena.' : 'Ármala para vigilar el garaje y la puerta principal.'));
+    final warn = !sounding && openText != null;
     final accent = sounding ? c.red : (armed ? c.green : c.text2);
     PillState stateOf(int pin) => s.pending.contains(pin) ? PillState.busy : (s.unconfirmed.contains(pin) ? PillState.failed : PillState.idle);
 
@@ -225,7 +217,7 @@ class _SecurityCardState extends State<SecurityCard> with SingleTickerProviderSt
               ),
             ]),
             const SizedBox(height: 12),
-            Text(description, style: T.small.copyWith(color: c.text2)),
+            Text(description, style: T.small.copyWith(color: warn ? c.amber : c.text2)),
             const SizedBox(height: 16),
             Row(children: [
               Expanded(
@@ -249,6 +241,15 @@ class _SecurityCardState extends State<SecurityCard> with SingleTickerProviderSt
     if (!sounding) return card(0);
     return AnimatedBuilder(animation: _pulse, builder: (_, _) => card(_pulse.value));
   }
+}
+
+/// El aviso de la placa sin repetir el título: «Alarma sonando: entrada abierta» → «Entrada abierta».
+String? _cause(String? notice, bool sounding) {
+  if (notice == null || !sounding) return notice;
+  if (!RegExp(r'^alarma', caseSensitive: false).hasMatch(notice.trim())) return null; // un aviso viejo, no la causa
+  final rest = notice.replaceFirst(RegExp(r'^alarma sonando[:.,\s-]*', caseSensitive: false), '').trim();
+  if (rest.isEmpty) return null;
+  return rest[0].toUpperCase() + rest.substring(1);
 }
 
 /// Una habitación que se abre y se cierra. Cerrada, ya deja prender luces y abrir puertas con un toque.
@@ -317,10 +318,10 @@ class RoomCard extends StatelessWidget {
                         final half = (box.maxWidth - 10) / 2;
                         return Wrap(spacing: 10, runSpacing: 10, children: [
                           for (final (i, x) in quick.indexed)
-                            SizedBox(
-                              width: quick.length.isOdd && i == quick.length - 1 ? box.maxWidth : half,
-                              child: ControlTile(session: session, spec: x, showPins: showPins),
-                            ),
+                            // La última de un número impar ocupa todo el ancho, en una sola fila baja.
+                            quick.length.isOdd && i == quick.length - 1
+                                ? SizedBox(width: box.maxWidth, child: ControlTile(session: session, spec: x, showPins: showPins, wide: true))
+                                : SizedBox(width: half, child: ControlTile(session: session, spec: x, showPins: showPins)),
                         ]);
                       }),
                     for (final b in blinds) ...[
@@ -405,12 +406,15 @@ class _QuickToggle extends StatelessWidget {
   }
 }
 
-/// Tarjeta de una luz o una puerta dentro de la habitación desplegada.
+/// Tarjeta de una luz o una puerta dentro de la habitación desplegada. Toda la tarjeta es el interruptor:
+/// encendida va rellena; en la esquina, un indicador solo mientras espera a la placa o si no respondió.
+/// [wide]: en una sola fila, para cuando ocupa todo el ancho.
 class ControlTile extends StatelessWidget {
   final Session session;
   final ControlSpec spec;
   final bool showPins;
-  const ControlTile({super.key, required this.session, required this.spec, required this.showPins});
+  final bool wide;
+  const ControlTile({super.key, required this.session, required this.spec, required this.showPins, this.wide = false});
 
   @override
   Widget build(BuildContext context) {
@@ -436,32 +440,41 @@ class ControlTile extends StatelessWidget {
             color: on ? look.bg : c.surface2,
             border: failed ? c.red : (on ? look.border : c.line),
             glow: look.glow,
-            padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                _swapIcon(controlIcon(spec, on: on), 26, on ? look.fg : c.text2),
-                const Spacer(),
-                Toggle(
-                  value: on,
-                  busy: session.pending.contains(spec.vpin),
-                  onFilled: on,
-                  onChanged: usable ? (_) => _toggle(session, spec) : null,
-                ),
-              ]),
-              const SizedBox(height: 16),
-              Text(spec.label, style: T.callout.copyWith(color: on ? look.fg : c.text)),
-              const SizedBox(height: 4),
-              Eyebrow(stateWord(session, spec), color: failed ? c.red : (on ? look.fg.withValues(alpha: 0.7) : c.text3)),
-              if (showPins) ...[
-                const SizedBox(height: 6),
-                Text(pinLabel(session.device, spec), style: T.small.copyWith(fontSize: 11.5, color: on ? look.fg.withValues(alpha: 0.6) : c.text3)),
-              ],
-            ]),
+            padding: wide ? const EdgeInsets.fromLTRB(14, 12, 14, 12) : const EdgeInsets.fromLTRB(14, 14, 12, 14),
+            child: wide
+                ? Row(children: [
+                    _swapIcon(controlIcon(spec, on: on), 26, on ? look.fg : c.text2),
+                    const SizedBox(width: 14),
+                    Expanded(child: _words(c, look.fg, on: on, failed: failed)),
+                    _confirmMark(session, spec.vpin, on ? look.fg : c.text, c, on: false),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      _swapIcon(controlIcon(spec, on: on), 26, on ? look.fg : c.text2),
+                      const Spacer(),
+                      _confirmMark(session, spec.vpin, on ? look.fg : c.text, c, on: false),
+                    ]),
+                    const SizedBox(height: 18),
+                    _words(c, look.fg, on: on, failed: failed),
+                  ]),
           ),
         ),
       ),
     );
   }
+}
+
+extension on ControlTile {
+  /// Nombre, estado y (en el modo técnico) el pin.
+  Widget _words(Palette c, Color fg, {required bool on, required bool failed}) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(spec.label, style: T.callout.copyWith(color: on ? fg : c.text)),
+        const SizedBox(height: 4),
+        Eyebrow(stateWord(session, spec), color: failed ? c.red : (on ? fg.withValues(alpha: 0.7) : c.text3)),
+        if (showPins) ...[
+          const SizedBox(height: 6),
+          Text(pinLabel(session.device, spec), style: T.small.copyWith(fontSize: 11.5, color: on ? fg.withValues(alpha: 0.6) : c.text3)),
+        ],
+      ]);
 }
 
 /// Persiana: deslizador de 0 a 100 % y atajos para cerrar, dejar a la mitad o abrir.

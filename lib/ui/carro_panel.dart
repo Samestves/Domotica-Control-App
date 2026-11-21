@@ -153,8 +153,6 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     final s = AppScope.of(context).session(widget.device);
     final on = s.connected;
     final dist = int.tryParse(s.values[CarPins.distance] ?? '');
-    final near = dist != null && dist < 20;
-    final speed = [_jy.abs(), _throttle].reduce((a, b) => a > b ? a : b);
     // Reversa y luces: lo que dice la placa (las recuerda aunque se salga del panel).
     final reverse = s.values[CarPins.reverse] == '1';
     final lights = s.values[CarPins.lights] == '1';
@@ -208,7 +206,7 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          const Eyebrow('Auto Robot'),
+                          Eyebrow(widget.device.subtitle, maxLines: 1),
                           const SizedBox(height: 2),
                           Text(widget.device.name, style: T.callout, maxLines: 2),
                         ]),
@@ -238,15 +236,9 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
                   child: Column(children: [
                     Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
                     const SizedBox(height: 10),
-                    Row(children: [
-                      Expanded(child: _Telemetry(icon: Ic.speed, label: 'Velocidad', value: '${reverse ? '-' : ''}$speed %')),
-                      const SizedBox(width: 8),
-                      Expanded(child: _Telemetry(icon: Ic.distance, label: 'Obstáculo', value: dist == null ? '—' : '$dist cm', alert: near)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _Telemetry(icon: Ic.steering, label: 'Dirección', value: _jx == 0 ? 'Recto' : (_jx < 0 ? 'Izq. ${-_jx}' : 'Der. $_jx')),
-                      ),
-                    ]),
+                    // La velocidad ya la muestra el acelerador y la dirección el joystick: aquí solo lo que
+                    // el conductor no ve desde lejos, la distancia al obstáculo.
+                    _ObstacleBar(distance: dist),
                     const SizedBox(height: 10),
                     Expanded(
                       child: Row(children: [
@@ -337,28 +329,61 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
   }
 }
 
-class _Telemetry extends StatelessWidget {
-  final IconData icon;
-  final String label, value;
-  final bool alert;
-  const _Telemetry({required this.icon, required this.label, required this.value, this.alert = false});
+/// Distancia al obstáculo de adelante: una barra que se llena al acercarse. Verde lejos, ámbar cerca
+/// y roja (con la tarjeta entera en rojo) cuando hay que frenar.
+class _ObstacleBar extends StatelessWidget {
+  final int? distance;
+  const _ObstacleBar({required this.distance});
+
+  /// Desde esta distancia la barra empieza a llenarse.
+  static const _range = 150.0;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Panel(
-      color: alert ? c.red.withValues(alpha: 0.14) : null,
-      border: alert ? c.red : null,
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(icon, size: 14, color: alert ? c.red : c.text2),
-          const SizedBox(width: 6),
-          Flexible(child: Eyebrow(label, color: alert ? c.red : null)),
+    final d = distance;
+    final near = d != null && d < 20;
+    final color = d == null ? c.text3 : (near ? c.red : (d < 50 ? c.amber : c.green));
+    final fill = d == null ? 0.0 : (1 - d / _range).clamp(0.04, 1.0);
+    return Semantics(
+      label: d == null ? 'Obstáculo: sin datos del sensor' : 'Obstáculo a $d centímetros',
+      excludeSemantics: true,
+      child: Panel(
+        color: near ? c.red.withValues(alpha: 0.12) : null,
+        border: near ? c.red : null,
+        padding: const EdgeInsets.fromLTRB(14, 10, 16, 12),
+        child: Row(children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Ic.distance, size: 14, color: near ? c.red : c.text2),
+              const SizedBox(width: 6),
+              Eyebrow(near ? 'Obstáculo cerca' : 'Obstáculo', color: near ? c.red : null, maxLines: 1),
+            ]),
+            const SizedBox(height: 6),
+            Text(d == null ? '—' : '$d cm', maxLines: 1, style: T.stat.copyWith(fontSize: 22, color: d == null ? c.text3 : (near ? c.red : c.text))),
+          ]),
+          const SizedBox(width: 18),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                height: 8,
+                color: c.surface2,
+                alignment: Alignment.centerLeft,
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween(end: fill),
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  builder: (_, v, _) => FractionallySizedBox(
+                    widthFactor: v,
+                    child: AnimatedContainer(duration: const Duration(milliseconds: 220), color: color),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ]),
-        const SizedBox(height: 6),
-        FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, maxLines: 1, style: T.stat.copyWith(fontSize: 22))),
-      ]),
+      ),
     );
   }
 }
