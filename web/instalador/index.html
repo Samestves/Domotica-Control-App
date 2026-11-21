@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instalador · Control Domótica</title>
+<meta name="description" content="Instala el programa de la casa domótica o del Auto Robot en un ESP32, desde Chrome, sin Arduino.">
+<meta name="theme-color" content="#000000">
+<style>
+/* Instalador con el estilo de la app Control Domótica (docs/GUIA-DISENO-UI.md):
+   negro puro, letra D-DIN, un solo color fuerte (el texto) y color solo para estados.
+   Una sola columna angosta, como una pantalla de la app. */
+@font-face { font-family: "DDIN"; src: url("fonts/D-DIN.otf") format("opentype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "DDIN"; src: url("fonts/D-DIN-Bold.otf") format("opentype"); font-weight: 700; font-display: swap; }
+:root {
+  --bg: #000000; --surface: #0C0D0F; --surface2: #15171A; --line: #1F2125; --line2: #30333A;
+  --text: #F0F0FA; --text2: #9AA0A9; --text3: #6E737C; --inverse: #F0F0FA; --on-inverse: #000000;
+  --green: #3DDC97; --amber: #F5B841; --red: #FF5A5F;
+  --font: "DDIN", "DIN Alternate", "Barlow", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 16px/1.4 var(--font); letter-spacing: .2px; -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+.wrap { max-width: 560px; margin: 0 auto; padding: 18px 20px 56px; display: grid; gap: 28px; }
+
+/* Tipografía */
+.eyebrow { font: 700 11.5px/1.2 var(--font); letter-spacing: 1.8px; text-transform: uppercase; color: var(--text2); margin: 0; }
+h1 { font: 700 34px/1.05 var(--font); letter-spacing: .3px; margin: 0; text-wrap: balance; }
+h2 { font: 700 19px/1.15 var(--font); letter-spacing: .3px; margin: 0; }
+p { margin: 0; }
+.lead { color: var(--text2); font-size: 16px; line-height: 1.45; max-width: 46ch; }
+.small { font-size: 13.5px; line-height: 1.4; color: var(--text2); }
+.callout { font: 700 15px/1.2 var(--font); letter-spacing: .3px; }
+
+/* Barra de arriba */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 44px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand span { font: 700 13px/1 var(--font); letter-spacing: 2.6px; text-transform: uppercase; }
+.tag { font: 700 11px/1 var(--font); letter-spacing: 1.6px; text-transform: uppercase; color: var(--text2); border: 1px solid var(--line2); border-radius: 999px; padding: 7px 11px; }
+
+/* Superficies */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.section { display: grid; gap: 10px; }
+.section > .eyebrow { padding: 0 4px; }
+.rows .row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 14px; padding: 14px 16px; align-items: start; }
+.rows .row + .row { border-top: 1px solid var(--line); margin-left: 16px; padding-left: 0; }
+.rows .row svg { margin-top: 1px; }
+.rows .row b { display: block; font-weight: 400; font-size: 16px; }
+
+/* Elegir placa: la elegida va rellena, como una luz encendida en la app */
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.choice { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 14px; border: 1px solid var(--line); background: var(--surface2); padding: 16px 14px 14px; display: grid; gap: 14px; transition: background .22s, border-color .22s, transform .12s, opacity .12s; }
+.choice:active { transform: scale(.97); opacity: .8; }
+.choice:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.choice .ver { font: 700 11.5px/1.2 var(--font); letter-spacing: 1.8px; text-transform: uppercase; color: var(--text3); }
+.choice[aria-checked="true"] { background: var(--inverse); border-color: var(--inverse); color: var(--on-inverse); box-shadow: 0 0 26px -6px rgba(240,240,250,.28); }
+.choice[aria-checked="true"] .ver { color: rgba(0,0,0,.6); }
+.notes { margin: 0; padding: 0 4px; list-style: none; display: grid; gap: 6px; }
+.notes li { display: grid; grid-template-columns: 26px minmax(0, 1fr); font-size: 13.5px; line-height: 1.4; color: var(--text2); }
+.notes li::before { content: attr(data-n); font: 700 11.5px/1.6 var(--font); letter-spacing: 1px; color: var(--text3); }
+
+/* Botones */
+.pill { all: unset; box-sizing: border-box; cursor: pointer; height: 50px; padding: 0 22px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font: 700 13px/1 var(--font); letter-spacing: 1.5px; text-transform: uppercase; border: 1px solid var(--line2); color: var(--text); transition: transform .12s, opacity .12s; text-align: center; }
+.pill:active { transform: scale(.98); opacity: .72; }
+.pill:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.pill.primary { background: var(--inverse); color: var(--on-inverse); border-color: var(--inverse); }
+.pill.danger { color: var(--red); border-color: rgba(255,90,95,.5); }
+.pill.wide { width: 100%; }
+.pill[disabled] { opacity: .38; pointer-events: none; }
+.actions { display: grid; gap: 10px; }
+
+/* Pasos de la instalación */
+.steps { list-style: none; margin: 0; padding: 6px 0; }
+.step { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; padding: 12px 16px; align-items: start; }
+.step .mark { width: 22px; height: 22px; display: grid; place-items: center; margin-top: 1px; }
+.step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line2); }
+.step .title { font-size: 16px; color: var(--text3); transition: color .2s; }
+.step .detail { font-size: 13.5px; line-height: 1.4; color: var(--text2); margin-top: 3px; }
+.step[data-state="doing"] .title, .step[data-state="done"] .title, .step[data-state="fail"] .title { color: var(--text); }
+.step[data-state="doing"] .dot { background: var(--amber); box-shadow: 0 0 10px rgba(245,184,65,.6); animation: pulse .9s ease-in-out infinite alternate; }
+.step[data-state="fail"] .detail { color: var(--red); }
+@keyframes pulse { from { opacity: .3; } to { opacity: 1; } }
+.bar { height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 10px; }
+.bar i { display: block; height: 100%; width: 0; background: var(--text); border-radius: 999px; transition: width .25s ease-out; }
+.pct { font: 700 28px/1 var(--font); font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+.keep { display: flex; gap: 10px; align-items: center; color: var(--amber); font-size: 13.5px; padding: 0 4px; }
+
+/* Avisos */
+.note { border-radius: 16px; padding: 16px; display: grid; gap: 10px; border: 1px solid var(--line); background: var(--surface); }
+.note.warn { border-color: rgba(245,184,65,.55); background: rgba(245,184,65,.07); }
+.note.bad { border-color: rgba(255,90,95,.55); background: rgba(255,90,95,.07); }
+.note.good { border-color: rgba(61,220,151,.5); background: rgba(61,220,151,.06); }
+.note .head { display: flex; gap: 12px; align-items: center; }
+.note.warn .eyebrow { color: var(--amber); } .note.bad .eyebrow { color: var(--red); } .note.good .eyebrow { color: var(--green); }
+
+/* Resultado */
+.result { text-align: center; padding: 28px 18px 22px; display: grid; gap: 12px; justify-items: center; }
+.result h2 { font-size: 26px; line-height: 1.1; }
+.result .small { max-width: 40ch; }
+.pop { animation: pop .42s cubic-bezier(.34,1.56,.64,1) both; }
+@keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* Botones de la placa (BOOT y EN) */
+.board-fig { display: grid; place-items: center; padding: 6px 0 2px; }
+ol.how { margin: 0; padding: 0 4px; list-style: none; counter-reset: h; display: grid; gap: 8px; }
+ol.how li { counter-increment: h; display: grid; grid-template-columns: 26px minmax(0, 1fr); font-size: 15px; line-height: 1.4; }
+ol.how li::before { content: counter(h, decimal-leading-zero); font: 700 12px/1.5 var(--font); letter-spacing: 1px; color: var(--text3); }
+
+/* Detalles técnicos */
+details { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+summary { cursor: pointer; list-style: none; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
+summary::-webkit-details-marker { display: none; }
+details[open] summary svg { transform: rotate(180deg); }
+summary svg { transition: transform .2s; }
+pre { margin: 0; padding: 0 16px 14px; max-height: 260px; overflow: auto; font: 12px/1.5 var(--mono); color: var(--text2); white-space: pre-wrap; word-break: break-word; }
+
+footer { display: grid; gap: 8px; color: var(--text3); font-size: 13px; line-height: 1.45; padding: 0 4px; }
+footer a { color: var(--text2); }
+.banner { border: 1px dashed var(--amber); color: var(--amber); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; }
+@media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+</style>
+<script src="lib/spark-md5-3.0.2.min.js"></script>
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div class="brand" aria-label="Control Domótica">
+      <svg width="28" height="28" viewBox="0 0 100 100" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 47 L50 10 L92 47"/><path d="M20 38 V90 H80 V38"/>
+        <circle cx="50" cy="75" r="5.5" fill="currentColor" stroke="none"/>
+        <path d="M39.4 64.4 A15 15 0 0 1 60.6 64.4"/><path d="M30.9 55.9 A27 27 0 0 1 69.1 55.9"/>
+      </svg>
+      <span>Control Domótica</span>
+    </div>
+    <span class="tag">Instalador</span>
+  </header>
+
+  <p class="banner" id="test-banner" hidden>Modo de prueba: la página simula una placa. No se conecta a ningún ESP32.</p>
+
+  <section style="display:grid;gap:12px">
+    <h1 id="title">Actualiza una placa</h1>
+    <p class="lead" id="lead">Conecta el ESP32 a esta computadora por USB. La página le instala la versión más nueva y comprueba que quedó bien. Tarda un minuto.</p>
+  </section>
+
+  <!-- Navegador sin cable serie -->
+  <section class="note warn" id="unsupported" hidden>
+    <div class="head"><span data-icon="desktop"></span><p class="eyebrow">Abre esta página en Chrome o Edge</p></div>
+    <p class="small">Para hablar con la placa por USB hace falta Google Chrome o Microsoft Edge en una computadora (Windows, Mac o Linux). Desde el celular, Firefox o Safari no funciona.</p>
+    <button class="pill wide" id="copy-link" type="button"><span data-icon="copy"></span>Copiar el enlace</button>
+  </section>
+
+  <!-- 1 · Elegir y preparar -->
+  <section id="setup" style="display:grid;gap:28px">
+    <div class="section">
+      <p class="eyebrow">01 · Elige la placa</p>
+      <div class="choices" role="radiogroup" aria-label="Placa" id="choices"></div>
+      <ul class="notes" id="notes" aria-label="Qué trae esta versión"></ul>
+    </div>
+
+    <div class="section">
+      <p class="eyebrow">02 · Antes de conectar</p>
+      <div class="panel rows">
+        <div class="row"><span data-icon="lightning-slash"></span><div><b>Desenchufa la fuente de la maqueta</b><p class="small">Deja solo el cable USB: así ningún servo ni relé se mueve mientras se instala.</p></div></div>
+        <div class="row"><span data-icon="usb"></span><div><b>Usa un cable USB de datos</b><p class="small">Los cables que solo cargan el teléfono no sirven: la placa no aparece.</p></div></div>
+        <div class="row"><span data-icon="desktop"></span><div><b>Cierra Arduino si está abierto</b><p class="small">Si el Monitor Serie está abierto, la placa queda ocupada.</p></div></div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="pill primary wide" id="start" type="button"><span data-icon="plugs-connected"></span><span id="start-label">Conectar e instalar</span></button>
+      <p class="small" style="text-align:center">Se abre una ventana con los puertos: elige el que dice <b style="color:var(--text);font-weight:400">CP210x</b>, <b style="color:var(--text);font-weight:400">CH340</b> o <b style="color:var(--text);font-weight:400">USB Serial</b> y toca «Conectar».</p>
+    </div>
+  </section>
+
+  <!-- 2 · Instalando -->
+  <section id="run" class="section" hidden>
+    <p class="eyebrow" id="run-eyebrow">Instalando</p>
+    <div class="panel">
+      <ol class="steps" id="steps">
+        <li class="step" data-step="find"><span class="mark"><span class="dot"></span></span><div><div class="title">Buscar la placa</div><div class="detail"></div></div></li>
+        <li class="step" data-step="write"><span class="mark"><span class="dot"></span></span><div><div class="title">Instalar el programa</div><div class="detail"></div>
+          <div id="progress" hidden><div style="display:flex;align-items:baseline;gap:10px;margin-top:10px"><span class="pct" id="pct">0 %</span><span class="small" id="pct-detail"></span></div><div class="bar"><i id="bar"></i></div></div></div></li>
+        <li class="step" data-step="verify"><span class="mark"><span class="dot"></span></span><div><div class="title">Comprobar que quedó idéntico</div><div class="detail"></div></div></li>
+        <li class="step" data-step="boot"><span class="mark"><span class="dot"></span></span><div><div class="title">Arrancar y saludar</div><div class="detail"></div></div></li>
+      </ol>
+    </div>
+    <p class="keep" id="keep"><span data-icon="warning-circle"></span>No desconectes el USB hasta que termine.</p>
+  </section>
+
+  <!-- La placa tiene el programa de la otra -->
+  <section class="note warn" id="ask" hidden>
+    <div class="head"><span data-icon="warning-circle"></span><p class="eyebrow">¿Es la placa correcta?</p></div>
+    <p id="ask-text" style="font-size:16px"></p>
+    <div class="actions">
+      <button class="pill wide" id="ask-yes" type="button"></button>
+      <button class="pill primary wide" id="ask-no" type="button">No, cancelar</button>
+    </div>
+  </section>
+
+  <!-- La placa no entró sola en modo de carga -->
+  <section class="note warn" id="manual" hidden>
+    <div class="head"><span data-icon="info"></span><p class="eyebrow">Hace falta tu ayuda</p></div>
+    <p style="font-size:16px">La placa no entró sola en modo de carga. Pasa con algunos ESP32, como el del carrito. Ayúdala con sus dos botones, junto al USB:</p>
+    <div class="board-fig" aria-hidden="true">
+      <svg width="260" height="118" viewBox="0 0 260 118" fill="none">
+        <rect x="1" y="1" width="258" height="116" rx="12" stroke="var(--line2)"/>
+        <rect x="104" y="68" width="52" height="40" rx="6" stroke="var(--text3)"/>
+        <text x="130" y="94" text-anchor="middle" fill="var(--text3)" font-family="DDIN, sans-serif" font-size="11" letter-spacing="1.4">USB</text>
+        <rect x="34" y="62" width="34" height="34" rx="7" stroke="var(--text2)"/><circle cx="51" cy="79" r="9" fill="var(--text2)"/>
+        <text x="51" y="46" text-anchor="middle" fill="var(--text)" font-family="DDIN, sans-serif" font-weight="700" font-size="13" letter-spacing="1.8">EN</text>
+        <rect x="192" y="62" width="34" height="34" rx="7" stroke="var(--amber)"/><circle cx="209" cy="79" r="9" fill="var(--amber)"/>
+        <text x="209" y="46" text-anchor="middle" fill="var(--amber)" font-family="DDIN, sans-serif" font-weight="700" font-size="13" letter-spacing="1.8">BOOT</text>
+      </svg>
+    </div>
+    <ol class="how">
+      <li><span>Mantén apretado <b>BOOT</b>.</span></li>
+      <li><span>Toca una vez <b>EN</b>, sin soltar BOOT.</span></li>
+      <li><span>Suelta BOOT.</span></li>
+      <li><span>Toca «Intentar de nuevo».</span></li>
+    </ol>
+    <p class="small">Es solo un segundo. No mantengas BOOT 5 segundos con la placa funcionando: eso borra su clave.</p>
+    <div class="actions">
+      <button class="pill primary wide" id="manual-retry" type="button"><span data-icon="arrow-clockwise"></span>Intentar de nuevo</button>
+      <button class="pill wide" id="manual-cancel" type="button">Cancelar</button>
+    </div>
+  </section>
+
+  <!-- Resultado -->
+  <section class="panel result" id="result" hidden>
+    <span id="result-icon" class="pop"></span>
+    <p class="eyebrow" id="result-eyebrow"></p>
+    <h2 id="result-title"></h2>
+    <p class="small" id="result-text"></p>
+    <div class="actions" style="width:100%;margin-top:8px">
+      <button class="pill primary wide" id="again" type="button"></button>
+    </div>
+  </section>
+
+  <details id="details">
+    <summary><span class="eyebrow">Detalles técnicos</span><span data-icon="caret-down"></span></summary>
+    <pre id="log" aria-live="off">Todavía no hay nada.</pre>
+    <div style="padding:0 16px 14px"><button class="pill" id="copy-log" type="button" style="height:36px;font-size:11.5px"><span data-icon="copy"></span>Copiar detalles</button></div>
+  </details>
+
+  <footer>
+    <p>Instala con <b style="font-weight:400;color:var(--text2)">esptool-js</b>, la herramienta oficial de Espressif (la misma que usa Arduino por dentro). Cargar un programa no puede dañar el ESP32: el cargador de fábrica está en una memoria de solo lectura y no se toca.</p>
+    <p id="versions"></p>
+    <p><a href="https://github.com/Samestves/Domotica-Control-App">Código en GitHub</a></p>
+  </footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "docs/guia-armado"],
       "port": 8765
+    },
+    {
+      "name": "instalador",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8766", "--directory", "build/instalador"],
+      "port": 8766
     }
   ]
 }
