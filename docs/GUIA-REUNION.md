@@ -9,10 +9,10 @@
 - **Casa:** el ESP32 del grupo tiene nuestro programa, con el cableado de su documento «Conexiones GPIO».
   Está **probado por Bluetooth con el Redmi** con la versión `alpha-0.6`: luces, puertas, persianas y alarma responden.
   En la placa suelta solo se ve «Luz Sala 1», porque es el LED azul del propio ESP32 (GPIO 2).
-- **`casa-0.7`** (servos en un pin cada uno): es la que tiene hoy la página de instalación. **Todavía sin probar en la placa.**
+- **`casa-0.7`** (servos en un pin cada uno): **todavía sin probar en la placa**.
 - **`casa-0.8`** (servos por el **módulo PCA9685**, como pidieron): compilada y revisada, **todavía sin probar**.
-  Se sube a la página cuando tengan el módulo conectado: si la instalan con los servos todavía en sus pines, las puertas
-  y persianas no se mueven.
+  Es la que instala la página. Sin el módulo conectado, las puertas y persianas no se mueven (las luces y la alarma sí);
+  en cuanto lo conectan, la placa lo encuentra sola en 2 segundos, sin volver a instalar.
 - **Carrito:** tiene `carro-0.2`. La versión nueva, `carro-0.4`, está compilada y revisada, **todavía sin cargar**.
   Ojo: `carro-0.4` **pide clave**, así que necesita la app 0.9.0 o más nueva (las anteriores no saben pedirla).
 - Falta probar todo **conectado a la maqueta** y al carrito con sus motores.

@@ -6,11 +6,11 @@
       "name": "Casa domótica",
       "short": "La casa",
       "icon": "house-simple",
-      "version": "casa-0.7",
+      "version": "casa-0.8",
       "notes": [
-        "Cada teléfono escribe la clave una sola vez; tres claves malas hacen esperar 30 segundos.",
-        "La alarma recuerda si estaba armada aunque se corte la luz.",
-        "Probar salidas una por una, sin que la placa se trabe."
+        "Puertas y persianas por el módulo PCA9685 (SDA 21, SCL 22): sin el módulo no se mueven; las luces sí.",
+        "Los servos se mueven de a uno, así alcanza una sola fuente de 5 V.",
+        "Conserva la clave y los ajustes que ya tenía la placa."
       ]
     },
     {
