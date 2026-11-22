@@ -83,6 +83,8 @@ p { margin: 0; }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .tile { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 28px; border: 1px solid var(--line); background: var(--surface); padding: 26px; min-height: 320px; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; text-align: left; transition: background-color .25s, border-color .25s, color .25s, transform .2s var(--ease); }
 .tile:active { transform: scale(.98); }
+.tile { animation: rise .55s var(--ease) backwards; }
+.tile + .tile { animation-delay: .07s; }
 .tile .row { display: flex; align-items: flex-start; justify-content: space-between; }
 .tile .disc { width: 80px; height: 80px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line2); transition: border-color .25s, transform .35s var(--ease); }
 .tile b { display: block; font: 700 30px/1.05 var(--font); letter-spacing: .3px; }
@@ -211,7 +213,12 @@ pre { margin: 0; padding: 0 18px 12px; max-height: 220px; overflow: auto; font: 
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .ok .ring1, .ok path { stroke-dashoffset: 0; } }
 </style>
-<script src="lib/spark-md5-3.0.2.min.js"></script>
+<script>
+/* La lista de placas se pide ya, en paralelo con el resto de la página. */
+window.placasPedidas = fetch('placas.json', { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+window.placasPedidas.catch(function () {});
+</script>
+<script defer src="lib/spark-md5-3.0.2.min.js"></script>
 </head>
 <body>
 <header class="bar">
@@ -353,6 +360,6 @@ pre { margin: 0; padding: 0 18px 12px; max-height: 220px; overflow: auto; font: 
   </div>
 
 </main>
-<script type="module" src="app.js?v=6745ac6f9f"></script>
+<script type="module" src="app.js?v=087469d98d"></script>
 </body>
 </html>

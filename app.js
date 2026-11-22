@@ -6,8 +6,11 @@
 // #prueba en la dirección simula una placa (sin USB) para revisar la página: #prueba-otra (la placa tiene el
 // programa de la otra), #prueba-boot (no entra sola en modo de carga), #prueba-error, #prueba-mudo y
 // #prueba-nada (no aparece ninguna placa en la lista).
-import { ESPLoader, Transport } from './lib/esptool-js-0.7.1.js';
 import { ICONS } from './icons.js?v=774b99fcda';
+
+// La herramienta de Espressif pesa unos 300 KB: se baja después de mostrar las tarjetas, no antes.
+let esptool = null;
+const loadEsptool = () => (esptool ??= import('./lib/esptool-js-0.7.1.js'));
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -257,6 +260,7 @@ class WrongChip extends Error {
 
 async function flash(files, mode, verified) {
   if (TEST) return fakeFlash(files, mode, verified);
+  const { ESPLoader, Transport } = await loadEsptool();
   const transport = new Transport(port, false);
   const terminal = {
     clean() {},
@@ -454,7 +458,8 @@ async function init() {
   $('boot-cancel').onclick = home;
 
   try {
-    manifest = await (await fetch('placas.json', { cache: 'no-store' })).json();
+    // La lista ya se empezó a pedir en el <head>, junto con el resto de la página.
+    manifest = await (window.placasPedidas || fetch('placas.json', { cache: 'no-store' }).then((r) => r.json()));
   } catch (_) {
     $('home').innerHTML = '<div class="titles"><h1>Sin conexión</h1><p class="big">Revisa el internet y vuelve a cargar la página.</p></div>';
     return;
@@ -464,6 +469,8 @@ async function init() {
   board = manifest.boards.find((b) => b.id === saved) || manifest.boards[0];
   renderTiles();
   if (!('serial' in navigator) && !TEST) screen('nobrowser');
+  // Con las tarjetas ya a la vista, baja la herramienta para que esté lista al tocar «Instalar».
+  setTimeout(() => loadEsptool().catch(() => { esptool = null; }), 300);
 }
 
 init();
