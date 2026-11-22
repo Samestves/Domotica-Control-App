@@ -83,6 +83,7 @@ function ring(frac) {
   $('pct').innerHTML = spin ? '' : `<span>${Math.round(frac * 100)}<small>%</small></span>`;
 }
 
+// Cada tarjeta es su propio botón: un toque y empieza a instalar esa placa.
 function renderTiles() {
   const box = $('tiles');
   box.innerHTML = '';
@@ -90,29 +91,17 @@ function renderTiles() {
     const t = document.createElement('button');
     t.type = 'button';
     t.className = 'tile';
-    t.setAttribute('role', 'radio');
-    t.setAttribute('aria-checked', String(b === board));
-    t.tabIndex = b === board ? 0 : -1;
-    t.innerHTML = `<span class="row"><span class="disc">${icon(b.icon, 40)}</span><span class="mark">${icon('check', 14)}</span></span>`
-      + `<span><b>${b.name}</b><span class="spec"><span>Versión</span><strong>${b.version.replace(/^[a-z]+-/, '')}</strong></span></span>`;
-    t.addEventListener('click', () => pick(b));
-    t.addEventListener('keydown', (e) => {
-      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-      e.preventDefault();
-      const n = manifest.boards.length;
-      const next = manifest.boards[(manifest.boards.indexOf(board) + (/Left|Up/.test(e.key) ? -1 : 1) + n) % n];
-      pick(next);
-      box.children[manifest.boards.indexOf(next)].focus();
+    t.setAttribute('aria-label', `Instalar en ${b.short.toLowerCase()}, versión ${b.version}`);
+    t.innerHTML = `<span class="row"><span class="disc">${icon(b.icon, 40)}</span></span>`
+      + `<span><b>${b.name}</b><span class="spec"><span>Versión</span><strong>${b.version.replace(/^[a-z]+-/, '')}</strong></span>`
+      + `<span class="cta">Instalar ${icon('arrow-right', 18)}</span></span>`;
+    t.addEventListener('click', () => {
+      board = b;
+      try { localStorage.setItem('placa', b.id); } catch (_) {}
+      start();
     });
     box.appendChild(t);
   }
-  $('go-label').textContent = board.id === 'casa' ? 'Instalar en la casa' : 'Instalar en el carrito';
-}
-
-function pick(b) {
-  board = b;
-  try { localStorage.setItem('placa', b.id); } catch (_) {}
-  renderTiles();
 }
 
 function home() {
@@ -158,12 +147,12 @@ async function copy(btn, text, done) {
 
 // ---------- Tema claro u oscuro ----------
 function paintTheme() {
-  const dark = document.documentElement.dataset.theme !== 'claro';
-  const b = $('theme');
-  b.innerHTML = icon(dark ? 'sun' : 'moon', 22);
-  b.setAttribute('aria-label', dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
-  b.title = b.getAttribute('aria-label');
-  document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#F3F3F4';
+  const t = document.documentElement.dataset.theme === 'claro' ? 'claro' : 'oscuro';
+  for (const b of $('theme').querySelectorAll('button')) {
+    b.setAttribute('aria-checked', String(b.dataset.t === t));
+    b.tabIndex = b.dataset.t === t ? 0 : -1;
+  }
+  document.querySelector('meta[name="theme-color"]').content = t === 'oscuro' ? '#000000' : '#F3F3F4';
 }
 function setTheme(t, save) {
   const root = document.documentElement;
@@ -175,10 +164,16 @@ function setTheme(t, save) {
 }
 function initTheme() {
   paintTheme();
-  $('theme').onclick = () => {
-    $('theme').classList.toggle('flip');
-    setTheme(document.documentElement.dataset.theme === 'claro' ? 'oscuro' : 'claro', true);
-  };
+  for (const b of $('theme').querySelectorAll('button')) {
+    b.onclick = () => setTheme(b.dataset.t, true);
+    b.onkeydown = (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+      e.preventDefault();
+      const other = b.dataset.t === 'claro' ? 'oscuro' : 'claro';
+      setTheme(other, true);
+      $('theme').querySelector(`[data-t="${other}"]`).focus();
+    };
+  }
   // Si nunca eligió, sigue al sistema también cuando este cambia.
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
     let saved = null;
@@ -451,7 +446,6 @@ async function init() {
   window.addEventListener('beforeunload', (e) => { if (writing) e.preventDefault(); });
   $('copy-log').onclick = () => copy($('copy-log'), lines.join('\n'), 'Copiado');
   $('copy-link').onclick = () => copy($('copy-link'), location.href.split('#')[0], 'Enlace copiado');
-  $('go').onclick = () => start();
   $('help-open').onclick = () => screen('help');
   $('help-retry').onclick = () => start();
   $('help-all').onclick = () => start(true);
@@ -469,7 +463,6 @@ async function init() {
   try { saved = localStorage.getItem('placa'); } catch (_) {}
   board = manifest.boards.find((b) => b.id === saved) || manifest.boards[0];
   renderTiles();
-  $('footer').textContent = 'Instala con la herramienta oficial de Espressif';
   if (!('serial' in navigator) && !TEST) screen('nobrowser');
 }
 

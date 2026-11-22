@@ -40,13 +40,14 @@
 .theming, .theming * { transition: background-color .35s ease, border-color .35s ease, color .35s ease, fill .35s ease, stroke .35s ease !important; }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
+body { display: flex; flex-direction: column; min-height: 100vh; }
 body { background: var(--bg); color: var(--text); font: 400 16px/1.4 var(--font); letter-spacing: .2px; -webkit-font-smoothing: antialiased; }
 [hidden] { display: none !important; }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 
-.wrap { max-width: 700px; margin: 0 auto; padding: 20px 24px 24px; min-height: 100vh; display: flex; flex-direction: column; }
-.stage { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 24px; padding: 32px 0; }
+.wrap { flex: 1; width: 100%; max-width: 700px; margin: 0 auto; padding: 0 24px 40px; display: flex; flex-direction: column; }
+.stage { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 24px; padding: 24px 0 48px; }
 .screen { display: grid; gap: 28px; }
 .center { text-align: center; justify-items: center; }
 /* Entrada: cada pieza de la pantalla sube un poco, una tras otra */
@@ -59,7 +60,7 @@ button { font: inherit; color: inherit; }
 @keyframes swap { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .eyebrow { font: 700 11.5px/1.2 var(--font); letter-spacing: 2.4px; text-transform: uppercase; color: var(--text3); margin: 0; }
-h1 { font: 700 clamp(32px, 5vw, 46px)/1.08 var(--font); letter-spacing: .3px; margin: 0; text-wrap: balance; }
+h1 { font: 700 clamp(28px, 4vw, 34px)/1.1 var(--font); letter-spacing: .3px; margin: 0; text-wrap: balance; }
 h2 { font: 700 clamp(30px, 4.6vw, 40px)/1.08 var(--font); letter-spacing: .3px; margin: 0; text-wrap: balance; }
 p { margin: 0; }
 .big { font-size: 19px; line-height: 1.45; color: var(--text2); }
@@ -68,17 +69,19 @@ p { margin: 0; }
 [data-icon] { display: inline-flex; }
 
 /* Cabecera: la marca al centro y el tema a la derecha */
-.top { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; height: 44px; }
-.brand { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.brand span { font: 700 13px/1 var(--font); letter-spacing: 2.8px; text-transform: uppercase; }
-.icon-btn { all: unset; box-sizing: border-box; cursor: pointer; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--text2); border: 1px solid transparent; transition: background-color .2s, color .2s, border-color .2s, transform .12s; }
-.icon-btn:active { transform: scale(.92); }
-.icon-btn svg { transition: transform .5s var(--ease); }
-.icon-btn.flip svg { transform: rotate(180deg); }
+/* Barra de arriba, a todo el ancho: la marca y la sección a la izquierda, el tema a la derecha */
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 32px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand .name { font: 700 13px/1 var(--font); letter-spacing: 2.8px; text-transform: uppercase; white-space: nowrap; }
+.brand .sep { width: 1px; height: 20px; background: var(--line2); margin: 0 6px; }
+.brand .section { font: 400 15.5px/1 var(--font); letter-spacing: .2px; color: var(--text2); white-space: nowrap; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line2); border-radius: 999px; background: var(--surface); }
+.seg button { all: unset; box-sizing: border-box; cursor: pointer; width: 40px; height: 32px; border-radius: 999px; display: grid; place-items: center; color: var(--text3); transition: background-color .25s, color .25s; }
+.seg button[aria-checked="true"] { background: var(--inverse); color: var(--on-inverse); }
 
 /* Elegir la placa: la elegida va rellena, como una luz encendida en la app */
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.tile { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 28px; border: 1px solid var(--line); background: var(--surface); padding: 26px; min-height: 290px; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; text-align: left; transition: background-color .25s, border-color .25s, color .25s, transform .2s var(--ease); }
+.tile { all: unset; box-sizing: border-box; cursor: pointer; border-radius: 28px; border: 1px solid var(--line); background: var(--surface); padding: 26px; min-height: 320px; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; text-align: left; transition: background-color .25s, border-color .25s, color .25s, transform .2s var(--ease); }
 .tile:active { transform: scale(.98); }
 .tile .row { display: flex; align-items: flex-start; justify-content: space-between; }
 .tile .disc { width: 80px; height: 80px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line2); transition: border-color .25s, transform .35s var(--ease); }
@@ -86,12 +89,9 @@ p { margin: 0; }
 .tile .spec { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); transition: border-color .25s; }
 .tile .spec span { font: 700 11px/1 var(--font); letter-spacing: 2.2px; text-transform: uppercase; color: var(--text3); transition: color .25s; }
 .tile .spec strong { font: 700 24px/1 var(--font); font-variant-numeric: tabular-nums; letter-spacing: .5px; }
-.tile .mark { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line2); color: transparent; transition: all .25s var(--ease); }
-.tile[aria-checked="true"] { background: var(--inverse); border-color: var(--inverse); color: var(--on-inverse); }
-.tile[aria-checked="true"] .disc { border-color: color-mix(in srgb, var(--on-inverse) 22%, transparent); }
-.tile[aria-checked="true"] .spec { border-color: color-mix(in srgb, var(--on-inverse) 16%, transparent); }
-.tile[aria-checked="true"] .spec span { color: color-mix(in srgb, var(--on-inverse) 55%, transparent); }
-.tile[aria-checked="true"] .mark { background: var(--on-inverse); border-color: var(--on-inverse); color: var(--inverse); }
+.cta { display: flex; align-items: center; justify-content: center; gap: 10px; height: 52px; margin-top: 22px; border-radius: 999px; border: 1px solid var(--line2); font: 700 13.5px/1 var(--font); letter-spacing: 1.8px; text-transform: uppercase; transition: background-color .25s, color .25s, border-color .25s; }
+.cta svg { transition: transform .25s var(--ease); }
+.tile:focus-visible .cta { background: var(--inverse); color: var(--on-inverse); border-color: var(--inverse); }
 
 /* Lo que es esta página, arriba del título */
 .kicker { display: inline-flex; align-items: center; gap: 10px; height: 36px; padding: 0 16px 0 12px; border-radius: 999px; border: 1px solid var(--line2); background: var(--surface); font: 700 11.5px/1 var(--font); letter-spacing: 2.2px; text-transform: uppercase; color: var(--text2); }
@@ -103,7 +103,10 @@ p { margin: 0; }
 .pill.primary { background: var(--inverse); color: var(--on-inverse); border-color: var(--inverse); }
 .pill .go { transition: transform .25s var(--ease); }
 .pill.small { height: 44px; padding: 0 18px; font-size: 12.5px; width: auto; gap: 8px; }
-.ghost { all: unset; box-sizing: border-box; cursor: pointer; justify-self: center; height: 48px; padding: 0 20px; border-radius: 999px; display: inline-flex; align-items: center; gap: 10px; color: var(--text2); font-size: 16px; transition: background-color .2s, color .2s, transform .12s; }
+/* Secundario de lo que se usa poco: botón con borde y fondo, más chico que el principal */
+.ghost { all: unset; box-sizing: border-box; cursor: pointer; justify-self: center; height: 50px; padding: 0 24px 0 18px; border-radius: 999px; display: inline-flex; align-items: center; gap: 10px; border: 1px solid var(--line2); background: var(--surface); color: var(--text); font: 400 16px/1 var(--font); letter-spacing: .2px; transition: background-color .2s, border-color .2s, transform .12s; }
+.ghost svg { color: var(--text2); transition: color .2s; }
+.ghost.plain { padding: 0 24px; }
 .ghost:active { transform: scale(.97); }
 .back { all: unset; box-sizing: border-box; cursor: pointer; justify-self: start; height: 40px; padding: 0 16px 0 10px; margin-left: -10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; color: var(--text2); font: 700 12.5px/1 var(--font); letter-spacing: 1.8px; text-transform: uppercase; transition: background-color .2s, color .2s; }
 .back svg { transition: transform .25s var(--ease); }
@@ -112,11 +115,15 @@ p { margin: 0; }
 @media (hover: hover) {
   .tile:hover { border-color: var(--text3); }
   .tile:hover .disc { transform: translateY(-3px); }
-  .tile[aria-checked="true"]:hover { border-color: var(--inverse); }
+  .tile:hover .cta { background: var(--inverse); color: var(--on-inverse); border-color: var(--inverse); }
+  .tile:hover .cta svg { transform: translateX(4px); }
   .pill:hover { background: var(--hover); border-color: var(--text3); }
   .pill.primary:hover { background: var(--inverse); border-color: var(--inverse); opacity: .9; }
   .pill:hover .go { transform: translateX(4px); }
-  .ghost:hover, .back:hover, .icon-btn:hover { background: var(--hover); color: var(--text); }
+  .ghost:hover { background: var(--surface2); border-color: var(--text3); }
+  .ghost:hover svg { color: var(--text); }
+  .back:hover { background: var(--hover); color: var(--text); }
+  .seg button:not([aria-checked="true"]):hover { color: var(--text); background: var(--hover); }
   .back:hover svg { transform: translateX(-3px); }
   .chip:hover { background: var(--inverse); color: var(--on-inverse); border-color: var(--inverse); }
 }
@@ -194,10 +201,11 @@ details[open] .det { animation: swap .3s var(--ease) both; }
 pre { margin: 0; padding: 0 18px 12px; max-height: 220px; overflow: auto; font: 12px/1.55 var(--mono); color: var(--text2); white-space: pre-wrap; word-break: break-word; }
 .det-foot { padding: 4px 18px 16px; }
 
-footer { color: var(--text3); font: 700 11px/1.6 var(--font); letter-spacing: 1.6px; text-transform: uppercase; text-align: center; }
+.kicker.solo-movil { display: none; }
+@media (max-width: 600px) { .bar { padding: 16px 20px; } .brand .sep, .brand .section { display: none; } .kicker.solo-movil { display: inline-flex; } }
 .banner { border: 1px dashed var(--amber); color: var(--amber); border-radius: 12px; padding: 8px 12px; font-size: 13px; text-align: center; }
 @media (max-width: 480px) {
-  .tile { padding: 18px; min-height: 220px; gap: 22px; border-radius: 24px; } .tile b { font-size: 21px; }
+  .tile { padding: 18px; min-height: 250px; gap: 22px; border-radius: 24px; } .cta { height: 46px; margin-top: 16px; font-size: 12.5px; } .tile b { font-size: 21px; }
   .tile .disc { width: 60px; height: 60px; } .tile .spec strong { font-size: 19px; } .tile .spec span { letter-spacing: 1.6px; }
   .pill { height: 56px; font-size: 13.5px; } .steps li { font-size: 10px; letter-spacing: 1px; }
 }
@@ -206,19 +214,23 @@ footer { color: var(--text3); font: 700 11px/1.6 var(--font); letter-spacing: 1.
 <script src="lib/spark-md5-3.0.2.min.js"></script>
 </head>
 <body>
-<main class="wrap">
-  <header class="top">
-    <span></span>
-    <div class="brand" aria-label="Control Domótica">
+<header class="bar">
+    <div class="brand">
       <svg width="26" height="26" viewBox="0 0 100 100" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M8 47 L50 10 L92 47"/><path d="M20 38 V90 H80 V38"/>
         <circle cx="50" cy="75" r="5.5" fill="currentColor" stroke="none"/>
         <path d="M39.4 64.4 A15 15 0 0 1 60.6 64.4"/><path d="M30.9 55.9 A27 27 0 0 1 69.1 55.9"/>
       </svg>
-      <span>Control Domótica</span>
+      <span class="name">Control Domótica</span>
+      <span class="sep" aria-hidden="true"></span>
+      <span class="section">Instalador de firmware</span>
     </div>
-    <button class="icon-btn" id="theme" type="button"></button>
-  </header>
+    <div class="seg" id="theme" role="radiogroup" aria-label="Tema">
+      <button type="button" role="radio" data-t="claro" aria-label="Modo claro" title="Modo claro"><span data-icon="sun" data-size="18"></span></button>
+      <button type="button" role="radio" data-t="oscuro" aria-label="Modo oscuro" title="Modo oscuro"><span data-icon="moon" data-size="18"></span></button>
+    </div>
+</header>
+<main class="wrap">
 
   <div class="stage">
   <p class="banner" id="test-banner" hidden>Modo de prueba: simula una placa, no se conecta a ningún ESP32.</p>
@@ -226,14 +238,12 @@ footer { color: var(--text3); font: 700 11px/1.6 var(--font); letter-spacing: 1.
   <!-- Inicio -->
   <section class="screen" id="home">
     <div class="titles">
-      <p class="kicker"><span data-icon="cpu" data-size="18"></span>Instalador de firmware</p>
+      <p class="kicker solo-movil"><span data-icon="cpu" data-size="18"></span>Instalador de firmware</p>
       <h1>¿Qué placa vas a actualizar?</h1>
+      <p class="big">Elige una y conéctala por USB.</p>
     </div>
-    <div class="tiles" role="radiogroup" aria-label="Placa" id="tiles"></div>
-    <div class="stack">
-      <button class="pill primary" id="go" type="button"><span id="go-label"></span><span class="go" data-icon="arrow-right" data-size="20"></span></button>
-      <button class="ghost" id="help-open" type="button"><span data-icon="question" data-size="20"></span>¿No aparece tu placa?</button>
-    </div>
+    <div class="tiles" id="tiles"></div>
+    <button class="ghost" id="help-open" type="button"><span data-icon="question" data-size="20"></span>¿No aparece tu placa?</button>
   </section>
 
   <!-- Navegador sin USB -->
@@ -314,7 +324,7 @@ footer { color: var(--text3); font: 700 11px/1.6 var(--font); letter-spacing: 1.
     </ol>
     <div class="stack">
       <button class="pill primary" id="boot-retry" type="button">Listo, intentar de nuevo</button>
-      <button class="ghost" id="boot-cancel" type="button">Cancelar</button>
+      <button class="ghost plain" id="boot-cancel" type="button">Cancelar</button>
     </div>
   </section>
 
@@ -342,8 +352,7 @@ footer { color: var(--text3); font: 700 11px/1.6 var(--font); letter-spacing: 1.
 
   </div>
 
-  <footer id="footer"></footer>
 </main>
-<script type="module" src="app.js?v=ca11538ba1"></script>
+<script type="module" src="app.js?v=6745ac6f9f"></script>
 </body>
 </html>
