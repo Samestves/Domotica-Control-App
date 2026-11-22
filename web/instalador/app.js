@@ -1,7 +1,7 @@
 // Instalador del programa de las placas (ESP32) desde Chrome o Edge, con esptool-js, la herramienta oficial
 // de Espressif. Pasos: 1) reinicia la placa y escucha qué programa tiene; 2) la pone en modo de carga y escribe
 // el programa; 3) esptool le pide al ESP32 la huella (MD5) de lo escrito y la compara con el archivo;
-// 4) la reinicia, espera su saludo «== Casa Domotica (casa-0.7) ==» y le pregunta PING, que responde PONG.
+// 4) la reinicia, espera su saludo «== Casa Domotica (casa-0.8) ==» y le pregunta PING, que responde PONG.
 //
 // #prueba en la dirección simula una placa (sin USB) para revisar la página: #prueba-otra (la placa tiene el
 // programa de la otra), #prueba-boot (no entra sola en modo de carga), #prueba-error, #prueba-mudo y
@@ -44,7 +44,6 @@ function icon(name, size = 20, color = 'currentColor') {
 function paintIcons(root = document) {
   root.querySelectorAll('[data-icon]').forEach((el) => {
     el.innerHTML = icon(el.dataset.icon, Number(el.dataset.size || 20));
-    el.style.display = 'inline-flex';
   });
 }
 
@@ -62,10 +61,16 @@ function screen(id) {
 }
 
 function phase(name, title, detail = '') {
+  if ($('phase').textContent !== title) {
+    const box = $('phase-box');
+    box.classList.remove('swap');
+    void box.offsetWidth; // reinicia la animación
+    box.classList.add('swap');
+  }
   $('phase').textContent = title;
   $('phase-detail').textContent = detail;
   const i = PHASES.indexOf(name);
-  document.querySelectorAll('.dots i').forEach((d, j) => {
+  document.querySelectorAll('.steps li').forEach((d, j) => {
     d.className = j < i ? 'done' : j === i ? 'on' : '';
   });
 }
@@ -75,7 +80,7 @@ function ring(frac) {
   const spin = frac === null;
   $('ring').classList.toggle('spin', spin);
   $('arc').style.strokeDashoffset = String(spin ? RING * 0.72 : RING * (1 - Math.max(0, Math.min(1, frac))));
-  $('pct').textContent = spin ? '' : `${Math.round(frac * 100)}%`;
+  $('pct').innerHTML = spin ? '' : `<span>${Math.round(frac * 100)}<small>%</small></span>`;
 }
 
 function renderTiles() {
@@ -88,7 +93,8 @@ function renderTiles() {
     t.setAttribute('role', 'radio');
     t.setAttribute('aria-checked', String(b === board));
     t.tabIndex = b === board ? 0 : -1;
-    t.innerHTML = `${icon(b.icon, 60)}<span><b>${b.name}</b><small>${b.version}</small></span>`;
+    t.innerHTML = `<span class="row"><span class="disc">${icon(b.icon, 40)}</span><span class="mark">${icon('check', 14)}</span></span>`
+      + `<span><b>${b.name}</b><span class="spec"><span>Versión</span><strong>${b.version.replace(/^[a-z]+-/, '')}</strong></span></span>`;
     t.addEventListener('click', () => pick(b));
     t.addEventListener('keydown', (e) => {
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
@@ -100,7 +106,7 @@ function renderTiles() {
     });
     box.appendChild(t);
   }
-  $('go').textContent = board.id === 'casa' ? 'Instalar en la casa' : 'Instalar en el carrito';
+  $('go-label').textContent = board.id === 'casa' ? 'Instalar en la casa' : 'Instalar en el carrito';
 }
 
 function pick(b) {
@@ -116,9 +122,9 @@ function home() {
 
 function end(kind, title, text, main, second) {
   writing = false;
-  const icons = { good: 'check-circle-fill', warn: 'warning-circle-fill', bad: 'x-circle-fill' };
+  const icons = { warn: 'warning-circle-fill', bad: 'x-circle-fill' };
   $('end-badge').className = `badge ${kind}`;
-  $('end-badge').innerHTML = icon(icons[kind], 92);
+  $('end-badge').innerHTML = kind === 'good' ? OK_MARK : icon(icons[kind], 96);
   $('end-title').textContent = title;
   $('end-text').textContent = text;
   $('end-main').textContent = main[0];
@@ -131,6 +137,54 @@ function end(kind, title, text, main, second) {
   $('end-details').hidden = kind === 'good';
   $('end-details').open = false;
   screen('end');
+}
+
+// Listo: el círculo se dibuja, se rellena y la palomita aparece.
+const OK_MARK = `<svg class="ok" viewBox="0 0 116 116" aria-hidden="true">
+  <circle class="fill" cx="58" cy="58" r="50"/><circle class="pulse" cx="58" cy="58" r="50"/>
+  <circle class="ring1" cx="58" cy="58" r="50"/><path d="M37 59 L51 73 L80 43"/></svg>`;
+
+// Copiar: la palomita confirma unos segundos y vuelve a su texto.
+async function copy(btn, text, done) {
+  const lbl = btn.querySelector('.lbl');
+  const ic = btn.querySelector('[data-icon]');
+  const was = lbl.textContent;
+  try { await navigator.clipboard.writeText(text); } catch (_) { return; }
+  lbl.textContent = done;
+  ic.innerHTML = icon('check', Number(ic.dataset.size));
+  clearTimeout(btn._t);
+  btn._t = setTimeout(() => { lbl.textContent = was; ic.innerHTML = icon('copy', Number(ic.dataset.size)); }, 2200);
+}
+
+// ---------- Tema claro u oscuro ----------
+function paintTheme() {
+  const dark = document.documentElement.dataset.theme !== 'claro';
+  const b = $('theme');
+  b.innerHTML = icon(dark ? 'sun' : 'moon', 22);
+  b.setAttribute('aria-label', dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
+  b.title = b.getAttribute('aria-label');
+  document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#F3F3F4';
+}
+function setTheme(t, save) {
+  const root = document.documentElement;
+  root.classList.add('theming');
+  root.dataset.theme = t;
+  if (save) try { localStorage.setItem('tema', t); } catch (_) {}
+  paintTheme();
+  setTimeout(() => root.classList.remove('theming'), 400);
+}
+function initTheme() {
+  paintTheme();
+  $('theme').onclick = () => {
+    $('theme').classList.toggle('flip');
+    setTheme(document.documentElement.dataset.theme === 'claro' ? 'oscuro' : 'claro', true);
+  };
+  // Si nunca eligió, sigue al sistema también cuando este cambia.
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+    let saved = null;
+    try { saved = localStorage.getItem('tema'); } catch (_) {}
+    if (!saved) setTheme(e.matches ? 'claro' : 'oscuro', false);
+  });
 }
 
 // ---------- Hablar con la placa por el cable (115200, como el Monitor Serie) ----------
@@ -392,14 +446,11 @@ async function fakeFlash(files, mode, verified) {
 // ---------- Arranque ----------
 async function init() {
   paintIcons();
+  initTheme();
   $('test-banner').hidden = !TEST;
   window.addEventListener('beforeunload', (e) => { if (writing) e.preventDefault(); });
-  $('copy-log').onclick = async () => {
-    try { await navigator.clipboard.writeText(lines.join('\n')); $('copy-log').textContent = 'Copiado'; } catch (_) {}
-  };
-  $('copy-link').onclick = async () => {
-    try { await navigator.clipboard.writeText(location.href.split('#')[0]); $('copy-link').textContent = 'Enlace copiado'; } catch (_) {}
-  };
+  $('copy-log').onclick = () => copy($('copy-log'), lines.join('\n'), 'Copiado');
+  $('copy-link').onclick = () => copy($('copy-link'), location.href.split('#')[0], 'Enlace copiado');
   $('go').onclick = () => start();
   $('help-open').onclick = () => screen('help');
   $('help-retry').onclick = () => start();
@@ -411,14 +462,14 @@ async function init() {
   try {
     manifest = await (await fetch('placas.json', { cache: 'no-store' })).json();
   } catch (_) {
-    $('home').innerHTML = '<h1>Sin conexión</h1><p class="big" style="color:var(--text2)">Revisa el internet y vuelve a cargar la página.</p>';
+    $('home').innerHTML = '<div class="titles"><h1>Sin conexión</h1><p class="big">Revisa el internet y vuelve a cargar la página.</p></div>';
     return;
   }
   let saved = null;
   try { saved = localStorage.getItem('placa'); } catch (_) {}
   board = manifest.boards.find((b) => b.id === saved) || manifest.boards[0];
   renderTiles();
-  $('footer').textContent = `${manifest.boards.map((b) => b.version).join(' · ')} · herramienta oficial de Espressif`;
+  $('footer').textContent = 'Instala con la herramienta oficial de Espressif';
   if (!('serial' in navigator) && !TEST) screen('nobrowser');
 }
 

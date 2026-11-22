@@ -32,8 +32,17 @@ def build() -> dict:
     if OUT.exists():
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True)
-    for name in ("index.html", "app.js", "icons.js"):
-        shutil.copy2(SRC / name, OUT / name)
+    # El código lleva su huella en el nombre pedido (app.js?v=...): así el navegador nunca mezcla un
+    # index.html nuevo con un app.js viejo guardado en su caché.
+    def stamp(name: str) -> str:
+        return hashlib.md5((SRC / name).read_bytes()).hexdigest()[:10]
+    icons_v = stamp("icons.js")
+    app = (SRC / "app.js").read_text(encoding="utf-8").replace("'./icons.js'", f"'./icons.js?v={icons_v}'")
+    (OUT / "app.js").write_text(app, encoding="utf-8", newline="")
+    app_v = hashlib.md5(app.encode("utf-8")).hexdigest()[:10]
+    html = (SRC / "index.html").read_text(encoding="utf-8").replace('src="app.js"', f'src="app.js?v={app_v}"')
+    (OUT / "index.html").write_text(html, encoding="utf-8", newline="")
+    shutil.copy2(SRC / "icons.js", OUT / "icons.js")
     shutil.copytree(SRC / "lib", OUT / "lib")
     (OUT / "fonts").mkdir()
     for name in ("D-DIN.otf", "D-DIN-Bold.otf", "OFL-D-DIN.txt"):
