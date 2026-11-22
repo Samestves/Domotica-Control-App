@@ -6,40 +6,40 @@
       "name": "Casa domótica",
       "short": "La casa",
       "icon": "house-simple",
-      "version": "casa-0.7",
+      "version": "casa-0.8",
       "notes": [
-        "Cada teléfono escribe la clave una sola vez; tres claves malas hacen esperar 30 segundos.",
-        "La alarma recuerda si estaba armada aunque se corte la luz.",
-        "Probar salidas una por una, sin que la placa se trabe."
+        "Puertas y persianas por el módulo PCA9685 (SDA 21, SCL 22): sin el módulo no se mueven; las luces sí.",
+        "Los servos se mueven de a uno, así alcanza una sola fuente de 5 V.",
+        "Conserva la clave y los ajustes que ya tenía la placa."
       ],
       "files": [
         {
           "name": "bootloader.bin",
-          "url": "firmware/casa-0.7/bootloader.bin",
+          "url": "firmware/casa-0.8/bootloader.bin",
           "address": 4096,
           "size": 18960,
           "md5": "81da22449acfb2451d39eaa91ecd2570"
         },
         {
           "name": "partitions.bin",
-          "url": "firmware/casa-0.7/partitions.bin",
+          "url": "firmware/casa-0.8/partitions.bin",
           "address": 32768,
           "size": 3072,
-          "md5": "70007348574201233bc0cb17155e9d12"
+          "md5": "2ddc2d5f85b2c5288013adbe45d9cb7b"
         },
         {
           "name": "boot_app0.bin",
-          "url": "firmware/casa-0.7/boot_app0.bin",
+          "url": "firmware/casa-0.8/boot_app0.bin",
           "address": 57344,
           "size": 8192,
           "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "name": "app.bin",
-          "url": "firmware/casa-0.7/app.bin",
+          "url": "firmware/casa-0.8/app.bin",
           "address": 65536,
-          "size": 1508192,
-          "md5": "bd69bcbac814116f10bf1f74238b2574"
+          "size": 1509920,
+          "md5": "60178380d3fc56fc448a13f5e6494a41"
         }
       ]
     },
