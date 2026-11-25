@@ -17,6 +17,10 @@ abstract class DeviceLink {
   Future<void> disconnect();
   Future<void> sendLine(String line);
 
+  /// Bytes tal cual, sin salto de línea: el programa nuevo de una placa (ver lib/core/board_update.dart).
+  /// Solo el Wi-Fi lo permite; por Bluetooth tardaría minutos.
+  Future<void> sendBytes(List<int> data) => throw UnsupportedError('Esta conexión no envía programas.');
+
   /// Las subclases llaman esto cuando llega una línea de la placa.
   void emitLine(String line) {
     if (!_lines.isClosed) _lines.add(line);

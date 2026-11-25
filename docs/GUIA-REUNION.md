@@ -2,8 +2,9 @@
 
 ## Dónde estamos
 
-- **App:** Alpha 0.9.5. Pasó una auditoría completa del código (ver [AUDITORIA.md](AUDITORIA.md)) y 87 pruebas automáticas.
-  Se actualiza sola desde GitHub (ver [ACTUALIZACIONES.md](ACTUALIZACIONES.md)).
+- **App:** Alpha 0.9.6. Pasó una auditoría completa del código (ver [AUDITORIA.md](AUDITORIA.md)) y 97 pruebas automáticas.
+  Se actualiza sola desde GitHub (ver [ACTUALIZACIONES.md](ACTUALIZACIONES.md)), **actualiza las placas por Wi‑Fi**
+  (desde `casa-0.9` y `carro-0.5`) y **avisa con una notificación** cuando hay versiones nuevas.
 - **Página para instalar el programa en el ESP32:** <https://samestves.github.io/Domotica-Control-App/>
   (Chrome o Edge en una computadora, sin Arduino). Ver [Cargar un programa nuevo](#cargar-un-programa-nuevo-en-el-esp32).
 - **Casa:** el ESP32 del grupo tiene nuestro programa, con el cableado de su documento «Conexiones GPIO».
@@ -11,13 +12,16 @@
   En la placa suelta solo se ve «Luz Sala 1», porque es el LED azul del propio ESP32 (GPIO 2).
 - **`casa-0.7`** (servos en un pin cada uno): **todavía sin probar en la placa**.
 - **`casa-0.8`** (servos por el **módulo PCA9685**, como pidieron): compilada y revisada, **todavía sin probar**.
-  Es la que instala la página. Sin el módulo conectado, las puertas y persianas no se mueven (las luces y la alarma sí);
-  en cuanto lo conectan, la placa lo encuentra sola en 2 segundos, sin volver a instalar.
-- **Carrito:** tiene `carro-0.2`. La versión nueva, `carro-0.4`, está compilada y revisada, **todavía sin cargar**.
-  Ojo: `carro-0.4` **pide clave**, así que necesita la app 0.9.0 o más nueva (las anteriores no saben pedirla).
+  Sin el módulo conectado, las puertas y persianas no se mueven (las luces y la alarma sí); en cuanto lo conectan, la placa
+  lo encuentra sola en 2 segundos, sin volver a instalar.
+- **`casa-0.9`** = `casa-0.8` + **actualización por Wi‑Fi** desde la app, y dice su versión. Compilada y revisada,
+  **todavía sin probar**. Es la que instala la página: **la última vez por cable**.
+- **Carrito:** tiene `carro-0.4`, instalada con la página; conecta por Bluetooth y pide clave (necesita la app 0.9.0 o más nueva).
+- **`carro-0.5`** = `carro-0.4` + **cara en una pantalla OLED** (opcional) + actualización por Wi‑Fi. Compilada y revisada,
+  **todavía sin probar**. Es la que instala la página.
 - Falta probar todo **conectado a la maqueta** y al carrito con sus motores.
 
-Pines de la casa con `casa-0.8`:
+Pines de la casa con `casa-0.8` y `casa-0.9`:
 
 | Pieza | Pin virtual | Dónde va |
 |---|---|---|
@@ -60,6 +64,25 @@ No conectado se conservan. Solo cada servo pasa a su canal.
 al arrancar, la placa no enciende. Si les pasa, en la app mantengan presionada la luz del baño y cámbienla al GPIO 23,
 32 o 33 (y muevan el cable).
 
+## Actualizar las placas por Wi‑Fi (desde `casa-0.9` y `carro-0.5`)
+
+La primera vez se instala por cable con la página. Desde ahí, **el teléfono le manda las versiones nuevas a la placa**:
+
+1. Al abrir la app con internet, si hay una versión nueva para una placa guardada, aparece el aviso **Versión nueva para…**
+   en el inicio (y la app ya la deja bajada en el teléfono). También se ve en las opciones de la placa (mantener presionada su
+   tarjeta → **Programa de la placa**).
+2. Tocar el aviso → **Instalar**. La app se une un momento a la red de la placa (**Casa Domotica** o **Carrito 4x4**), aunque
+   la placa esté guardada por Bluetooth. Si Android pregunta, toquen **Conectar**.
+3. La barra muestra lo que **la placa confirma que recibió**. La placa revisa la huella del archivo y recién entonces se reinicia.
+4. La app se vuelve a conectar y comprueba que la placa dice la versión nueva: **Listo**.
+
+Si algo falla (se corta el Wi‑Fi, el archivo llegó dañado, la clave guardada no sirve), **la placa sigue con su versión**.
+Si la versión nueva se colgara al arrancar, la placa **vuelve sola a la anterior**. Mientras llega, la casa no mueve puertas ni
+persianas y el carrito queda quieto (su cara muestra «ACTUALIZANDO 45%»).
+
+**Avisos:** la app revisa cada 12 horas, aunque esté cerrada, si hay versiones nuevas de la app o de las placas, y avisa una
+vez por versión. Se apagan en **Ajustes → Avisos**. En teléfonos Xiaomi conviene permitir el «Inicio automático» de la app.
+
 ## Mostrar la app sin la maqueta
 
 1. Abre **Casa (demo)**. Prende luces, abre puertas y mueve persianas.
@@ -69,7 +92,8 @@ al arrancar, la placa no enciende. Si les pasa, en la app mantengan presionada l
 
 ## Clave de la casa (y del carrito)
 
-Solo quien sepa la clave puede controlar la casa, por Bluetooth o por Wi‑Fi. Con `carro-0.4`, el carrito funciona igual.
+Solo quien sepa la clave puede controlar la casa, por Bluetooth o por Wi‑Fi. Desde `carro-0.4`, el carrito funciona igual.
+También hace falta para **actualizar una placa**: nadie sin la clave puede cambiarle el programa.
 
 - **La primera vez** que un teléfono se conecta, la app pide **crear la clave**: de 4 a 8 números. Anótenla.
   **Usen 6 a 8 números:** cuesta mucho más adivinarla.
@@ -128,7 +152,7 @@ Usa el reconocimiento de voz de Google del teléfono: normalmente necesita inter
 3. Menú ⋮ → **Probar salidas una por una**. Cada luz, puerta y persiana se mueve en orden (con `casa-0.7` la alarma y los
    mensajes siguen funcionando mientras tanto).
 4. Si algo no coincide:
-   - **Se activa otra cosa:** mantén presionado el control y cambia el GPIO (en puertas y persianas, con `casa-0.8` y la
+   - **Se activa otra cosa:** mantén presionado el control y cambia el GPIO (en puertas y persianas, desde `casa-0.8` y la
      app 0.9.5, el **canal del PCA9685**; o muevan el servo de canal).
    - **Una luz funciona al revés:** activa **Invertir**.
    - **Una puerta o persiana gira hacia el lado contrario:** activa **Invertir** en ella.
@@ -142,7 +166,7 @@ piezas en el mismo GPIO, y si se reinicia recuerda si la alarma estaba armada.
 ## Carrito 4x4
 
 El carrito usa **la misma app**. Lo que cambia es el programa de su ESP32: `firmware/carro_esp32`, cargado en el DevKitC v4
-(versión cargada hoy: `carro-0.2`; nueva: `carro-0.4`).
+(versión cargada hoy: `carro-0.4`; nueva: `carro-0.5`, con cara y actualización por Wi‑Fi).
 
 1. En la app: **Agregar dispositivo → Bluetooth** y elige **Carrito 4x4** (o por Wi‑Fi, red **Carrito 4x4**). El panel **Auto Robot** se elige solo.
 2. Con `carro-0.4`, la primera vez la app pide **crear la clave del carrito**, igual que en la casa.
@@ -169,18 +193,36 @@ Pines (los mismos de la guía de armado):
 | Trasera derecha | B · ENB, IN3, IN4 | 17 | 18 | 19 |
 | Luces | — | 23 | | |
 | Bocina (buzzer activo) | — | 5 | | |
+| Pantalla de la cara (SDA · SCL), desde `carro-0.5` | — | 21 · 22 | | |
 
-Si lo cablean distinto, los pines se cambian por el monitor serie sin cargar nada de nuevo, por ejemplo `RUEDA:DI:32,33,25`, `CFG:V23:23:0:1` o `SENSOR:21,34` para un sensor de distancia HC‑SR04 (su ECHO necesita un divisor de voltaje a 3,3 V). `PINES` muestra lo que está usando y `FABRICA` vuelve a los de la tabla. Todo está explicado al inicio de `carro_esp32.ino`.
+Si lo cablean distinto, los pines se cambian por el monitor serie sin cargar nada de nuevo, por ejemplo `RUEDA:DI:32,33,25`, `CFG:V23:23:0:1` o `SENSOR:15,34` para un sensor de distancia HC‑SR04 (su ECHO necesita un divisor de voltaje a 3,3 V). `PINES` muestra lo que está usando y `FABRICA` vuelve a los de la tabla. Todo está explicado al inicio de `carro_esp32.ino`.
+
+### La cara del carrito (desde `carro-0.5`)
+
+Una pantalla **OLED de 0,96" (128×64, I2C, chip SSD1306)** hace de cara: ojos que parpadean, miran hacia donde gira, se
+asustan con un obstáculo, guiñan con la bocina, se duermen después de un minuto sin uso y muestran el avance al actualizar.
+Al encender dibuja el logo de Control Domótica.
+
+| Pantalla | Va a |
+|---|---|
+| VCC | 3V3 del ESP32 |
+| GND | GND del ESP32 |
+| SDA | GPIO 21 |
+| SCL | GPIO 22 |
+
+Es opcional: **sin pantalla el carrito funciona igual**, y si se conecta después la encuentra sola en 3 segundos. Por eso
+los GPIO 21 y 22 quedan reservados: si el sensor estaba en el 21, muévanlo con `SENSOR:15,34` (el Monitor Serie lo avisa).
+Una de 1,3" (chip SH1106) también sirve cambiando `OLED_SH1106` a 1 en `cara.h`.
 
 Para cargarlo de nuevo, lo más fácil es la [página de instalación](#cargar-un-programa-nuevo-en-el-esp32) (botón **Auto Robot**).
 Esta placa **no entra sola en modo carga**: mantén presionado **BOOT** cuando la página lo pida (o mientras dice «Connecting…»).
-**Antes de cargar `carro-0.4`, actualicen la app a 0.9.0 en todos los teléfonos** (si no, no podrán crear la clave).
+**Para actualizar por Wi‑Fi después, instalen la app 0.9.6 en los teléfonos.**
 
 ```powershell
-.\tool\cargar_esp32.ps1 -Version carro-0.4 -Puerto COM3
+.\tool\cargar_esp32.ps1 -Version carro-0.5 -Puerto COM3
 ```
 
-Para volver a la versión anterior, sin clave: `-Version carro-0.2`.
+Para volver atrás: `-Version carro-0.4` (sin cara ni actualización por Wi‑Fi) o `-Version carro-0.2` (sin clave).
 
 ## Cargar un programa nuevo en el ESP32
 
@@ -192,7 +234,8 @@ Para volver a la versión anterior, sin clave: `-Version carro-0.2`.
 4. Esperen a que el círculo llegue al 100 %. La página comprueba lo que escribió y, al final, que la placa arranca y responde.
 
 Si la placa no aparece en la lista, la página explica qué hacer: probar otro cable (muchos cables solo cargan, no pasan datos)
-o instalar el driver del chip USB (CP210x o CH340), con el enlace directo.
+o instalar el driver del chip USB. Los botones **CP2102**, **CH340** y **CH9102** bajan el driver oficial directo, y debajo dice
+cómo instalarlo. El chip es el pequeño junto al USB: CP2102 y CH9102 son cuadrados, CH340 es alargado.
 Si se queda esperando la placa (pasa con el carrito), la página pide mantener **BOOT** presionado y volver a intentar.
 **Ojo con la casa:** mantener BOOT 5 segundos **mientras el programa corre** borra la clave. Presiónenlo solo cuando la página lo pida.
 
@@ -200,15 +243,16 @@ Desde la computadora del proyecto también se puede cargar una versión ya compi
 ESP32 aparece como **Silicon Labs CP210x (COM3)**:
 
 ```powershell
-.\tool\cargar_esp32.ps1 -Version casa-0.8 -Puerto COM3
+.\tool\cargar_esp32.ps1 -Version casa-0.9 -Puerto COM3
 ```
 
-Para compilar y cargar el programa de `firmware/casa_esp32` desde el código (`casa-0.8` usa el esquema de memoria
-**Minimal SPIFFS**, que deja lugar para actualizar por Wi‑Fi más adelante; en el Arduino IDE: *Herramientas → Partition
-Scheme → Minimal SPIFFS*; `casa-0.7` usaba **Huge APP**):
+Para compilar una versión nueva desde el código (las dos placas usan el esquema de memoria **Minimal SPIFFS**, con dos
+espacios de programa para actualizar por Wi‑Fi; en el Arduino IDE: *Herramientas → Partition Scheme → Minimal SPIFFS*).
+La herramienta lee la versión de `FW_VERSION`, revisa que `ota.h` sea igual en las dos placas y la guarda en
+`firmware/versiones`. Para que la página la instale, cámbienla en `web/instalador/placas.fuente.json`:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\arduino-cli\arduino-cli.exe" compile --upload -p COM3 --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs firmware\casa_esp32
+.\tool\compilar_firmware.ps1 -Placa casa
 ```
 
 Para probar sin teléfono, escribe mensajes como `V10:1` en el monitor serie (el cable USB no necesita clave):
@@ -220,6 +264,12 @@ Para probar sin teléfono, escribe mensajes como `V10:1` en el monitor serie (el
 ## Volver atrás
 
 Si algo deja de funcionar después de un cambio, el ESP32 de la casa se puede devolver a un estado conocido:
+
+- **A `casa-0.8`, sin actualización por Wi‑Fi:**
+
+  ```powershell
+  .\tool\cargar_esp32.ps1 -Version casa-0.8 -Puerto COM3
+  ```
 
 - **A `casa-0.7`, con los servos directo en sus pines (sin el módulo PCA9685):**
 
@@ -263,4 +313,6 @@ El respaldo de Blynk no está en el proyecto porque contiene sus claves de Wi‑
 - La casa acepta un teléfono por Bluetooth y otro por Wi‑Fi, y los dos pueden controlarla a la vez. El carrito, uno manejando.
 - Los intentos de clave se cuentan por conexión: quien insista puede reconectarse para probar más. Por eso conviene una clave larga.
 - La app usa Bluetooth LE. Un módulo **HC‑05** (Bluetooth clásico) todavía no es compatible.
+- Las placas se actualizan **por Wi‑Fi**, no por Bluetooth (tardaría minutos). Las versiones anteriores a `casa-0.9` y
+  `carro-0.5` no saben recibirlas: esa primera vez es por cable, con la página.
 - Solo Android.

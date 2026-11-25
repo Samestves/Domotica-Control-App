@@ -6,10 +6,10 @@
       "name": "Casa domótica",
       "short": "La casa",
       "icon": "house-simple",
-      "version": "casa-0.8",
+      "version": "casa-0.9",
       "notes": [
-        "Puertas y persianas por el módulo PCA9685 (SDA 21, SCL 22): sin el módulo no se mueven; las luces sí.",
-        "Los servos se mueven de a uno, así alcanza una sola fuente de 5 V.",
+        "Desde esta versión se actualiza por Wi-Fi desde la app 0.9.6: esta es la última vez por cable.",
+        "Dice su versión a la app al conectarse.",
         "Conserva la clave y los ajustes que ya tenía la placa."
       ]
     },
@@ -18,11 +18,11 @@
       "name": "Auto Robot",
       "short": "El carrito",
       "icon": "car-profile",
-      "version": "carro-0.4",
+      "version": "carro-0.5",
       "notes": [
-        "Pide clave como la casa: necesita la app 0.9 o más nueva.",
-        "Un solo conductor a la vez.",
-        "Seguro de manejo: hay que soltar los controles para volver a manejar."
+        "Cara en una pantalla OLED de 0,96\" (SDA 21, SCL 22). Sin pantalla funciona igual.",
+        "Desde esta versión se actualiza por Wi-Fi desde la app 0.9.6: esta es la última vez por cable.",
+        "Conserva la clave y los ajustes. Si el sensor estaba en el GPIO 21, muévelo al 15 para usar la pantalla."
       ]
     }
   ]

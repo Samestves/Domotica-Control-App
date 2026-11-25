@@ -41,6 +41,9 @@ class MainActivity : FlutterActivity() {
     // Búsqueda de redes en curso (para limpiarla si la app se cierra a mitad).
     private var receptorBusqueda: BroadcastReceiver? = null
 
+    // Respuesta pendiente del permiso para avisar (Android 13 o más nuevo).
+    private var avisosPendiente: MethodChannel.Result? = null
+
     // Respuesta pendiente de «conectarRed»: siempre se contesta una vez, aunque se pida otra red o se suelte.
     private var resultadoRed: MethodChannel.Result? = null
 
@@ -103,6 +106,31 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Notificaciones locales (ver Avisos.kt y lib/core/avisos.dart).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "control_domotica/avisos").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "programar" -> {
+                    Avisos.programar(this, call.argument<Boolean>("activos") ?: true)
+                    result.success(null)
+                }
+                "pedirPermiso" -> pedirPermisoAvisos(result)
+                "mostrar" -> {
+                    Avisos.mostrar(this, ID_RESULTADO, Avisos.CANAL_PLACAS, call.argument<String>("titulo") ?: "", call.argument<String>("texto") ?: "")
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /// Android 13 o más nuevo pregunta si la app puede avisar. En los anteriores el permiso viene dado.
+    private fun pedirPermisoAvisos(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            return result.success(Avisos.puedeAvisar(this))
+        }
+        avisosPendiente?.success(false)
+        avisosPendiente = result
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), PEDIDO_AVISOS)
     }
 
     /// Abre el instalador de Android con el APK descargado. Android pide confirmar y reemplaza la app
@@ -136,6 +164,7 @@ class MainActivity : FlutterActivity() {
         }
         receptorBusqueda = null
         resultadoRed = null // la app se cierra: ya no hay a quién contestar
+        avisosPendiente = null
         soltarRed()
         super.onDestroy()
     }
@@ -200,6 +229,11 @@ class MainActivity : FlutterActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PEDIDO_AVISOS) {
+            avisosPendiente?.success(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+            avisosPendiente = null
+            return
+        }
         if (requestCode != PEDIDO_WIFI) return
         val ok = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
         // Negado y sin «explicación» disponible: el usuario marcó «No volver a preguntar» (o lo negó dos veces).
@@ -343,5 +377,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val PEDIDO_WIFI = 7301
+        private const val PEDIDO_AVISOS = 7302
+        private const val ID_RESULTADO = 2
     }
 }

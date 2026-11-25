@@ -1,5 +1,5 @@
 /*
-  Casa Domótica · programa para el ESP32 de la maqueta · versión casa-0.8
+  Casa Domótica · programa para el ESP32 de la maqueta · versión casa-0.9
   ----------------------------------------------------------------------
   Recibe mensajes de la app (por Bluetooth LE, Wi-Fi o el Monitor Serie) y mueve
   las salidas de la maqueta. También avisa a la app de cada cambio y de la alarma.
@@ -40,9 +40,11 @@
                     En puertas y persianas, invertir = el servo gira al lado contrario.
                     Se rechazan los GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria), 21 y 22 (el módulo
                     PCA9685) y un GPIO o canal que ya use otra salida activa. El que se deja queda en reposo.
-    SYNC            la placa responde con el estado actual de todo
+    SYNC            la placa responde con su versión (VER:casa-0.9) y el estado actual de todo
     TEST            mueve cada salida una por una para ver qué es cada cosa (ERR si ya hay una en curso)
     PING            la placa responde PONG
+    OTA:<tamaño>:<md5>  recibe una versión nueva por Wi-Fi (ver ota.h). Mientras llega, las puertas y
+                    persianas no se mueven (responden ERR) y lo demás funciona igual.
   Los números tienen que ser números: «V:1», «Vx:1» o «V10:abc» responden ERR y no mueven nada.
   Una línea de más de 120 letras se descarta entera.
 
@@ -66,15 +68,12 @@
   recibe «ERR:ya hay otro telefono conectado por Wi-Fi» y se cierra. Si el actual lleva más
   de 6 s sin mandar nada (la app manda PING cada 3 s), se cierra el actual y entra el nuevo.
 
-  Cambios de casa-0.8 (respecto de casa-0.7):
-    - Las 5 puertas y las 4 persianas van por el módulo PCA9685 (GPIO 21 y 22), no por un pin cada una.
-      Quedan libres los GPIO 13 a 19. Las luces y la sirena siguen en sus pines.
-    - Los servos se mueven de a uno (150 ms entre uno y otro), para que alcance una sola fuente.
-    - Lo guardado de casa-0.7 se conserva (clave, seguridad, luces, invertir y activar). Solo el pin
-      guardado de cada servo se deja: ahora su lugar es su canal del módulo.
-    - Memoria dividida en dos espacios de programa (Minimal SPIFFS), para poder actualizar por Wi-Fi
-      más adelante. La clave y los ajustes están en otra zona y no se borran al cambiar.
-    - Ya no usa la librería ESP32Servo: el módulo genera los pulsos.
+  Cambios de casa-0.9 (respecto de casa-0.8):
+    - Se actualiza por Wi-Fi desde la app (OTA, ver ota.h): el teléfono le manda el programa nuevo, la
+      placa revisa su huella MD5 y solo entonces se reinicia con él. Si la versión nueva se cuelga al
+      arrancar, la placa vuelve sola a la anterior. La primera vez (para llegar a casa-0.9) es por cable.
+    - Dice su versión al conectarse (VER:casa-0.9, con SYNC), para que la app sepa si hay una más nueva.
+    - Lo guardado se conserva: clave, seguridad, luces, invertir, activar y canales.
 
   Pines de arranque: la luz del baño (V13) está en el GPIO 12, que el ESP32 lee al encender.
   Si lo que tiene conectado lo sube a 3,3 V en ese momento, el ESP32 no arranca. Se deja así
@@ -89,10 +88,11 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <Wire.h>
+#include "ota.h"
 
 // ============ CONFIGURACIÓN ============
 #define DEVICE_NAME  "Casa Domotica"
-#define FW_VERSION   "casa-0.8"
+#define FW_VERSION   "casa-0.9"
 #define USE_BLE      1        // 1 = conectar por Bluetooth LE
 #define USE_WIFI     1        // 1 = conectar también por Wi-Fi
 #define WIFI_PROPIA  1        // 1 = el ESP32 crea su propia red · 0 = se une a la red de abajo
@@ -307,7 +307,8 @@ bool pcaReady() {
 
 // Un servo a la vez, con SERVO_GAP_MS entre uno y otro: el pico de corriente es el de uno solo.
 void loopServos(unsigned long now) {
-  if (servoDue == 0 || now - lastServoMove < SERVO_GAP_MS || !pcaReady()) return;
+  // Mientras llega una versión nueva, los movimientos pendientes esperan (ver OTA_BUSY).
+  if (servoDue == 0 || otaActive() || now - lastServoMove < SERVO_GAP_MS || !pcaReady()) return;
   for (int k = 0; k < N; k++) {
     int i = (servoNext + k) % N;
     if (!(servoDue & (1UL << i))) continue;
@@ -608,8 +609,9 @@ void loopResetButton(unsigned long now) {
 }
 
 // ---------- Mensajes de la app ----------
-// Envía el estado real de la casa, para que la app muestre lo que hay y no lo que recuerda.
+// Envía la versión y el estado real de la casa, para que la app muestre lo que hay y no lo que recuerda.
 void sendState() {
+  sendLine("VER:" FW_VERSION);
   for (int i = 0; i < N; i++) if (ch[i].enabled) report(ch[i]);
   sendLine("V" + String(VPIN_ARMED) + ":" + String(armed ? 1 : 0));
 }
@@ -706,6 +708,10 @@ void handleConfig(const String& line) {
   sendLine("OK:V" + String(c->vpin) + (isServo(*c) ? " canal " : " GPIO ") + String(pin) + (inverted ? " inv" : "") + (enabled ? "" : " off"));
 }
 
+// Mientras llega una versión nueva, los servos no se mueven: su pico de corriente podría reiniciar la placa
+// a mitad de la escritura (la versión actual seguiría, pero la actualización se perdería).
+const char* OTA_BUSY = "ERR:la casa se esta actualizando; espera unos segundos";
+
 void handleLine(Src src, String line) {
   line.trim();
   if (line.length() == 0) return;
@@ -716,7 +722,12 @@ void handleLine(Src src, String line) {
   if (!authed[src]) { reply(src, houseKey.length() ? "AUTH:PIDE" : "AUTH:NUEVA"); return; }
 
   if (line == "SYNC") { sendState(); return; }
-  if (line == "TEST") { startTest(src); return; }
+  // Por Wi-Fi tarda segundos; por Bluetooth tardaría minutos, así que no se ofrece.
+  if (line.startsWith("OTA:")) { reply(src, src == SRC_TCP ? otaBegin(line.substring(4)) : "OTA:ERR:se actualiza por Wi-Fi"); return; }
+  if (line == "TEST") {
+    if (otaActive()) reply(src, OTA_BUSY); else startTest(src);
+    return;
+  }
   if (line.startsWith("CFG:V")) { handleConfig(line); return; }
 
   // V<pin>:<valor>, los dos números de verdad: «V:1» o «Vx:1» ya no abren el garaje (antes valían V0).
@@ -741,6 +752,7 @@ void handleLine(Src src, String line) {
 
   Channel* c = findCh(vpin);
   if (!c) { sendLine("ERR:V" + String(vpin) + " no existe"); return; }
+  if (isServo(*c) && otaActive()) { reply(src, OTA_BUSY); return; }
   if (isServo(*c) && c->enabled && !pcaReady()) {
     // Sin el módulo, el servo no se movería: no se confirma, para que la app no muestre algo que no pasó.
     sendLine("ERR:V" + String(vpin) + " sin el modulo PCA9685: revisa SDA (21), SCL (22) y su alimentacion");
@@ -939,6 +951,7 @@ void setupWifi() {
 
 // Cierra la conexión Wi-Fi actual y olvida su clave, sus intentos y lo que quedaba por enviar.
 void tcpClose(const char* why) {
+  otaAbort();   // una versión nueva a medias se descarta: la placa sigue con la suya
   tcpClient.stop();
   tcpOpen = false;
   tcpOut = "";
@@ -960,6 +973,21 @@ void tcpFlush() {
   if (sent > 0) { tcpOut.remove(0, sent); tcpOutAt = millis(); return; }
   if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) { tcpClose("se perdio la conexion"); return; }
   if (millis() - tcpOutAt >= TCP_STUCK_MS || tcpOut.length() > TCP_OUT_MAX) tcpClose("el telefono no recibe; se cierra la conexion");
+}
+
+// Recibe la versión nueva (ver ota.h). Como mucho unos 4 KB por vuelta: la alarma y el resto siguen atendidos.
+void loopOtaRx() {
+  static uint8_t buf[1436];
+  for (int k = 0; k < 3 && tcpOpen && otaActive(); k++) {
+    size_t want = min(min((size_t)tcpClient.available(), sizeof(buf)), otaWant());
+    if (want == 0) return;
+    int got = tcpClient.read(buf, want);
+    if (got <= 0) return;
+    tcpLastRx = millis();
+    String answer = otaReceive(buf, got);
+    if (answer.length()) reply(SRC_TCP, answer);
+    if (answer == "OTA:OK") notice("Version nueva recibida: la casa se reinicia");
+  }
 }
 
 void loopWifi() {
@@ -985,13 +1013,18 @@ void loopWifi() {
       reply(SRC_TCP, "HELLO:" DEVICE_NAME);
     }
   }
-  // Como mucho 128 bytes por vuelta, igual que por Bluetooth.
-  for (int n = 0; n < 128 && tcpOpen && tcpClient.available(); n++) {
-    tcpLastRx = millis();
-    feedChar(SRC_TCP, tcpClient.read());
+  if (otaActive()) {
+    loopOtaRx();
+  } else {
+    // Como mucho 128 bytes por vuelta, igual que por Bluetooth. Después de OTA:LISTO llega el programa, no texto.
+    for (int n = 0; n < 128 && tcpOpen && !otaActive() && tcpClient.available(); n++) {
+      tcpLastRx = millis();
+      feedChar(SRC_TCP, tcpClient.read());
+    }
   }
   tcpFlush();
 }
+
 #endif
 
 // Respuesta solo para quien preguntó (por ejemplo, el resultado de la clave).
@@ -1068,4 +1101,6 @@ void loop() {
   loopServos(now);
   loopTest(now);
   loopResetButton(now);
+  String otaNews = otaLoop(now);
+  if (otaNews.length()) reply(SRC_TCP, otaNews);
 }

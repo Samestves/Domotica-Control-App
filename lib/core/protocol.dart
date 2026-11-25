@@ -11,6 +11,7 @@
 ///   `PING`
 ///   `AUTH:123456`     entrega la clave de la casa (vacía si la app todavía no la conoce)
 ///   `CLAVE:123456`    crea la clave, o la cambia si ya se entregó la actual
+///   `OTA:<tamaño>:<md5>`  manda una versión nueva del programa, solo por Wi-Fi (ver lib/core/board_update.dart)
 ///
 /// Placa → app:
 ///   `V10:24.1`        lectura de un sensor
@@ -21,6 +22,8 @@
 ///   `AUTH:ESPERA:30`  demasiados intentos; esperar 30 s
 ///   `AUTH:NUEVA`      la casa no tiene clave todavía
 ///   `AUTH:PIDE`       hace falta la clave
+///   `VER:casa-0.9`    la versión del programa, con SYNC (desde casa-0.9 y carro-0.5)
+///   `OTA:LISTO`, `OTA:AVANCE:35`, `OTA:OK`, `OTA:ERR:<motivo>`  cómo va una versión nueva
 ///   `PONG`, `OK:<texto>`, `ERR:<texto>`
 ///
 /// Una placa que no conoce `AUTH` (el carrito, o una versión anterior) responde `ERR` o nada:

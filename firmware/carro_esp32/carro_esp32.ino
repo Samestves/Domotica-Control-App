@@ -1,5 +1,5 @@
 /*
-  Carrito 4x4 · programa para el ESP32 del carrito · versión carro-0.4
+  Carrito 4x4 · programa para el ESP32 del carrito · versión carro-0.5
   --------------------------------------------------------------------
   Cuatro motores TT con dos puentes H L298N. Se maneja desde la misma app de la casa
   (panel «Auto Robot») por Bluetooth LE o por Wi-Fi. Gira como un tanque: para doblar,
@@ -62,8 +62,16 @@
     TD      B       17              18             19
     Luces 23 · Bocina 5 · Torreta y sensor: sin conectar
 
+  Cara (desde carro-0.5): una pantalla OLED de 0,96" con ojos que reaccionan a lo que hace el carrito
+  (ver cara.h). SDA en el GPIO 21 y SCL en el 22, por eso esos dos quedan reservados. Es opcional: sin
+  pantalla el carrito funciona igual.
+
+  Actualización por Wi-Fi (desde carro-0.5): la app le manda la versión nueva por la red del carrito
+  (ver ota.h). Mientras llega, el carrito queda quieto y no acepta manejo. La primera vez es por cable.
+
   Otros mensajes (por la app o el Monitor Serie a 115200; todos piden la clave menos PING):
-    SYNC                  la placa responde con el estado actual
+    SYNC                  la placa responde con su versión (VER:carro-0.5) y el estado actual
+    OTA:<tamaño>:<md5>    recibe una versión nueva por Wi-Fi (ver ota.h)
     TEST                  mueve cada rueda hacia adelante, una por una, para ver cuál es cuál:
                           OK:PRUEBA rueda <nombre> por cada una y al final OK:PRUEBA terminada.
                           Se cancela con «ERR:prueba cancelada: ...» si llega joystick, acelerador o freno,
@@ -72,22 +80,33 @@
     PING                  responde PONG
     RUEDA:DI:32,33,25     cambia los pines de una rueda (EN, IN1, IN2)
     CFG:V23:23:0:1        luces en el GPIO 23, sin invertir (0), activadas (1). Igual V26 (bocina) y V21 (torreta)
-    SENSOR:21,34          sensor HC-SR04: TRIG en 21 y ECHO en 34 (¡ECHO con divisor de voltaje a 3,3 V!)
+    SENSOR:15,34          sensor HC-SR04: TRIG en 15 y ECHO en 34 (¡ECHO con divisor de voltaje a 3,3 V!)
     SENSOR:NO             quita el sensor
     MINIMO:35             potencia mínima (%) con la que las ruedas empiezan a girar
     FABRICA               vuelve a los pines de fábrica (la clave no se borra)
   Los cambios se guardan en la placa. Los números se revisan (CFG:V23:abc da ERR en vez de usar 0),
-  los GPIO 1 y 3 (Monitor Serie) y 6 a 11 (memoria) no se aceptan, y una línea de más de 120 letras
-  se descarta entera.
+  los GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria) y 21 y 22 (la pantalla) no se aceptan, y una línea
+  de más de 120 letras se descarta entera.
 
-  Placa: "ESP32 Dev Module" con Partition Scheme "Huge APP". Sin librerías extra.
+  Cambios de carro-0.5 (respecto de carro-0.4):
+    - La cara en la pantalla OLED (cara.h) y la actualización por Wi-Fi desde la app (ota.h).
+    - Dice su versión al conectarse (VER:carro-0.5, con SYNC).
+    - Memoria en dos espacios de programa («Minimal SPIFFS» en vez de «Huge APP»), para poder recibir una
+      versión nueva mientras funciona. La clave y los ajustes están en otra zona: se conservan.
+    - Los GPIO 21 y 22 quedan para la pantalla. Si el sensor estaba en el 21, la pantalla no se usa hasta
+      moverlo (SENSOR:15,34); el carrito lo avisa por el Monitor Serie.
+
+  Placa: "ESP32 Dev Module" con Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)". Sin librerías extra.
+    .\tool\compilar_firmware.ps1 -Placa carro
 */
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include "ota.h"
+#include "cara.h"
 
 // ============ CONFIGURACIÓN ============
-#define FW_VERSION  "carro-0.4"
+#define FW_VERSION  "carro-0.5"
 #define DEVICE_NAME "Carrito 4x4"
 #define USE_WIFI    1                      // 1 = crear también la red Wi-Fi propia del carrito
 #if USE_WIFI
@@ -202,6 +221,7 @@ const char* gpioProblem(int gpio, bool output = true) {
   if (gpio < 0 || gpio > 39) return "el ESP32 tiene GPIO del 0 al 39";
   if (gpio == 1 || gpio == 3) return "los GPIO 1 y 3 los usa el Monitor Serie (cable USB)";
   if (gpio >= 6 && gpio <= 11) return "los GPIO 6 a 11 los usa la memoria de la placa";
+  if (gpio == OLED_SDA || gpio == OLED_SCL) return "los GPIO 21 y 22 son de la pantalla de la cara (SDA y SCL)";
   if (gpio == 20 || gpio == 24 || (gpio >= 28 && gpio <= 31)) return "ese GPIO no existe en el ESP32";
   if (output && gpio >= 34) return "los GPIO 34 a 39 solo sirven como entrada";
   return nullptr;
@@ -351,7 +371,7 @@ void computeTargets() {
   target[2] = target[3] = toPower(right);
 
   String now = "Ruedas: izquierda " + String(left) + " % · derecha " + String(right) + " %";
-  if (now != lastPrinted) { Serial.println(now); lastPrinted = now; }
+  if (now != lastPrinted) { Serial.println(now); lastPrinted = now; caraDrive(left, right); }
 }
 
 bool moving() {
@@ -366,6 +386,7 @@ void stopNow(const char* why) {
   joyX = joyY = throttle = 0;
   for (int i = 0; i < 4; i++) { target[i] = current[i] = 0; applyWheel(i); }
   lastPrinted = "";
+  caraDrive(0, 0);
   if (was && why) sendLine(String("ERR:") + why);
 }
 
@@ -500,6 +521,7 @@ void loopSensor(uint32_t now) {
   bool obstacle = obstacleAhead();
   if (obstacle != lastObstacle && !testRunning()) {
     lastObstacle = obstacle;
+    if (obstacle) caraObstacle(distanceCm);
     computeTargets();
     // Obstáculo adelante: el avance se corta al instante, sin rampa (girar o retroceder sigue con rampa).
     if (obstacle)
@@ -551,25 +573,31 @@ uint32_t lockLeft(uint32_t now) {
   return (LOCK_MS - elapsed + 999) / 1000;
 }
 
+// Respuesta de clave para un teléfono, y la cara reacciona (pide, acepta o rechaza).
+void replyAuth(Src src, const String& answer, CaraKey face) {
+  reply(src, answer);
+  if (src != SRC_SERIAL) caraKey(face);
+}
+
 // AUTH:<clave>
 void handleAuth(Src src, const String& given) {
-  if (carKey.length() == 0) { reply(src, "AUTH:NUEVA"); return; }
+  if (carKey.length() == 0) { replyAuth(src, "AUTH:NUEVA", CARA_KEY_ASK); return; }
   uint32_t wait = lockLeft(millis());
-  if (wait) { reply(src, "AUTH:ESPERA:" + String(wait)); return; }
+  if (wait) { replyAuth(src, "AUTH:ESPERA:" + String(wait), CARA_KEY_BAD); return; }
   if (given == carKey) {
     failCount = 0;
     authed[src] = true;
-    reply(src, "AUTH:OK");
+    replyAuth(src, "AUTH:OK", CARA_KEY_OK);
     return;
   }
   deauth(src);
-  if (given.length() == 0) { reply(src, "AUTH:PIDE"); return; }   // la app aún no la conoce: no cuenta como intento
+  if (given.length() == 0) { replyAuth(src, "AUTH:PIDE", CARA_KEY_ASK); return; }   // la app aún no la conoce: no cuenta como intento
   if (++failCount >= MAX_FAILS) {
     failCount = 0;
     lockStart = millis() | 1;   // nunca 0, que significa «sin bloqueo»
-    reply(src, "AUTH:ESPERA:" + String(LOCK_MS / 1000));
+    replyAuth(src, "AUTH:ESPERA:" + String(LOCK_MS / 1000), CARA_KEY_BAD);
   } else {
-    reply(src, "AUTH:MAL:" + String(MAX_FAILS - failCount));
+    replyAuth(src, "AUTH:MAL:" + String(MAX_FAILS - failCount), CARA_KEY_BAD);
   }
 }
 
@@ -584,7 +612,7 @@ void handleNewKey(Src src, const String& key) {
   if (!validKey(key)) { reply(src, "ERR:la clave debe tener de 4 a 8 numeros"); return; }
   storeKey(key, src);
   authed[src] = true;
-  reply(src, "AUTH:OK");
+  replyAuth(src, "AUTH:OK", CARA_KEY_OK);
   Serial.println("Clave del carrito guardada");
 }
 
@@ -621,6 +649,7 @@ String invertString() {
 }
 
 void sync() {
+  sendLine("VER:" FW_VERSION);
   sendLine("V" + String(VPIN_LIGHTS) + ":" + String(lightsOn ? 1 : 0));
   sendLine("V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0));
   sendLine("V" + String(VPIN_THROTTLE) + ":" + String(throttle));
@@ -647,6 +676,7 @@ void showPins() {
 void spinTestWheel(int w) {
   testWheel = w;
   testPaused = false;
+  caraWheel(w);   // la cara mira la rueda que gira
   sendLine(String("OK:PRUEBA rueda ") + WHEEL_NAME[w]);
   current[w] = toPower(60);
   applyWheel(w);
@@ -674,6 +704,7 @@ void loopTest(uint32_t now) {
     spinTestWheel(w + 1);
   } else {
     testWheel = -1;
+    caraWheel(-1);
     sendLine("OK:PRUEBA terminada. Si una rueda giro hacia atras, activa Invertir en esa rueda");
   }
 }
@@ -838,6 +869,28 @@ bool lockedFor(Src src, bool neutral, bool& seen) {
   return !unlockWith(neutral, seen);
 }
 
+// ============ ACTUALIZACIÓN POR WI-FI (ver ota.h) ============
+const char* OTA_BUSY = "ERR:el carrito se esta actualizando; espera unos segundos";
+
+// Contesta al teléfono y la cara muestra cómo va: 0 % al empezar, el avance, listo o no se pudo.
+void otaReply(const String& answer) {
+  reply(SRC_TCP, answer);
+  if (answer == "OTA:LISTO") caraUpdate(0);
+  else if (answer.startsWith("OTA:AVANCE:")) caraUpdate(answer.substring(11).toInt());
+  else if (answer == "OTA:OK") caraUpdate(100);
+  else if (answer.startsWith("OTA:ERR:")) caraUpdate(-1);
+}
+
+// OTA:<tamaño>:<md5>. Solo por Wi-Fi (por Bluetooth tardaría minutos), y el carrito se detiene antes.
+void handleOta(Src src, const String& arg) {
+  if (src != SRC_TCP) { reply(src, "OTA:ERR:se actualiza por Wi-Fi"); return; }
+  abortTest("llego una version nueva");
+  stopNow(nullptr);
+  lockDriving();
+  releaseDriver();
+  otaReply(otaBegin(arg));
+}
+
 void handleLine(Src src, String line) {
   line.trim();
   if (!line.length()) return;
@@ -847,9 +900,16 @@ void handleLine(Src src, String line) {
   if (up == "PING") { reply(src, "PONG"); return; }   // sin clave también; no cuenta como señal de manejo
   if (up.startsWith("AUTH:")) { handleAuth(src, line.substring(5)); return; }
   if (up.startsWith("CLAVE:")) { handleNewKey(src, line.substring(6)); return; }
-  if (!authed[src]) { reply(src, carKey.length() ? "AUTH:PIDE" : "AUTH:NUEVA"); return; }
+  if (!authed[src]) { replyAuth(src, carKey.length() ? "AUTH:PIDE" : "AUTH:NUEVA", CARA_KEY_ASK); return; }
+  caraWake();   // una orden de verdad (PING no cuenta): si la cara dormía, se despierta
 
   if (up == "SYNC") { sync(); return; }
+  if (up.startsWith("OTA:")) { handleOta(src, line.substring(4)); return; }
+  if (otaActive() && (up == "TEST" || up == "FABRICA" || up.startsWith("RUEDA:") ||
+                      up.startsWith("V" + String(VPIN_JOY) + ":") || up.startsWith("V" + String(VPIN_THROTTLE) + ":"))) {
+    warnOnce(src, OTA_BUSY);   // quieto mientras llega la versión nueva
+    return;
+  }
   if (up == "TEST") { startTest(src); return; }
   if (up == "PINES") { showPins(); return; }
   if (up == "FABRICA") {
@@ -907,9 +967,13 @@ void handleLine(Src src, String line) {
         return;
       }
       reverseGear = n != 0; computeTargets(); sendLine("V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0)); return;
-    case VPIN_LIGHTS:   setLights(n != 0); sendLine("V" + String(VPIN_LIGHTS) + ":" + String(lightsOn ? 1 : 0)); return;
+    case VPIN_LIGHTS:
+      setLights(n != 0);
+      caraLights(lightsOn);
+      sendLine("V" + String(VPIN_LIGHTS) + ":" + String(lightsOn ? 1 : 0));
+      return;
     case VPIN_HORN:
-      if (n) { setHorn(true); hornUntil = millis() + HORN_MS; } else { setHorn(false); hornUntil = 0; }
+      if (n) { setHorn(true); hornUntil = millis() + HORN_MS; caraHorn(); } else { setHorn(false); hornUntil = 0; }
       return;
     case VPIN_TURRET:
       if (cfg.turret < 0) {
@@ -1000,6 +1064,7 @@ void loopBle() {
     if (k == BLE_MARK_ON || k == BLE_MARK_OFF) {
       authed[SRC_BLE] = false;   // otra vez, en orden: un AUTH viejo procesado recién no autentica al nuevo
       sourceChanged(SRC_BLE);
+      showLinks();
       Serial.println(k == BLE_MARK_ON ? "Bluetooth conectado" : "Bluetooth desconectado");
     } else {
       feedChar(SRC_BLE, (char)k);
@@ -1045,6 +1110,20 @@ void setupWifi() {
   Serial.println("Wi-Fi propio listo: red \"" DEVICE_NAME "\", IP " + WiFi.softAPIP().toString() + ", puerto " + String(TCP_PORT));
 }
 
+// Recibe la versión nueva (ver ota.h). Como mucho unos 4 KB por vuelta: el loop sigue atendiendo lo demás.
+void loopOtaRx() {
+  static uint8_t buf[1436];
+  for (int k = 0; k < 3 && otaActive() && tcpClient.connected(); k++) {
+    size_t want = min(min((size_t)tcpClient.available(), sizeof(buf)), otaWant());
+    if (want == 0) return;
+    int got = tcpClient.read(buf, want);
+    if (got <= 0) return;
+    tcpLastRx = millis();
+    String answer = otaReceive(buf, got);
+    if (answer.length()) otaReply(answer);
+  }
+}
+
 void loopWifi(uint32_t now) {
   bool active = tcpClient.connected();
   if (active && now - tcpLastRx > TCP_IDLE_MS) {   // conexión medio abierta: el teléfono no da señales
@@ -1067,6 +1146,7 @@ void loopWifi(uint32_t now) {
       tcpWasConnected = true;
       authed[SRC_TCP] = false;   // cada teléfono que se conecta entrega la clave de nuevo
       sourceChanged(SRC_TCP);
+      showLinks();
       Serial.println("Wi-Fi: telefono conectado");
       reply(SRC_TCP, "HELLO:" DEVICE_NAME);
     }
@@ -1074,16 +1154,29 @@ void loopWifi(uint32_t now) {
   if (tcpWasConnected && !tcpClient.connected()) {
     tcpWasConnected = false;
     authed[SRC_TCP] = false;
+    if (otaActive()) { otaAbort(); caraUpdate(-1); }   // lo recibido a medias se descarta
     sourceChanged(SRC_TCP);
+    showLinks();
     Serial.println("Wi-Fi desconectado");
   }
+  if (otaActive()) { loopOtaRx(); return; }
   // Como mucho 512 bytes por vuelta, para que un teléfono que manda sin parar no trabe el loop.
-  for (int n = 0; n < 512 && tcpClient.connected() && tcpClient.available(); n++) {
+  // Después de OTA:LISTO llega el programa, no texto: se deja de leer letras en ese momento.
+  for (int n = 0; n < 512 && !otaActive() && tcpClient.connected() && tcpClient.available(); n++) {
     tcpLastRx = millis();
     feedChar(SRC_TCP, (char)tcpClient.read());
   }
 }
 #endif
+
+// La cara muestra qué teléfonos están conectados (con la clave o todavía sin ella).
+void showLinks() {
+#if USE_WIFI
+  caraLink(bleConnected, tcpWasConnected);
+#else
+  caraLink(bleConnected, false);
+#endif
+}
 
 // Respuesta solo para quien preguntó (por ejemplo, el resultado de la clave).
 void reply(Src src, const String& line) {
@@ -1104,6 +1197,20 @@ void sendLine(const String& line) {
 }
 
 // ============ PROGRAMA PRINCIPAL ============
+// La pantalla usa los GPIO 21 y 22. Un ajuste guardado antes de carro-0.5 pudo poner algo ahí (el sensor
+// del ejemplo usaba el 21): en ese caso se respeta ese ajuste y la cara no se usa hasta moverlo.
+bool faceOn = false;
+
+void setupFace() {
+  if (pinInUse(OLED_SDA) || pinInUse(OLED_SCL)) {
+    Serial.println("Aviso: la pantalla de la cara usa los GPIO 21 y 22, pero " + pinOwner(pinInUse(OLED_SDA) ? OLED_SDA : OLED_SCL) +
+                   " esta en uno de ellos. Muevelo (por ejemplo SENSOR:15,34) para usar la cara.");
+    return;
+  }
+  faceOn = true;
+  caraBegin();
+}
+
 void setup() {
   loadConfig();
   setupAll();            // motores quietos lo antes posible
@@ -1115,6 +1222,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("\n== " DEVICE_NAME " (" FW_VERSION ") ==");
+  setupFace();           // antes que el Bluetooth: el logo aparece enseguida
   setupBle();
 #if USE_WIFI
   setupWifi();
@@ -1138,4 +1246,7 @@ void loop() {
   if (!testRunning()) loopRamp(now);   // durante la prueba las ruedas las maneja loopTest
   loopHorn(now);
   loopResetButton(now);
+  String otaNews = otaLoop(now);
+  if (otaNews.length()) otaReply(otaNews);
+  if (faceOn) caraLoop(now);
 }

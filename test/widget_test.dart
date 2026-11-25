@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:control_domotica/core/casa_sim.dart';
 import 'package:control_domotica/core/demo_link.dart';
+import 'package:control_domotica/core/firmware.dart';
 import 'package:control_domotica/core/link.dart';
 import 'package:control_domotica/core/protocol.dart';
 import 'package:control_domotica/core/wifi_net.dart';
@@ -804,6 +805,29 @@ void main() {
     expect(find.byIcon(Ic.chevronRight), findsNWidgets(2), reason: 'cada tarjeta muestra que se puede abrir');
     expect(find.text('Mantén presionada una tarjeta para ver sus opciones.'), findsOneWidget);
     expect(find.text('CONECTAR'), findsWidgets, reason: 'cada placa desconectada tiene su botón');
+  });
+
+  testWidgets('una placa con una versión vieja muestra el aviso en el inicio y su hoja para instalar', (t) async {
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(800, 1400);
+    addTearDown(t.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final app = AppState();
+    await app.load();
+    await app.add(SavedDevice(id: 'c', name: 'Casa', profile: Profile.casa, transport: Transport.ble, firmware: 'casa-0.8'));
+    app.boardReleases = {
+      'casa': BoardRelease(board: 'casa', version: 'casa-0.9', url: Uri.parse('https://x/app.bin'), size: 1517888, md5: 'a' * 32),
+    };
+    await t.pumpWidget(ControlApp(state: app));
+    expect(find.text('VERSIÓN NUEVA PARA CASA'), findsOneWidget);
+    expect(find.text('casa-0.9 · toca para instalar'), findsOneWidget);
+    expect(find.text('VERSIÓN NUEVA PARA CASA (DEMO)'), findsNothing, reason: 'las demo no tienen programa que actualizar');
+
+    await t.tap(find.text('casa-0.9 · toca para instalar'));
+    await t.pumpAndSettle();
+    expect(find.text('casa-0.9'), findsOneWidget, reason: 'la hoja muestra la versión nueva');
+    expect(find.textContaining('tiene casa-0.8'), findsOneWidget);
+    expect(find.text('INSTALAR · 1,5 MB'), findsOneWidget);
   });
 
   testWidgets('«Cambiar la clave» está en las opciones del dispositivo y espera a que la casa confirme', (t) async {

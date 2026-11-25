@@ -82,7 +82,9 @@ String? gpioProblem(int gpio, {bool output = true}) {
   if (gpio >= 6 && gpio <= 11) return 'Los GPIO 6 a 11 los usa la memoria de la placa.';
   if (gpio == 1 || gpio == 3) return 'Los GPIO 1 y 3 son el cable USB (Monitor Serie) de la placa.';
   if (const {20, 24, 28, 29, 30, 31}.contains(gpio)) return 'El GPIO $gpio no existe en el ESP32.';
-  if (gpio == 21 || gpio == 22) return 'Los GPIO 21 y 22 los usa el módulo PCA9685 (SDA y SCL).';
+  if (gpio == 21 || gpio == 22) {
+    return 'Los GPIO 21 y 22 son SDA y SCL: los usa el módulo PCA9685 de la casa y la pantalla de la cara del carrito.';
+  }
   if (output && gpio >= 34) return 'Los GPIO 34 a 39 solo sirven como entrada.';
   return null;
 }

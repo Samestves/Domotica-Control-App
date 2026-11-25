@@ -55,6 +55,10 @@ class SavedDevice {
   String? ssid;
   String? wifiPass;
 
+  /// Versión del programa de la placa (`casa-0.9`), la última vez que lo dijo al conectarse. null = no se sabe:
+  /// las versiones anteriores a casa-0.9 y carro-0.5 no la dicen (y tampoco se actualizan por Wi-Fi).
+  String? firmware;
+
   SavedDevice({
     required this.id,
     required this.name,
@@ -67,6 +71,7 @@ class SavedDevice {
     this.clave,
     this.ssid,
     this.wifiPass,
+    this.firmware,
   }) : pins = pins ?? {};
 
   String get subtitle => switch (transport) {
@@ -87,6 +92,7 @@ class SavedDevice {
         if (clave != null) 'clave': clave,
         if (ssid != null) 'ssid': ssid,
         if (wifiPass != null) 'wifiPass': wifiPass,
+        if (firmware != null) 'firmware': firmware,
       };
 
   factory SavedDevice.fromJson(Map<String, dynamic> j) => SavedDevice(
@@ -102,5 +108,6 @@ class SavedDevice {
         clave: j['clave'] as String?,
         ssid: j['ssid'] as String?,
         wifiPass: j['wifiPass'] as String?,
+        firmware: j['firmware'] as String?,
       );
 }

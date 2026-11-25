@@ -149,4 +149,14 @@ class WifiLink extends DeviceLink {
       _drop('No se pudo enviar: $e');
     }
   }
+
+  /// Envía y espera a que el teléfono lo entregue a la red: quien llama manda de a trozos, y cada trozo sale
+  /// recién cuando el anterior salió (así se nota si la placa deja de recibir).
+  @override
+  Future<void> sendBytes(List<int> data) async {
+    final s = _socket;
+    if (s == null) throw const SocketException('sin conexión');
+    s.add(data);
+    await s.flush();
+  }
 }

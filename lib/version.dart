@@ -1,11 +1,12 @@
 /// Versión que se muestra en la app. Mantener igual a `version` en pubspec.yaml.
-const appVersion = 'Alpha 0.9.5';
-const appBuild = 25;
+const appVersion = 'Alpha 0.9.6';
+const appBuild = 26;
 
 /// Qué trae esta versión. La app lo muestra una vez al abrirla después de actualizar (y en Ajustes → Acerca de),
 /// y tool/publicar.ps1 lo usa como descripción de la Release en GitHub. Una frase corta por punto.
 const appNews = [
-  'Lista para la casa con el módulo PCA9685 (casa-0.8): en puertas y persianas, la hoja de pines pide el canal del módulo.',
-  'Los ajustes viejos de los servos pasan solos a su canal, sin perder invertir ni activar.',
-  'Los GPIO 21 y 22 quedan reservados para el módulo (SDA y SCL).',
+  'Actualiza el programa de la casa y del carrito por Wi-Fi, desde la app. Funciona desde casa-0.9 y carro-0.5, que se instalan una vez por cable.',
+  'Avisos: la app te avisa cuando hay una versión nueva de la app o de tus placas, aunque esté cerrada. Se apagan en Ajustes.',
+  'En las opciones de cada placa (mantén presionada su tarjeta) se ve la versión de su programa.',
+  'El carrito ya puede llevar su pantalla con cara: los GPIO 21 y 22 quedan para ella.',
 ];

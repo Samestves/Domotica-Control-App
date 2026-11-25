@@ -23,6 +23,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <!-- Avisar versiones nuevas y cómo salió la actualización de una placa (Android 13 o más nuevo lo pregunta) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Actualizar la app desde la propia app (descarga el APK de GitHub y abre el instalador de Android) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Sin respaldo en la nube ni copia a otro teléfono: la clave de la casa y la contraseña Wi‑Fi

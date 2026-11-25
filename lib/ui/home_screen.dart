@@ -12,6 +12,7 @@ import 'casa_panel.dart';
 import 'credits_screen.dart';
 import 'theme.dart';
 import 'widgets/app_scaffold.dart';
+import 'widgets/board_update_sheet.dart';
 import 'widgets/clave.dart';
 import 'widgets/kit.dart';
 import 'widgets/news_sheet.dart';
@@ -88,6 +89,8 @@ class _HomeScreenState extends State<HomeScreen> {
           sliver: SliverList.list(children: [
             for (final s in alerts) ...[_AlertBanner(session: s), const SizedBox(height: 12)],
             if (app.update != null) ...[UpdateBanner(release: app.update!), const SizedBox(height: 12)],
+            for (final d in app.devices)
+              if (app.boardUpdate(d) case final r?) ...[BoardUpdateBanner(device: d, release: r), const SizedBox(height: 12)],
             if (app.devices.isEmpty) _EmptyState(onAdd: () => HomeScreen._add(context)),
             for (final d in app.devices) ...[_DeviceCard(device: d), const SizedBox(height: 12)],
             if (app.devices.isNotEmpty) _AddCard(onTap: () => HomeScreen._add(context)),
@@ -299,6 +302,19 @@ class _SettingsSheet extends StatelessWidget {
             ),
           ],
         ),
+        const SectionHeader('Avisos', padding: EdgeInsets.fromLTRB(4, 24, 4, 10)),
+        RowGroup(
+          footer: 'La app revisa cada 12 horas, aunque esté cerrada, si hay una versión nueva de la app o de tus placas, '
+              'y avisa una vez por versión. En teléfonos Xiaomi, permite el «Inicio automático» de la app para que no se atrase.',
+          children: [
+            ListRow(
+              icon: Ic.bell,
+              title: 'Avisar versiones nuevas',
+              trailing: Toggle(value: app.avisos, onChanged: app.setAvisos),
+              onTap: () => app.setAvisos(!app.avisos),
+            ),
+          ],
+        ),
         const SizedBox(height: 18),
         RowGroup(children: [
           ListRow(
@@ -425,6 +441,8 @@ void _showDeviceOptions(BuildContext context, Session s) {
                 s.linked || s.busy ? s.disconnect() : s.connect();
               },
             ),
+            // Qué programa tiene la placa (lo dice al conectarse desde casa-0.9 y carro-0.5) y si hay uno más nuevo.
+            if (d.transport != Transport.demo) _firmwareRow(context, sheet, d),
             ListRow(
               icon: Ic.edit,
               title: 'Cambiar nombre',
@@ -464,6 +482,27 @@ void _showDeviceOptions(BuildContext context, Session s) {
       ]),
     );
   });
+}
+
+Widget _firmwareRow(BuildContext context, BuildContext sheet, SavedDevice d) {
+  final c = sheet.c;
+  final update = AppScope.read(context).boardUpdate(d);
+  return ListRow(
+    icon: Ic.board,
+    title: 'Programa de la placa',
+    detail: switch ((d.firmware, update)) {
+      (null, _) => 'Se ve al conectarse, desde casa-0.9 y carro-0.5',
+      (final mine?, null) => '$mine · al día',
+      (final mine?, final r?) => '$mine · hay ${r.version}',
+    },
+    trailing: update == null ? null : Eyebrow('Actualizar', color: c.green),
+    onTap: update == null
+        ? null
+        : () {
+            Navigator.pop(sheet);
+            showBoardUpdateSheet(context, d);
+          },
+  );
 }
 
 /// Hoja para cambiar el nombre de un dispositivo.

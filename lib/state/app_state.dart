@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart' show ThemeMode;
+import 'package:flutter/material.dart' show AppLifecycleState, ThemeMode, WidgetsBinding;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/avisos.dart';
 import '../core/ble_link.dart';
+import '../core/board_update.dart';
 import '../core/demo_link.dart';
+import '../core/firmware.dart';
 import '../core/link.dart';
 import '../core/protocol.dart';
 import '../core/updater.dart';
@@ -400,6 +403,12 @@ class Session extends ChangeNotifier {
     if (!_messages.isClosed) _messages.add(m);
     if (m.kind == 'AUTH') {
       _onClaveReply(m.value);
+    } else if (m.kind == 'VER') {
+      // La placa dice su versión (desde casa-0.9 y carro-0.5): así la app sabe si hay una más nueva.
+      if (device.firmware != m.value) {
+        device.firmware = m.value;
+        onDeviceChanged?.call();
+      }
     } else if (m.kind == 'ERR' && clave == ClaveState.checking && !keyed && m.value.contains('AUTH')) {
       _ready(); // una versión anterior del programa no conoce la clave
     } else if (m.isPin) {
@@ -487,10 +496,11 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> _teardown() async {
-    for (final s in _subs) {
-      await s.cancel();
-    }
+    // Se copia antes de esperar: mientras tanto otra apertura puede agregar las suyas.
+    final subs = [..._subs];
     _subs.clear();
+    // Todas se cancelan ya (sin esperar entre una y otra): ningún aviso llega a una sesión que se está cerrando.
+    await Future.wait(subs.map((s) => s.cancel()));
     await _link?.dispose();
     _link = null;
   }
@@ -498,6 +508,7 @@ class Session extends ChangeNotifier {
   @override
   void dispose() {
     _wantConnected = false;
+    _generation++; // una apertura que todavía no terminó lo nota y no sigue
     _retryTimer?.cancel();
     _stopHeartbeat();
     _clearPending();
@@ -539,12 +550,91 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Al abrir la app: revisa en segundo plano si hay una versión nueva. Sin internet no pasa nada
-  /// (se puede buscar a mano en Ajustes).
+  /// Al abrir la app: revisa en segundo plano si hay una versión nueva de la app o del programa de las placas.
+  /// Sin internet no pasa nada (la app se busca a mano en Ajustes; las placas, en la próxima apertura).
   Future<void> checkForUpdateQuietly() async {
+    await Future.wait([
+      () async {
+        try {
+          setUpdate(await Updater.check());
+        } catch (_) {}
+      }(),
+      _checkBoards(),
+    ]);
+    if (update != null || devices.any((d) => boardUpdate(d) != null)) await _askAvisosOnce();
+  }
+
+  // ---------- Programa de las placas ----------
+
+  /// Versión publicada de cada placa (`casa`, `carro`), según la página del instalador. Vacío hasta revisar.
+  Map<String, BoardRelease> boardReleases = {};
+
+  /// La versión nueva que le sirve a esta placa, o null si ya la tiene (o no se puede actualizar por Wi-Fi).
+  BoardRelease? boardUpdate(SavedDevice d) => Firmware.updateFor(d, boardReleases);
+
+  final Map<String, BoardUpdate> _boardJobs = {};
+
+  /// La actualización en curso (o la última) de una placa, para que la hoja la muestre aunque se haya cerrado.
+  BoardUpdate? boardJob(SavedDevice d) => _boardJobs[d.id];
+
+  Future<void> _checkBoards() async {
     try {
-      setUpdate(await Updater.check());
-    } catch (_) {}
+      boardReleases = await Firmware.fetchCatalog();
+      notifyListeners();
+    } catch (_) {
+      return;
+    }
+    // Se baja ya, con internet: al actualizar, la app estará unida a la red de la placa, que no tiene.
+    for (final d in devices) {
+      final r = boardUpdate(d);
+      if (r == null) continue;
+      try {
+        await Firmware.download(r);
+      } catch (_) {}
+    }
+  }
+
+  /// Instala [r] en la placa [d] (ver [BoardUpdate]). Si ya hay una en curso, devuelve esa.
+  BoardUpdate updateBoard(SavedDevice d, BoardRelease r) {
+    final running = _boardJobs[d.id];
+    if (running != null && running.busy) return running;
+    final job = BoardUpdate(session(d), r, linkFor: linkFor);
+    _boardJobs[d.id] = job;
+    job.addListener(notifyListeners);
+    job.run().then((_) {
+      // Con la app en segundo plano, una notificación cuenta cómo salió.
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) return;
+      final ok = job.step == BoardUpdateStep.done;
+      Avisos.show(ok ? '«${d.name}» quedó actualizada' : 'No se pudo actualizar «${d.name}»',
+          ok ? 'Ya tiene ${r.version}.' : 'Sigue con ${d.firmware ?? 'su versión'}. Abre la app para ver qué pasó.');
+    });
+    return job;
+  }
+
+  // ---------- Avisos ----------
+
+  static const _avisosKey = 'avisos_versiones';
+  static const _avisosAskedKey = 'avisos_permiso_pedido';
+
+  /// Avisar versiones nuevas con notificaciones, aunque la app esté cerrada (la revisión en Android lee este ajuste).
+  bool avisos = true;
+
+  Future<void> setAvisos(bool v) async {
+    avisos = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_avisosKey, v);
+    await Avisos.schedule(v);
+    if (v) await Avisos.askPermission();
+  }
+
+  /// La primera vez que aparece una versión nueva, Android pregunta si la app puede avisar: así el permiso se
+  /// pide cuando se entiende para qué es, y una sola vez.
+  Future<void> _askAvisosOnce() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!avisos || (prefs.getBool(_avisosAskedKey) ?? false)) return;
+    await prefs.setBool(_avisosAskedKey, true);
+    await Avisos.askPermission();
   }
 
   static const _newsKey = 'novedades_vistas';
@@ -603,6 +693,8 @@ class AppState extends ChangeNotifier {
     newsPending = seen == null ? raw != null : seen < appBuild;
     if (raw == null && seen == null) await prefs.setInt(_newsKey, appBuild);
     showPins = read(() => prefs.getBool(_showPinsKey)) ?? false;
+    avisos = read(() => prefs.getBool(_avisosKey)) ?? true;
+    Avisos.schedule(avisos); // sin esperar: Android guarda el horario aunque la app se cierre
     theme.value = ThemeMode.values.asNameMap()[read(() => prefs.getString(_themeKey))] ?? ThemeMode.system;
     devices.clear();
     _unreadable.clear();

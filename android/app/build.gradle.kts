@@ -65,3 +65,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Revisión de versiones nuevas cada 12 horas, aunque la app esté cerrada (ver Avisos.kt).
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+}
