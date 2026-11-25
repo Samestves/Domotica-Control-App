@@ -25,6 +25,8 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <!-- Avisar versiones nuevas y cómo salió la actualización de una placa (Android 13 o más nuevo lo pregunta) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- La revisión de versiones sigue programada después de reiniciar el teléfono (JobScheduler la pide) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Actualizar la app desde la propia app (descarga el APK de GitHub y abre el instalador de Android) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Sin respaldo en la nube ni copia a otro teléfono: la clave de la casa y la contraseña Wi‑Fi
@@ -47,6 +49,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/archivos" />
         </provider>
+        <!-- Revisión de versiones nuevas cada 12 horas (ver RevisarVersiones.kt). Solo Android puede llamarla. -->
+        <service
+            android:name=".RevisarVersiones"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

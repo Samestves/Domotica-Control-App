@@ -3,16 +3,14 @@ package com.domotica.control_domotica
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 /**
@@ -27,7 +25,7 @@ object Avisos {
     /** Cómo salió la actualización de una placa. */
     const val CANAL_PLACAS = "placas"
 
-    private const val TRABAJO = "revisar-versiones"
+    private const val TRABAJO = 7401
 
     fun crearCanales(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
@@ -72,19 +70,22 @@ object Avisos {
     }
 
     /**
-     * Revisión cada 12 horas, solo con internet. Repetirla no reinicia la espera (KEEP): la app la pide al abrirse.
-     * La primera espera una hora, porque al abrirse la app ya revisó.
+     * Revisión cada 12 horas, solo con internet, con el programador de tareas de Android (JobScheduler).
+     * Si ya está programada no se toca: así la app puede pedirla cada vez que se abre sin reiniciar la espera.
+     * Sigue programada aunque se reinicie el teléfono.
      */
     fun programar(ctx: Context, activos: Boolean) {
-        val wm = WorkManager.getInstance(ctx)
+        val js = ctx.getSystemService(JobScheduler::class.java) ?: return
         if (!activos) {
-            wm.cancelUniqueWork(TRABAJO)
+            js.cancel(TRABAJO)
             return
         }
-        val pedido = PeriodicWorkRequestBuilder<RevisarVersiones>(12, TimeUnit.HOURS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-            .setInitialDelay(1, TimeUnit.HOURS)
+        if (js.getPendingJob(TRABAJO) != null) return
+        val tarea = JobInfo.Builder(TRABAJO, ComponentName(ctx, RevisarVersiones::class.java))
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+            .setPeriodic(TimeUnit.HOURS.toMillis(12))
+            .setPersisted(true)
             .build()
-        wm.enqueueUniquePeriodicWork(TRABAJO, ExistingPeriodicWorkPolicy.KEEP, pedido)
+        js.schedule(tarea)
     }
 }

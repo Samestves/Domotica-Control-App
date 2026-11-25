@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 
-/// Notificaciones del teléfono, todas locales: sin servidor ni cuentas (ver MainActivity.kt y RevisarVersiones.kt).
+/// Notificaciones del teléfono, todas locales: sin servidor ni cuentas (ver Avisos.kt y RevisarVersiones.kt).
+/// La revisión en segundo plano usa el programador de tareas de Android (JobScheduler), sin librerías.
 ///
 /// - Cada 12 horas, aunque la app esté cerrada, Android corre una revisión: si hay una versión nueva de la app o del
 ///   programa de una placa guardada, avisa una sola vez por versión.
