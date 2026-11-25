@@ -178,6 +178,8 @@ p { margin: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .chip { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px 0 16px; border-radius: 999px; border: 1px solid var(--line2); color: var(--text); text-decoration: none; font: 700 12px/1 var(--font); letter-spacing: 1.4px; text-transform: uppercase; transition: background-color .2s, color .2s, border-color .2s, transform .12s; }
 .chip:active { transform: scale(.96); }
+.how-driver { grid-column: 2; list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.how-driver b { font-size: inherit; padding: 0; color: var(--text); }
 
 /* BOOT y EN: el dibujo hace los tres pasos, en bucle */
 .board-art { width: 300px; max-width: 100%; height: auto; }
@@ -341,12 +343,17 @@ window.placasPedidas.catch(function () {});
     <h2>¿No aparece tu placa?</h2>
     <div class="cards">
       <div class="card"><span class="ic" data-icon="plug" data-size="24"></span><b>Prueba otro cable</b><span class="small">Muchos cables solo cargan y no pasan datos.</span></div>
-      <div class="card"><span class="ic" data-icon="download-simple" data-size="24"></span><b>Instala el driver</b><span class="small">Mira el chip pequeño junto al USB y toca el que diga. Después desconecta y vuelve a conectar la placa.</span>
+      <div class="card"><span class="ic" data-icon="download-simple" data-size="24"></span><b>Instala el driver</b><span class="small">Mira el chip pequeño junto al USB y toca su nombre: se baja el driver oficial. Después desconecta y vuelve a conectar la placa.</span>
+        <!-- Archivos oficiales de Silicon Labs y WCH, directo (comprobados: ZIP de 292 KB, CH341SER.EXE y CH343SER.EXE). -->
         <div class="chips">
-          <a class="chip" href="https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers" target="_blank" rel="noopener">CP2102 <span data-icon="arrow-up-right" data-size="14"></span></a>
-          <a class="chip" href="https://www.wch-ic.com/downloads/CH341SER_EXE.html" target="_blank" rel="noopener">CH340 <span data-icon="arrow-up-right" data-size="14"></span></a>
-          <a class="chip" href="https://www.wch-ic.com/downloads/CH343SER_EXE.html" target="_blank" rel="noopener">CH9102 <span data-icon="arrow-up-right" data-size="14"></span></a>
+          <a class="chip" href="https://www.silabs.com/documents/public/software/CP210x_Universal_Windows_Driver.zip" download>CP2102 <span data-icon="download-simple" data-size="14"></span></a>
+          <a class="chip" href="https://www.wch-ic.com/download/file?id=65" download>CH340 <span data-icon="download-simple" data-size="14"></span></a>
+          <a class="chip" href="https://www.wch-ic.com/download/file?id=331" download>CH9102 <span data-icon="download-simple" data-size="14"></span></a>
         </div>
+        <ul class="how-driver small">
+          <li><b>CP2102</b> (cuadrado): extrae el ZIP, clic derecho en <b>silabser.inf</b> → <b>Instalar</b>.</li>
+          <li><b>CH340</b> (alargado) o <b>CH9102</b> (cuadrado): abre el archivo y toca <b>INSTALL</b>.</li>
+        </ul>
       </div>
       <div class="card"><span class="ic" data-icon="usb" data-size="24"></span><b>Otro puerto USB</b><span class="small">Directo en la computadora, sin alargadores ni hubs.</span></div>
       <div class="card"><span class="ic" data-icon="lightning-slash" data-size="24"></span><b>¿Está en la maqueta?</b><span class="small">Desenchufa su fuente de 5 V y deja solo el cable USB.</span></div>

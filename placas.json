@@ -1,45 +1,45 @@
 {
-  "updated": "21-11-2026",
+  "updated": "24-11-2026",
   "boards": [
     {
       "id": "casa",
       "name": "Casa domótica",
       "short": "La casa",
       "icon": "house-simple",
-      "version": "casa-0.8",
+      "version": "casa-0.9",
       "notes": [
-        "Puertas y persianas por el módulo PCA9685 (SDA 21, SCL 22): sin el módulo no se mueven; las luces sí.",
-        "Los servos se mueven de a uno, así alcanza una sola fuente de 5 V.",
+        "Desde esta versión se actualiza por Wi-Fi desde la app 0.9.6: esta es la última vez por cable.",
+        "Dice su versión a la app al conectarse.",
         "Conserva la clave y los ajustes que ya tenía la placa."
       ],
       "files": [
         {
           "name": "bootloader.bin",
-          "url": "firmware/casa-0.8/bootloader.bin",
+          "url": "firmware/casa-0.9/bootloader.bin",
           "address": 4096,
           "size": 18960,
           "md5": "81da22449acfb2451d39eaa91ecd2570"
         },
         {
           "name": "partitions.bin",
-          "url": "firmware/casa-0.8/partitions.bin",
+          "url": "firmware/casa-0.9/partitions.bin",
           "address": 32768,
           "size": 3072,
           "md5": "2ddc2d5f85b2c5288013adbe45d9cb7b"
         },
         {
           "name": "boot_app0.bin",
-          "url": "firmware/casa-0.8/boot_app0.bin",
+          "url": "firmware/casa-0.9/boot_app0.bin",
           "address": 57344,
           "size": 8192,
           "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "name": "app.bin",
-          "url": "firmware/casa-0.8/app.bin",
+          "url": "firmware/casa-0.9/app.bin",
           "address": 65536,
-          "size": 1509920,
-          "md5": "60178380d3fc56fc448a13f5e6494a41"
+          "size": 1518032,
+          "md5": "d839c1896b6cab676dd41796d5c7bc1a"
         }
       ]
     },
@@ -48,40 +48,40 @@
       "name": "Auto Robot",
       "short": "El carrito",
       "icon": "car-profile",
-      "version": "carro-0.4",
+      "version": "carro-0.5",
       "notes": [
-        "Pide clave como la casa: necesita la app 0.9 o más nueva.",
-        "Un solo conductor a la vez.",
-        "Seguro de manejo: hay que soltar los controles para volver a manejar."
+        "Cara en una pantalla OLED de 0,96\" (SDA 21, SCL 22). Sin pantalla funciona igual.",
+        "Desde esta versión se actualiza por Wi-Fi desde la app 0.9.6: esta es la última vez por cable.",
+        "Conserva la clave y los ajustes. Si el sensor estaba en el GPIO 21, muévelo al 15 para usar la pantalla."
       ],
       "files": [
         {
           "name": "bootloader.bin",
-          "url": "firmware/carro-0.4/bootloader.bin",
+          "url": "firmware/carro-0.5/bootloader.bin",
           "address": 4096,
           "size": 18960,
           "md5": "81da22449acfb2451d39eaa91ecd2570"
         },
         {
           "name": "partitions.bin",
-          "url": "firmware/carro-0.4/partitions.bin",
+          "url": "firmware/carro-0.5/partitions.bin",
           "address": 32768,
           "size": 3072,
-          "md5": "70007348574201233bc0cb17155e9d12"
+          "md5": "2ddc2d5f85b2c5288013adbe45d9cb7b"
         },
         {
           "name": "boot_app0.bin",
-          "url": "firmware/carro-0.4/boot_app0.bin",
+          "url": "firmware/carro-0.5/boot_app0.bin",
           "address": 57344,
           "size": 8192,
           "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "name": "app.bin",
-          "url": "firmware/carro-0.4/app.bin",
+          "url": "firmware/carro-0.5/app.bin",
           "address": 65536,
-          "size": 1507136,
-          "md5": "e116db1f171066863277d776c8ef796a"
+          "size": 1545200,
+          "md5": "e606751919e2819af6020ca689c0151b"
         }
       ]
     }
