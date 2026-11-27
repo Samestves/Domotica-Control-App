@@ -68,18 +68,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final c = context.c;
     final alerts = app.devices.map(app.session).where((s) => s.lastAlert != null).toList();
-    final connected = app.connectedCount;
 
     return AppScaffold(
       brand: const Brand(),
       title: 'Dispositivos',
-      subtitle: Row(children: [
-        StatusDot(color: connected > 0 ? c.green : c.text3),
-        const SizedBox(width: 9),
-        Eyebrow(connected == 0 ? 'Ninguno conectado' : '$connected de ${app.devices.length} conectados', color: connected > 0 ? c.green : c.text2),
-      ]),
       actions: [
         RoundButton(icon: Ic.settings, tooltip: 'Ajustes', size: 40, onTap: () => showSettingsSheet(context)),
       ],
@@ -94,12 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (app.devices.isEmpty) _EmptyState(onAdd: () => HomeScreen._add(context)),
             for (final d in app.devices) ...[_DeviceCard(device: d), const SizedBox(height: 12)],
             if (app.devices.isNotEmpty) _AddCard(onTap: () => HomeScreen._add(context)),
-            if (app.devices.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-                child: Text('Mantén presionada una tarjeta para ver sus opciones.',
-                    style: T.small.copyWith(color: c.text3), textAlign: TextAlign.center),
-              ),
+            const _CreditsLink(),
           ]),
         ),
       ],
@@ -117,60 +105,64 @@ class _DeviceCard extends StatelessWidget {
     final s = AppScope.of(context).session(device);
     final c = context.c;
     final k = connOf(s);
-    final detail = connDetail(s) ?? (k == Conn.connected ? _summary(s) : null);
+    final live = k == Conn.connected;
+    // Un error o la clave se explican en su propia línea; el resumen («2 luces encendidas») va junto al estado.
+    final problem = k == Conn.failed || k == Conn.needsClave ? connDetail(s) : null;
+    final summary = problem == null ? (connDetail(s) ?? (live ? _summary(s) : null)) : null;
 
     return Tap(
       onTap: () => HomeScreen.open(context, device),
       onLongPress: () => _showDeviceOptions(context, s),
       child: Panel(
-        padding: EdgeInsets.zero,
-        border: k == Conn.connected ? c.line2 : null,
+        padding: const EdgeInsets.fromLTRB(16, 14, 6, 16),
+        border: live ? c.line2 : null,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // Arriba: qué es. Toda la tarjeta abre el panel; la flecha solo lo indica.
-          Semantics(
-            button: true,
-            label: 'Abrir ${device.name}',
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
-              child: Row(children: [
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Icon(profileIcon(device.profile), size: 16, color: c.text2),
-                      const SizedBox(width: 8),
-                      Flexible(child: Eyebrow(device.subtitle)),
+          Row(children: [
+            Expanded(
+              child: Semantics(
+                button: true,
+                label: 'Abrir ${device.name}',
+                child: Row(children: [
+                  // El tipo de placa en su cuadro: se enciende cuando la placa está lista para usar.
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(color: live ? c.inverse : c.surface2, borderRadius: BorderRadius.circular(R.tile)),
+                    child: Icon(profileIcon(device.profile), size: 22, color: live ? c.onInverse : c.text2),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(device.name, style: T.heading, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 2),
+                      Text(device.subtitle, style: T.small.copyWith(color: c.text2), maxLines: 1, overflow: TextOverflow.ellipsis),
                     ]),
-                    const SizedBox(height: 8),
-                    Text(device.name, style: T.title.copyWith(fontSize: 24)),
-                  ]),
-                ),
-                const SizedBox(width: 12),
-                Icon(Ic.chevronRight, size: 20, color: k == Conn.connected ? c.text : c.text3),
-              ]),
-            ),
-          ),
-          const Hairline(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 12, 12, 12),
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  ConnectionTag(session: s),
-                  if (detail != null) ...[
-                    const SizedBox(height: 4),
-                    Text(detail, style: T.small.copyWith(color: k == Conn.failed ? c.red : c.text2)),
-                  ],
+                  ),
                 ]),
               ),
+            ),
+            MoreButton(label: 'Opciones de ${device.name}', onTap: () => _showDeviceOptions(context, s)),
+          ]),
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: Row(children: [
+              ConnectionTag(session: s),
               const SizedBox(width: 10),
+              Expanded(
+                child: summary == null
+                    ? const SizedBox.shrink()
+                    : Text(summary, style: T.small.copyWith(color: c.text2), maxLines: 2, overflow: TextOverflow.ellipsis),
+              ),
               ConnectionAction(session: s),
             ]),
           ),
-          // Mientras conecta, una línea fina corre por debajo.
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: s.busy ? ThinProgress(color: c.amber) : const SizedBox(height: 2),
-          ),
+          if (problem != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(2, 10, 10, 0),
+              child: Text(problem, style: T.small.copyWith(color: k == Conn.failed ? c.red : c.text2), maxLines: 3),
+            ),
         ]),
       ),
     );
@@ -188,6 +180,37 @@ class _DeviceCard extends StatelessWidget {
       if (s.values[CasaPins.armed] == '1') 'alarma armada',
     ];
     return parts.isEmpty ? 'Todo apagado y cerrado' : parts.join(' · ');
+  }
+}
+
+/// Al final del inicio: quién hizo la app, a un toque. Antes había que tocar tres veces el logo y nadie lo encontraba.
+class _CreditsLink extends StatelessWidget {
+  const _CreditsLink();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Padding(
+      padding: const EdgeInsets.only(top: 22),
+      child: Center(
+        child: Semantics(
+          button: true,
+          label: 'Ver los créditos del equipo',
+          excludeSemantics: true,
+          child: Tap(
+            onTap: () => showCredits(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Ic.team, size: 18, color: c.text3),
+                const SizedBox(width: 8),
+                Text('Hecho por el equipo · Ver créditos', style: T.small.copyWith(color: c.text3)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -304,8 +327,7 @@ class _SettingsSheet extends StatelessWidget {
         ),
         const SectionHeader('Avisos', padding: EdgeInsets.fromLTRB(4, 24, 4, 10)),
         RowGroup(
-          footer: 'La app revisa cada 12 horas, aunque esté cerrada, si hay una versión nueva de la app o de tus placas, '
-              'y avisa una vez por versión. En teléfonos Xiaomi, permite el «Inicio automático» de la app para que no se atrase.',
+          footer: 'Cada 12 horas, aunque la app esté cerrada. En Xiaomi, permite su «Inicio automático» para que no se atrase.',
           children: [
             ListRow(
               icon: Ic.bell,
@@ -336,6 +358,16 @@ class _SettingsSheet extends StatelessWidget {
             onTap: () {
               Navigator.pop(context);
               showAppSheet<void>(context, (_) => const _AboutSheet());
+            },
+          ),
+          ListRow(
+            icon: Ic.team,
+            title: 'Créditos',
+            detail: 'El equipo que hizo Control Domótica',
+            trailing: Icon(Ic.chevronRight, size: 18, color: context.c.text3),
+            onTap: () {
+              Navigator.pop(context);
+              showCredits(context);
             },
           ),
         ]),
@@ -392,6 +424,8 @@ class _AboutSheetState extends State<_AboutSheet> {
         const Text('Control Domótica', style: T.title),
         const SizedBox(height: 6),
         Eyebrow('Versión $appVersion · compilación $appBuild'),
+        const SizedBox(height: 16),
+        PillButton('Ver créditos', icon: Ic.team, kind: PillKind.ghost, onTap: () => showCredits(context)),
         const SizedBox(height: 22),
         RowGroup(children: [
           ListRow(icon: Ic.house, title: 'Casa domótica', detail: 'Luces, puertas, persianas, alarma y voz'),
@@ -442,7 +476,7 @@ void _showDeviceOptions(BuildContext context, Session s) {
               },
             ),
             // Qué programa tiene la placa (lo dice al conectarse desde casa-0.9 y carro-0.5) y si hay uno más nuevo.
-            if (d.transport != Transport.demo) _firmwareRow(context, sheet, d),
+            if (d.transport != Transport.demo) _firmwareRow(context, sheet, s),
             ListRow(
               icon: Ic.edit,
               title: 'Cambiar nombre',
@@ -484,14 +518,17 @@ void _showDeviceOptions(BuildContext context, Session s) {
   });
 }
 
-Widget _firmwareRow(BuildContext context, BuildContext sheet, SavedDevice d) {
+Widget _firmwareRow(BuildContext context, BuildContext sheet, Session s) {
   final c = sheet.c;
+  final d = s.device;
   final update = AppScope.read(context).boardUpdate(d);
   return ListRow(
     icon: Ic.board,
     title: 'Programa de la placa',
     detail: switch ((d.firmware, update)) {
-      (null, _) => 'Se ve al conectarse, desde casa-0.9 y carro-0.5',
+      // Conectada y sin decir su versión: tiene un programa anterior a casa-0.9 o carro-0.5.
+      (null, _) when s.connected => 'Versión anterior: se actualiza con la página del instalador',
+      (null, _) => 'Se ve al conectarse',
       (final mine?, null) => '$mine · al día',
       (final mine?, final r?) => '$mine · hay ${r.version}',
     },

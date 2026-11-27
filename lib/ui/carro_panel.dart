@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/pantalla.dart';
 import '../core/protocol.dart';
 import '../main.dart';
 import '../models/controls.dart';
@@ -60,6 +61,7 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _keepAlive = Timer.periodic(CarPins.keepAlive, (_) => _repeat());
+    Pantalla.encendida(true); // si la pantalla se apagara manejando, el carrito frenaría
   }
 
   /// Si se corta la conexión, el acelerador y el joystick vuelven a cero: al reconectar, el carro
@@ -128,6 +130,7 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     scheduleMicrotask(() => _neutral(s));
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    Pantalla.encendida(false);
     super.dispose();
   }
 
@@ -206,9 +209,8 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Eyebrow(widget.device.subtitle, maxLines: 1),
-                          const SizedBox(height: 2),
                           Text(widget.device.name, style: T.callout, maxLines: 2),
+                          if (on) ...[const SizedBox(height: 5), ConnectionTag(session: s)],
                         ]),
                       ),
                       RoundButton(icon: Ic.wheels, tooltip: 'Ruedas', size: 40, onTap: () => showCarroAjustes(context, s)),
@@ -234,8 +236,12 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
                 // Centro: estado, telemetría, torreta y mensajes
                 Expanded(
                   child: Column(children: [
-                    Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
-                    const SizedBox(height: 10),
+                    // Conectado, el estado va bajo el nombre; esta tarjeta solo aparece cuando hay algo que hacer
+                    // (conectar, reintentar, la clave).
+                    if (!on) ...[
+                      Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
+                      const SizedBox(height: 10),
+                    ],
                     // La velocidad ya la muestra el acelerador y la dirección el joystick: aquí solo lo que
                     // el conductor no ve desde lejos, la distancia al obstáculo.
                     _ObstacleBar(distance: dist),
@@ -268,7 +274,12 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
                           ),
                           const SizedBox(width: 10),
                         ],
-                        Expanded(child: _MiniLog(session: s)),
+                        // Lo técnico (los mensajes con la placa) solo en el modo técnico: manejando importa qué hace.
+                        Expanded(
+                          child: AppScope.of(context).showPins
+                              ? _MiniLog(session: s)
+                              : _DriveStatus(session: s, x: _jx, y: _jy, throttle: _throttle, reverse: reverse),
+                        ),
                       ]),
                     ),
                   ]),
@@ -433,6 +444,62 @@ class _DriveButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Qué hace el carrito, en grande, para verlo de reojo: «Adelante · 60 %», «Girando a la izquierda», «Quieto».
+/// Si la placa acaba de avisar algo («otro teléfono está manejando»), se muestra eso unos segundos.
+class _DriveStatus extends StatelessWidget {
+  final Session session;
+  final int x, y, throttle;
+  final bool reverse;
+  const _DriveStatus({required this.session, required this.x, required this.y, required this.throttle, required this.reverse});
+
+  static const _noticeFor = Duration(seconds: 6);
+
+  /// Último aviso de la placa, si es reciente: «ERR:otro telefono…» → «Otro telefono…».
+  String? _notice() {
+    for (final l in session.log) {
+      if (DateTime.now().difference(l.at) > _noticeFor) return null;
+      // Lo del saludo con la clave (una placa vieja responde «ERR:no entiendo AUTH») no le sirve al conductor.
+      if (l.incoming && l.text.startsWith('ERR:') && l.text.length > 4 && !l.text.contains('AUTH')) {
+        final t = l.text.substring(4);
+        return t[0].toUpperCase() + t.substring(1);
+      }
+    }
+    return null;
+  }
+
+  String _motion() {
+    if (!session.connected) return 'Sin conexión';
+    if (x.abs() > 20 && x.abs() >= y.abs()) return x > 0 ? 'Girando a la derecha' : 'Girando a la izquierda';
+    if (y > 10) return 'Adelante · $y %';
+    if (y < -10) return 'Atrás · ${-y} %';
+    if (throttle > 0) return reverse ? 'Reversa · $throttle %' : 'Adelante · $throttle %';
+    return 'Quieto';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final notice = _notice();
+    return Panel(
+      padding: const EdgeInsets.fromLTRB(18, 12, 14, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+        if (notice != null) ...[
+          Icon(Ic.warning, size: 22, color: c.amber),
+          const SizedBox(height: 8),
+          Text(notice, style: T.body.copyWith(color: c.text), maxLines: 3, overflow: TextOverflow.ellipsis),
+        ] else ...[
+          Text('Ahora', style: T.small.copyWith(color: c.text3)),
+          const SizedBox(height: 4),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            child: Text(_motion(), key: ValueKey(_motion()), style: T.title, maxLines: 2),
+          ),
+        ],
+      ]),
     );
   }
 }

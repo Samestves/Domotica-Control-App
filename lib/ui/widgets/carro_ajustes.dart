@@ -8,6 +8,7 @@ import '../../state/app_state.dart';
 import '../theme.dart';
 import 'clave.dart';
 import 'kit.dart';
+import 'status.dart';
 
 /// Ruedas en el orden del programa del carrito: DI, TI, DD, TD.
 const _wheelNames = ['Delantera izq.', 'Trasera izq.', 'Delantera der.', 'Trasera der.'];
@@ -117,9 +118,9 @@ class _CarroAjustesState extends State<_CarroAjustes> {
                 padding: const EdgeInsets.only(top: 10),
                 child: Text('Conecta el carrito para probar e invertir las ruedas.', style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
               ),
-            if (on && _s.keyed) ...[
-              const SizedBox(height: 18),
-              RowGroup(children: [
+            const SizedBox(height: 18),
+            RowGroup(children: [
+              if (on && _s.keyed)
                 ListRow(
                   icon: Ic.lock,
                   title: 'Cambiar la clave',
@@ -129,8 +130,16 @@ class _CarroAjustesState extends State<_CarroAjustes> {
                     showChangeClaveSheet(context, _s);
                   },
                 ),
-              ]),
-            ],
+              // Desconectar vive aquí y no en el panel: es lo que menos se usa al manejar.
+              ListRow(
+                icon: connectionMenuItem(_s).$1,
+                title: connectionMenuItem(_s).$2,
+                onTap: () {
+                  Navigator.pop(context);
+                  toggleConnection(_s);
+                },
+              ),
+            ]),
           ]),
         );
       },

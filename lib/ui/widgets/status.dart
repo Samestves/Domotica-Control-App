@@ -28,8 +28,8 @@ Color connColor(Palette c, Conn k) => switch (k) {
 String connLabel(Conn k) => switch (k) {
       Conn.connected => 'Conectado',
       Conn.needsClave => 'Falta la clave',
-      Conn.connecting => 'Conectando',
-      Conn.reconnecting => 'Reconectando',
+      Conn.connecting => 'Conectando…',
+      Conn.reconnecting => 'Reconectando…',
       Conn.failed => 'Sin conexión',
       Conn.off => 'Desconectado',
     };
@@ -45,7 +45,34 @@ IconData transportIcon(Transport t) => switch (t) {
       Transport.demo => Ic.demo,
     };
 
-/// «● CONECTADO»: el estado en mayúsculas con su punto de color.
+/// Un estado en una pastilla suave: lo dice el texto, el color solo acompaña. Mientras algo está en marcha
+/// (conectando), un círculo pequeño gira a su lado.
+class StatusPill extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool busy;
+  const StatusPill({super.key, required this.label, required this.color, this.busy = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      padding: EdgeInsets.fromLTRB(busy ? 8 : 11, 5, 11, 6),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(999)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (busy) ...[
+          SizedBox(width: 11, height: 11, child: CircularProgressIndicator(strokeWidth: 1.5, color: color)),
+          const SizedBox(width: 7),
+        ],
+        Flexible(
+          child: Text(label, style: T.small.copyWith(color: color, fontWeight: FontWeight.w700, height: 1.1), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      ]),
+    );
+  }
+}
+
+/// El estado de la conexión de una placa, en su pastilla: «Conectado», «Conectando…», «Sin conexión».
 class ConnectionTag extends StatelessWidget {
   final Session session;
   const ConnectionTag({super.key, required this.session});
@@ -53,12 +80,7 @@ class ConnectionTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final k = connOf(session);
-    final color = connColor(context.c, k);
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      StatusDot(color: color, pulse: k == Conn.connecting || k == Conn.reconnecting),
-      const SizedBox(width: 9),
-      Flexible(child: Eyebrow(connLabel(k), color: color)),
-    ]);
+    return StatusPill(label: connLabel(k), color: connColor(context.c, k), busy: k == Conn.connecting || k == Conn.reconnecting);
   }
 }
 
@@ -70,7 +92,8 @@ String? connDetail(Session s) => switch (connOf(s)) {
       _ => null,
     };
 
-/// El botón que corresponde al estado: siempre hay uno, para no quedar atrapado «conectando».
+/// El botón que corresponde al estado mientras no está conectada: Conectar, Cancelar o Reintentar (nunca se queda
+/// atrapada «conectando»). Conectada no hace falta uno: «Desconectar» es lo que menos se usa y vive en el menú «⋯».
 class ConnectionAction extends StatelessWidget {
   final Session session;
   final bool small;
@@ -80,13 +103,20 @@ class ConnectionAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = session;
     return switch (connOf(s)) {
-      Conn.connected || Conn.needsClave => PillButton('Desconectar', kind: PillKind.secondary, small: small, onTap: s.disconnect),
+      Conn.connected || Conn.needsClave => const SizedBox.shrink(),
       Conn.connecting || Conn.reconnecting => PillButton('Cancelar', kind: PillKind.secondary, small: small, onTap: s.disconnect),
       Conn.failed => PillButton('Reintentar', small: small, onTap: s.connect),
       Conn.off => PillButton('Conectar', small: small, onTap: s.connect),
     };
   }
 }
+
+/// Conectar o desconectar, según el estado: para los menús «⋯».
+(IconData, String) connectionMenuItem(Session s) => s.linked || s.busy
+    ? (Ic.unlink, s.linked ? 'Desconectar' : 'Cancelar la conexión')
+    : (Ic.link, 'Conectar');
+
+void toggleConnection(Session s) => s.linked || s.busy ? s.disconnect() : s.connect();
 
 /// Estado y botón juntos, con la explicación debajo. Va bajo el título de cada panel.
 class ConnectionBar extends StatelessWidget {

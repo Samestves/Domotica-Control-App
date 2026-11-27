@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../version.dart';
 import '../theme.dart';
 import 'kit.dart';
+import 'status.dart';
 
 /// Hoja «Qué hay de nuevo». Sale sola una vez al abrir la app después de actualizar ([justUpdated]),
 /// y se puede volver a ver en Ajustes → Acerca de.
@@ -22,15 +23,10 @@ class NewsSheet extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              if (justUpdated) ...[StatusDot(color: c.green), const SizedBox(width: 9)],
-              Flexible(
-                child: Eyebrow(
-                  justUpdated ? 'Actualizada a $appVersion' : '$appVersion · compilación $appBuild',
-                  color: justUpdated ? c.green : null,
-                ),
-              ),
-            ]),
+            if (justUpdated)
+              StatusPill(label: 'Actualizada a $appVersion', color: c.green)
+            else
+              Eyebrow('$appVersion · compilación $appBuild'),
             const SizedBox(height: 8),
             const Text('Qué hay de nuevo', style: T.title),
             if (justUpdated) ...[

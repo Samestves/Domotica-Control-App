@@ -61,14 +61,12 @@ Widget _popIn(Widget child, Animation<double> a) => ScaleTransition(
     );
 
 /// Indicador pequeño en la esquina: girando mientras espera a la placa, aviso si no respondió.
-Widget _confirmMark(Session s, int pin, Color color, Palette c, {required bool on}) {
+Widget _confirmMark(Session s, int pin, Color color, Palette c) {
   final Widget child;
   if (s.pending.contains(pin)) {
     child = SizedBox(key: const ValueKey('wait'), width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 1.5, color: color));
   } else if (s.unconfirmed.contains(pin)) {
     child = Icon(Ic.warning, key: const ValueKey('fail'), size: 18, color: c.red);
-  } else if (on) {
-    child = StatusDot(key: const ValueKey('on'), color: color, size: 6);
   } else {
     child = const SizedBox(key: ValueKey('off'), width: 14, height: 14);
   }
@@ -288,8 +286,10 @@ class RoomCard extends StatelessWidget {
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(room, style: T.heading.copyWith(fontSize: 17)),
-                    const SizedBox(height: 3),
-                    Text(_summary(), style: T.small.copyWith(color: anyOn ? c.text2 : c.text3)),
+                    if (_summary() case final summary?) ...[
+                      const SizedBox(height: 3),
+                      Text(summary, style: T.small.copyWith(color: c.text2)),
+                    ],
                   ]),
                 ),
                 if (!expanded)
@@ -335,8 +335,8 @@ class RoomCard extends StatelessWidget {
     );
   }
 
-  /// «Luz encendida · puerta cerrada», o «Todo apagado».
-  String _summary() {
+  /// «Luz encendida · puerta abierta». Con todo apagado y cerrado no dice nada: solo se nombra lo que cambia.
+  String? _summary() {
     final controls = casaControls.where((x) => x.room == room && x.isEnabledOn(session.device)).toList();
     final parts = <String>[];
     final lights = controls.where((x) => x.kind == ControlKind.light).toList();
@@ -348,7 +348,7 @@ class RoomCard extends StatelessWidget {
     for (final b in controls.where((x) => x.kind == ControlKind.blind && isOn(session, x))) {
       parts.add('${b.label} ${blindPercent(session, b)} %');
     }
-    if (parts.isEmpty) return controls.isEmpty ? 'Sin piezas conectadas' : 'Todo apagado';
+    if (parts.isEmpty) return controls.isEmpty ? 'Sin piezas conectadas' : null;
     return parts.join(' · ');
   }
 }
@@ -446,13 +446,13 @@ class ControlTile extends StatelessWidget {
                     _swapIcon(controlIcon(spec, on: on), 26, on ? look.fg : c.text2),
                     const SizedBox(width: 14),
                     Expanded(child: _words(c, look.fg, on: on, failed: failed)),
-                    _confirmMark(session, spec.vpin, on ? look.fg : c.text, c, on: false),
+                    _confirmMark(session, spec.vpin, on ? look.fg : c.text, c),
                   ])
                 : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
                       _swapIcon(controlIcon(spec, on: on), 26, on ? look.fg : c.text2),
                       const Spacer(),
-                      _confirmMark(session, spec.vpin, on ? look.fg : c.text, c, on: false),
+                      _confirmMark(session, spec.vpin, on ? look.fg : c.text, c),
                     ]),
                     const SizedBox(height: 18),
                     _words(c, look.fg, on: on, failed: failed),
@@ -547,7 +547,7 @@ class _BlindControlState extends State<BlindControl> {
                   if (widget.showPins) ...[const SizedBox(height: 4), Text(pinLabel(_s.device, _spec), style: T.small.copyWith(fontSize: 11.5, color: c.text3))],
                 ]),
               ),
-              _confirmMark(_s, _spec.vpin, c.text, c, on: false),
+              _confirmMark(_s, _spec.vpin, c.text, c),
               const SizedBox(width: 8),
               Text('$percent %', style: T.stat.copyWith(fontSize: 24, color: open ? c.text : c.text3)),
             ]),

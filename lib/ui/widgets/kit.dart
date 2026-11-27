@@ -43,6 +43,10 @@ class Ic {
   static const micFill = IconData(0xe326, fontFamily: 'PhosphorFill') /* microphone */;
   static const stop = IconData(0xe46c, fontFamily: 'PhosphorFill') /* stop */;
   static const bell = IconData(0xe5e8, fontFamily: 'PhosphorLight') /* bellRinging */;
+  static const team = IconData(0xe68e, fontFamily: 'PhosphorLight') /* usersThree */;
+  static const night = IconData(0xe58e, fontFamily: 'PhosphorLight') /* moonStars */;
+  static const leave = IconData(0xe42a, fontFamily: 'PhosphorLight') /* signOut */;
+  static const arrive = IconData(0xe2c4, fontFamily: 'PhosphorLight') /* houseLine */;
 
   // Casa
   static const light = IconData(0xe2dc, fontFamily: 'PhosphorLight') /* lightbulb */;
@@ -78,6 +82,29 @@ class Ic {
   static const distance = IconData(0xe1d6, fontFamily: 'PhosphorLight') /* crosshair */;
   static const steering = IconData(0xe9ac, fontFamily: 'PhosphorLight') /* steeringWheel */;
   static const wheels = IconData(0xe434, fontFamily: 'PhosphorLight') /* slidersHorizontal */;
+}
+
+/// «⋯»: abre las opciones de algo. Sin borde, para que no compita con lo principal; [label] es su nombre para el
+/// lector de pantalla.
+class MoreButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const MoreButton({super.key, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: label,
+        child: Semantics(
+          button: true,
+          label: label,
+          excludeSemantics: true,
+          child: Tap(
+            onTap: onTap,
+            scale: 0.9,
+            child: SizedBox(width: 40, height: 40, child: Center(child: Icon(Ic.more, size: 22, color: context.c.text2))),
+          ),
+        ),
+      );
 }
 
 /// Se atenúa y se encoge apenas al tocarlo.

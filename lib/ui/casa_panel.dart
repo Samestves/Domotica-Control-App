@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/pantalla.dart';
 import '../main.dart';
 import '../models/controls.dart';
 import '../models/device.dart';
@@ -41,10 +42,12 @@ class _CasaPanelState extends State<CasaPanel> {
     super.initState();
     // El micrófono se prepara al entrar, así la primera orden no espera.
     WidgetsBinding.instance.addPostFrameCallback((_) => _voice.warmUp());
+    Pantalla.encendida(true);
   }
 
   @override
   void dispose() {
+    Pantalla.encendida(false);
     _voice.dispose();
     super.dispose();
   }
@@ -65,7 +68,6 @@ class _CasaPanelState extends State<CasaPanel> {
     _maybeAlert(s);
 
     return AppScaffold(
-      eyebrow: widget.device.subtitle,
       title: widget.device.name,
       subtitle: ConnectionBar(session: s),
       actions: [_Menu(session: s, showPins: showPins, onShowPins: app.setShowPins)],
@@ -77,6 +79,8 @@ class _CasaPanelState extends State<CasaPanel> {
             children: showsClaveCard(s)
                 ? [ClaveCard(session: s)]
                 : [
+                    _Scenes(session: s, voice: _voice),
+                    const SizedBox(height: 12),
                     Panel(padding: EdgeInsets.zero, child: AllLightsRow(session: s)),
                     const SizedBox(height: 12),
                     SecurityCard(session: s),
@@ -94,16 +98,17 @@ class _CasaPanelState extends State<CasaPanel> {
                       RoomCard(session: s, room: room, expanded: _open.contains(room), onToggle: () => _toggleRoom(room), showPins: showPins),
                       const SizedBox(height: 10),
                     ],
-                    // Lo técnico (los mensajes con la placa) solo en el modo técnico: el panel queda para usar la casa.
+                    // Lo técnico (los mensajes con la placa y cómo cambiar pines) solo en el modo técnico: el panel queda
+                    // para usar la casa.
                     if (showPins) ...[
                       const SectionHeader('Registro'),
                       MessageConsole(session: s),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: Text('Mantén presionado un control para cambiar su pin, invertirlo o marcarlo como no conectado.',
+                            style: T.small.copyWith(color: c.text3), textAlign: TextAlign.center),
+                      ),
                     ],
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                      child: Text('Mantén presionado un control para cambiar su pin, invertirlo o marcarlo como no conectado.',
-                          style: T.small.copyWith(color: c.text3), textAlign: TextAlign.center),
-                    ),
                   ],
           ),
         ),
@@ -124,6 +129,61 @@ class _CasaPanelState extends State<CasaPanel> {
       HapticFeedback.heavyImpact();
       SystemSound.play(SystemSoundType.alert);
     });
+  }
+}
+
+/// Escenas: lo mismo que decir «buenas noches», «me voy» o «ya llegué», en un toque. Pasan por la voz, así que el
+/// resultado se confirma igual (la barra de abajo dice si la casa lo hizo) y la lógica es una sola.
+class _Scenes extends StatelessWidget {
+  final Session session;
+  final VoiceController voice;
+  const _Scenes({required this.session, required this.voice});
+
+  static const _all = [
+    (Ic.night, 'Buenas noches', 'buenas noches'),
+    (Ic.leave, 'Me voy', 'me voy'),
+    (Ic.arrive, 'Ya llegué', 'ya llegué'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final on = session.connected;
+    // Mismo alto para las tres aunque «Buenas noches» ocupe dos líneas en un teléfono angosto.
+    return IntrinsicHeight(
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        for (final (i, (icon, label, phrase)) in _all.indexed) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(
+            child: Semantics(
+              button: true,
+              enabled: on,
+              label: 'Escena $label',
+              excludeSemantics: true,
+              child: Tap(
+                onTap: on
+                    ? () {
+                        HapticFeedback.lightImpact();
+                        voice.handle(session, phrase);
+                      }
+                    : null,
+                child: Opacity(
+                  opacity: on ? 1 : 0.38,
+                  child: Panel(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(icon, size: 24, color: c.text),
+                      const SizedBox(height: 10),
+                      Text(label, style: T.callout, maxLines: 2),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ]),
+    );
   }
 }
 
@@ -150,18 +210,23 @@ class _Menu extends StatelessWidget {
       tooltip: 'Más opciones',
       offset: const Offset(0, 50),
       onSelected: (k) => switch (k) {
+        'conexion' => toggleConnection(session),
         'pins' => onShowPins(!showPins),
         'test' => session.sendRaw('TEST'),
         'sync' => session.sendRaw('SYNC'),
         'clave' => showChangeClaveSheet(context, session),
         _ => null,
       },
-      itemBuilder: (_) => [
-        item('pins', Ic.pins, showPins ? 'Ocultar pines' : 'Mostrar pines'),
-        item('test', Ic.play, 'Probar salidas una por una', enabled: session.connected),
-        item('sync', Ic.sync, 'Leer estado de la placa', enabled: session.connected),
-        if (session.connected && session.keyed) item('clave', Ic.lock, 'Cambiar la clave'),
-      ],
+      itemBuilder: (_) {
+        final (icon, label) = connectionMenuItem(session);
+        return [
+          item('conexion', icon, label),
+          item('pins', Ic.pins, showPins ? 'Ocultar pines' : 'Mostrar pines'),
+          item('test', Ic.play, 'Probar salidas una por una', enabled: session.connected),
+          item('sync', Ic.sync, 'Leer estado de la placa', enabled: session.connected),
+          if (session.connected && session.keyed) item('clave', Ic.lock, 'Cambiar la clave'),
+        ];
+      },
       child: const IgnorePointer(child: RoundButton(icon: Ic.more, tooltip: 'Más opciones', size: 40)),
     );
   }

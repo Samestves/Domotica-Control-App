@@ -11,11 +11,11 @@ import 'package:control_domotica/models/controls.dart';
 import 'package:control_domotica/models/device.dart';
 import 'package:control_domotica/state/app_state.dart';
 import 'package:control_domotica/ui/carro_panel.dart';
+import 'package:control_domotica/ui/casa_panel.dart';
 import 'package:control_domotica/ui/credits_screen.dart';
 import 'package:control_domotica/ui/widgets/carro_ajustes.dart';
 import 'package:control_domotica/ui/widgets/casa_tiles.dart';
 import 'package:control_domotica/ui/widgets/drive_controls.dart';
-import 'package:control_domotica/ui/widgets/kit.dart';
 import 'package:control_domotica/ui/widgets/status.dart';
 import 'package:control_domotica/version.dart';
 import 'package:flutter/material.dart';
@@ -371,7 +371,7 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(find.text('Qué hay de nuevo'), findsOneWidget);
       expect(find.text(appNews.first), findsOneWidget);
-      expect(find.text('Actualizada a $appVersion'.toUpperCase()), findsOneWidget);
+      expect(find.text('Actualizada a $appVersion'), findsOneWidget);
 
       await t.tap(find.text('ENTENDIDO'));
       await t.pump();
@@ -616,6 +616,30 @@ void main() {
     int throttleSent(List<String> lines) =>
         lines.where((l) => l.startsWith('V${CarPins.throttle}:')).map((l) => int.parse(l.split(':')[1])).fold(0, (a, b) => a > b ? a : b);
 
+    testWidgets('manejando muestra qué hace el carrito, no el registro técnico', (t) async {
+      final (_, s, _) = await openPanel(t);
+      expect(find.text('Quieto'), findsOneWidget);
+      expect(find.text('Sin mensajes'), findsNothing, reason: 'el registro solo se ve en el modo técnico');
+
+      await t.drag(find.byType(Throttle), const Offset(0, -80));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('Adelante ·'), findsOneWidget);
+      await close(t, s);
+    });
+
+    testWidgets('«Desconectar» está en los ajustes del carrito, no en el panel', (t) async {
+      final (_, s, _) = await openPanel(t);
+      expect(find.text('DESCONECTAR'), findsNothing);
+      await t.tap(find.byTooltip('Ruedas'));
+      await t.pump(const Duration(milliseconds: 600));
+      await t.ensureVisible(find.text('Desconectar'));
+      await t.pump(const Duration(milliseconds: 300));
+      await t.tap(find.text('Desconectar'));
+      await t.pump(const Duration(milliseconds: 600));
+      expect(s.linked, isFalse);
+      await close(t, s);
+    });
+
     testWidgets('al reconectar no arranca solo con el acelerador que tenía antes del corte', (t) async {
       final (_, s, links) = await openPanel(t);
       expect(links.single.sent, containsAll(['V${CarPins.joystick}:0,0', 'V${CarPins.throttle}:0']),
@@ -802,8 +826,11 @@ void main() {
     expect(find.text('Agregar dispositivo'), findsOneWidget, reason: 'un solo lugar para agregar, al final de la lista');
     expect(find.byTooltip('Agregar dispositivo'), findsNothing, reason: 'arriba solo queda Ajustes');
     expect(find.byTooltip('Ajustes'), findsOneWidget);
-    expect(find.byIcon(Ic.chevronRight), findsNWidgets(2), reason: 'cada tarjeta muestra que se puede abrir');
-    expect(find.text('Mantén presionada una tarjeta para ver sus opciones.'), findsOneWidget);
+    expect(find.byTooltip('Opciones de Casa (demo)'), findsOneWidget, reason: 'las opciones se ven, no hay que adivinar que se mantiene presionado');
+    expect(find.byTooltip('Opciones de Auto Robot (demo)'), findsOneWidget);
+    expect(find.text('Mantén presionada una tarjeta para ver sus opciones.'), findsNothing, reason: 'con «⋯» a la vista ya no hace falta explicarlo');
+    expect(find.text('Hecho por el equipo · Ver créditos'), findsOneWidget, reason: 'los créditos se encuentran sin trucos');
+    expect(find.text('DESCONECTAR'), findsNothing, reason: 'desconectado no se ofrece desconectar');
     expect(find.text('CONECTAR'), findsWidgets, reason: 'cada placa desconectada tiene su botón');
   });
 
@@ -828,6 +855,34 @@ void main() {
     expect(find.text('casa-0.9'), findsOneWidget, reason: 'la hoja muestra la versión nueva');
     expect(find.textContaining('tiene casa-0.8'), findsOneWidget);
     expect(find.text('INSTALAR · 1,5 MB'), findsOneWidget);
+  });
+
+  testWidgets('las escenas de la casa mandan lo mismo que decirlas: «Buenas noches» cierra, apaga y arma', (t) async {
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(800, 1600);
+    addTearDown(t.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final links = <_RecLink>[];
+    final app = AppState(linkFor: (_) => (links..add(_RecLink())).last);
+    await app.load();
+    final casa = app.devices.firstWhere((d) => d.profile == Profile.casa);
+    final s = app.session(casa);
+    await s.connect();
+    await t.pump(const Duration(milliseconds: 100));
+    expect(s.connected, isTrue);
+    await t.pumpWidget(ControlApp(state: app, home: CasaPanel(device: casa)));
+    await t.pump(const Duration(milliseconds: 300));
+    expect(find.text('DESCONECTAR'), findsNothing, reason: 'desconectar vive en el menú «⋯»');
+
+    await t.tap(find.bySemanticsLabel('Escena Buenas noches'));
+    await t.pump(const Duration(milliseconds: 100));
+    final sent = links.single.sent;
+    expect(sent, containsAll(['V${CasaPins.allLights}:0', 'V${CasaPins.armed}:1', 'V${CasaPins.mainDoor}:0']));
+
+    await t.pump(const Duration(seconds: 3)); // la barra de voz espera la confirmación y avisa que no llegó
+    await t.pumpWidget(const SizedBox());
+    await s.disconnect();
+    await t.pump(const Duration(seconds: 1));
   });
 
   testWidgets('«Cambiar la clave» está en las opciones del dispositivo y espera a que la casa confirme', (t) async {
