@@ -6,40 +6,40 @@
       "name": "Casa domótica",
       "short": "La casa",
       "icon": "house-simple",
-      "version": "casa-1.0",
+      "version": "casa-1.1",
       "notes": [
-        "Cada servo se suelta un segundo después de moverse: ya no se queda empujando ni gastando corriente.",
-        "Si el módulo de los servos se reinicia, la placa lo prepara de nuevo sola.",
+        "Invertir una puerta cambia abrir por cerrar en su mismo recorrido: ya no empuja contra la pared.",
+        "Cada servo se suelta un segundo después de moverse, y si el módulo de los servos se reinicia, la placa lo prepara de nuevo sola.",
         "Se actualiza por Wi-Fi desde la app y conserva la clave y los ajustes que ya tenía la placa."
       ],
       "files": [
         {
           "name": "bootloader.bin",
-          "url": "firmware/casa-1.0/bootloader.bin",
+          "url": "firmware/casa-1.1/bootloader.bin",
           "address": 4096,
           "size": 18960,
           "md5": "81da22449acfb2451d39eaa91ecd2570"
         },
         {
           "name": "partitions.bin",
-          "url": "firmware/casa-1.0/partitions.bin",
+          "url": "firmware/casa-1.1/partitions.bin",
           "address": 32768,
           "size": 3072,
           "md5": "2ddc2d5f85b2c5288013adbe45d9cb7b"
         },
         {
           "name": "boot_app0.bin",
-          "url": "firmware/casa-1.0/boot_app0.bin",
+          "url": "firmware/casa-1.1/boot_app0.bin",
           "address": 57344,
           "size": 8192,
           "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "name": "app.bin",
-          "url": "firmware/casa-1.0/app.bin",
+          "url": "firmware/casa-1.1/app.bin",
           "address": 65536,
           "size": 1519952,
-          "md5": "2151bcf5a4161c04c23d51c246be87d9"
+          "md5": "40265a5580cecc484fb30a2d45b8e43c"
         }
       ]
     },
@@ -48,40 +48,40 @@
       "name": "Auto Robot",
       "short": "El carrito",
       "icon": "car-profile",
-      "version": "carro-0.5",
+      "version": "carro-0.6",
       "notes": [
-        "Cara en una pantalla OLED de 0,96\" (SDA 21, SCL 22). Sin pantalla funciona igual.",
-        "Desde esta versión se actualiza por Wi-Fi desde la app 0.9.6: esta es la última vez por cable.",
-        "Conserva la clave y los ajustes. Si el sensor estaba en el GPIO 21, muévelo al 15 para usar la pantalla."
+        "El robot que escribe: dos motores paso a paso, el marcador que sube y baja, y escribe lo que le mandas desde la app 0.9.9.",
+        "Un ojo en cada pantalla (izquierdo SDA 21 · SCL 22, derecho SDA 23 · SCL 4). Sin pantallas funciona igual.",
+        "Se actualiza por Wi-Fi desde la app y conserva la clave. Los pines son los nuevos del robot (ver la guía)."
       ],
       "files": [
         {
           "name": "bootloader.bin",
-          "url": "firmware/carro-0.5/bootloader.bin",
+          "url": "firmware/carro-0.6/bootloader.bin",
           "address": 4096,
           "size": 18960,
           "md5": "81da22449acfb2451d39eaa91ecd2570"
         },
         {
           "name": "partitions.bin",
-          "url": "firmware/carro-0.5/partitions.bin",
+          "url": "firmware/carro-0.6/partitions.bin",
           "address": 32768,
           "size": 3072,
           "md5": "2ddc2d5f85b2c5288013adbe45d9cb7b"
         },
         {
           "name": "boot_app0.bin",
-          "url": "firmware/carro-0.5/boot_app0.bin",
+          "url": "firmware/carro-0.6/boot_app0.bin",
           "address": 57344,
           "size": 8192,
           "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "name": "app.bin",
-          "url": "firmware/carro-0.5/app.bin",
+          "url": "firmware/carro-0.6/app.bin",
           "address": 65536,
-          "size": 1545200,
-          "md5": "e606751919e2819af6020ca689c0151b"
+          "size": 1549952,
+          "md5": "aafa52f46107adacceb279264ea8c073"
         }
       ]
     }
