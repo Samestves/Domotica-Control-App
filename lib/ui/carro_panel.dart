@@ -14,6 +14,7 @@ import 'widgets/carro_ajustes.dart';
 import 'widgets/clave.dart';
 import 'widgets/drive_controls.dart';
 import 'widgets/kit.dart';
+import 'widgets/robot_tiles.dart';
 import 'widgets/status.dart';
 
 /// Panel de manejo en horizontal, como un control remoto.
@@ -150,15 +151,52 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     s.send(CarPins.joystick, '0,0');
   }
 
+  /// Parar todo (el robot): la escritura, las ruedas y la prueba. Vale desde cualquier teléfono.
+  void _stopAll(Session s) {
+    HapticFeedback.heavyImpact();
+    setState(_zeroControls);
+    s.sendRaw('PARAR');
+    s.send(CarPins.joystick, '0,0');
+  }
+
+  Widget _header(BuildContext context, Session s, {required String settings}) => Row(children: [
+        RoundButton(icon: Ic.back, tooltip: 'Volver', size: 40, onTap: () => Navigator.pop(context)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(widget.device.name, style: T.callout, maxLines: 2),
+            if (s.connected) ...[const SizedBox(height: 5), ConnectionTag(session: s)],
+          ]),
+        ),
+        RoundButton(icon: Ic.wheels, tooltip: settings, size: 40, onTap: () => showCarroAjustes(context, s)),
+      ]);
+
+  Widget _joystick(Session s, double size, {required bool enabled}) => Joystick(
+        size: size,
+        enabled: enabled,
+        onChanged: (x, y) {
+          setState(() {
+            _jx = x;
+            _jy = y;
+          });
+          _sendThrottled(s, CarPins.joystick, '$x,$y', force: x == 0 && y == 0);
+        },
+      );
+
+  /// Conectado, el estado va bajo el nombre; esta tarjeta solo aparece cuando hay algo que hacer
+  /// (conectar, reintentar, la clave). Siempre ocupa su lugar (vacío si no hace falta): así lo de abajo
+  /// no cambia de posición y no pierde lo que tenía (por ejemplo, el texto a medio escribir).
+  Widget _connectionCard(Session s) => s.connected
+      ? const SizedBox.shrink()
+      : Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
+        );
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final s = AppScope.of(context).session(widget.device);
-    final on = s.connected;
-    final dist = int.tryParse(s.values[CarPins.distance] ?? '');
-    // Reversa y luces: lo que dice la placa (las recuerda aunque se salga del panel).
-    final reverse = s.values[CarPins.reverse] == '1';
-    final lights = s.values[CarPins.lights] == '1';
     final overlay = (c.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark).copyWith(statusBarColor: Colors.transparent);
 
     // El carrito (desde carro-0.4) pide clave como la casa: hasta tenerla, se muestra la tarjeta.
@@ -193,150 +231,189 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
       child: Scaffold(
         backgroundColor: c.bg,
         body: SafeArea(
-          child: LayoutBuilder(builder: (context, box) {
-            // En teléfonos chicos (640 × 360) las columnas de los lados se angostan y la torreta se achica.
-            final side = (box.maxWidth * 0.27).clamp(168.0, 206.0);
-            final compact = box.maxWidth - 2 * side - 60 < 330;
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 18, 12),
-              child: Row(children: [
-                // Izquierda: volver, nombre y joystick
-                SizedBox(
-                  width: side,
-                  child: Column(children: [
-                    Row(children: [
-                      RoundButton(icon: Ic.back, tooltip: 'Volver', size: 40, onTap: () => Navigator.pop(context)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(widget.device.name, style: T.callout, maxLines: 2),
-                          if (on) ...[const SizedBox(height: 5), ConnectionTag(session: s)],
-                        ]),
-                      ),
-                      RoundButton(icon: Ic.wheels, tooltip: 'Ruedas', size: 40, onTap: () => showCarroAjustes(context, s)),
-                    ]),
-                    Expanded(
-                      child: Center(
-                        child: Joystick(
-                          size: side < 190 ? side - 8 : 176,
-                          enabled: on,
-                          onChanged: (x, y) {
-                            setState(() {
-                              _jx = x;
-                              _jy = y;
-                            });
-                            _sendThrottled(s, CarPins.joystick, '$x,$y', force: x == 0 && y == 0);
-                          },
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-                const SizedBox(width: 14),
-                // Centro: estado, telemetría, torreta y mensajes
-                Expanded(
-                  child: Column(children: [
-                    // Conectado, el estado va bajo el nombre; esta tarjeta solo aparece cuando hay algo que hacer
-                    // (conectar, reintentar, la clave).
-                    if (!on) ...[
-                      Panel(padding: const EdgeInsets.fromLTRB(16, 8, 8, 8), child: ConnectionBar(session: s)),
-                      const SizedBox(height: 10),
-                    ],
-                    // La velocidad ya la muestra el acelerador y la dirección el joystick: aquí solo lo que
-                    // el conductor no ve desde lejos, la distancia al obstáculo.
-                    _ObstacleBar(distance: dist),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: Row(children: [
-                        // La torreta aparece solo si la placa dice que tiene una (envía V21 al conectar).
-                        if (s.values.containsKey(CarPins.turret)) ...[
-                          Panel(
-                            padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
-                            child: Row(children: [
-                              Dial360(
-                                value: _turret,
-                                size: compact ? 84 : 104,
-                                enabled: on,
-                                onChanged: (v) {
-                                  setState(() => _turret = v);
-                                  _sendThrottled(s, CarPins.turret, v);
-                                },
-                              ),
-                              if (!compact) ...[
-                                const SizedBox(width: 8),
-                                const Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Eyebrow('Torreta'),
-                                  SizedBox(height: 4),
-                                  Text('Giro 360°', style: T.callout),
-                                ]),
-                              ],
-                            ]),
-                          ),
-                          const SizedBox(width: 10),
-                        ],
-                        // Lo técnico (los mensajes con la placa) solo en el modo técnico: manejando importa qué hace.
-                        Expanded(
-                          child: AppScope.of(context).showPins
-                              ? _MiniLog(session: s)
-                              : _DriveStatus(session: s, x: _jx, y: _jy, throttle: _throttle, reverse: reverse),
-                        ),
-                      ]),
-                    ),
-                  ]),
-                ),
-                const SizedBox(width: 14),
-                // Derecha: acelerador y botones
-                SizedBox(
-                  width: side,
-                  child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Throttle(
-                      value: _throttle,
-                      enabled: on,
-                      onChanged: (v) {
-                        setState(() => _throttle = v);
-                        _sendThrottled(s, CarPins.throttle, v, force: v == 0);
-                      },
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        _DriveButton(
-                          label: 'Reversa',
-                          icon: Ic.reverse,
-                          active: reverse,
-                          activeColor: c.amber,
-                          onTap: on ? () => s.send(CarPins.reverse, reverse ? 0 : 1) : null,
-                        ),
-                        const SizedBox(height: 8),
-                        _DriveButton(
-                          label: 'Luces',
-                          icon: Ic.headlights,
-                          active: lights,
-                          onTap: on ? () => s.send(CarPins.lights, lights ? 0 : 1) : null,
-                        ),
-                        const SizedBox(height: 8),
-                        _DriveButton(
-                          label: 'Bocina',
-                          icon: Ic.horn,
-                          onTap: on
-                              ? () {
-                                  HapticFeedback.mediumImpact();
-                                  s.send(CarPins.horn, 1, remember: false);
-                                }
-                              : null,
-                        ),
-                        const SizedBox(height: 8),
-                        _DriveButton(label: 'Freno', icon: Ic.brake, active: true, activeColor: c.red, onTap: on ? () => _brake(s) : null),
-                      ]),
-                    ),
-                  ]),
-                ),
-              ]),
-            );
-          }),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 18, 12),
+            // El robot que escribe (carro-0.6) y el carrito 4x4 (carro-0.5) tienen piezas distintas: cada uno su
+            // tablero. La placa dice cuál es al conectarse (el robot dice su lápiz).
+            child: LayoutBuilder(builder: (context, box) => isRobot(s) ? _robotBoard(context, s, box) : _carBoard(context, s, box)),
+          ),
         ),
       ),
     );
+  }
+
+  /// Qué hace el robot, en pocas palabras: un aviso reciente de la placa, la letra que escribe o cómo se mueve.
+  String _robotStatus(Session s) {
+    if (!s.connected) return 'Sin conexión';
+    final notice = recentNotice(s);
+    if (notice != null) return notice;
+    final p = writingProgress(s);
+    if (p != null) return 'Escribiendo · letra ${p.$1} de ${p.$2}';
+    return motionText(_jx, _jy, 0, reverse: false);
+  }
+
+  /// Robot: manejar a la izquierda, escribir al centro (lo más grande) y lápiz y parar a la derecha.
+  /// Con el teclado abierto queda poco alto: solo se ve escribir. Las columnas de los lados quedan vacías en
+  /// su lugar (no se quitan), así la tarjeta de escribir no se rearma y no pierde el texto ni el teclado.
+  Widget _robotBoard(BuildContext context, Session s, BoxConstraints box) {
+    final c = context.c;
+    final on = s.connected;
+    final writing = writingProgress(s) != null;
+    final roomy = box.maxHeight >= 200;
+    final side = roomy ? (box.maxWidth * 0.26).clamp(170.0, 230.0) : 0.0;
+    final rail = roomy ? (box.maxWidth * 0.17).clamp(116.0, 150.0) : 0.0;
+    final gap = roomy ? 12.0 : 0.0;
+    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SizedBox(
+        width: side,
+        child: !roomy
+            ? null
+            : Column(children: [
+                _header(context, s, settings: 'Ajustes del robot'),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: DriveTile(session: s, status: _robotStatus(s), joystick: (size) => _joystick(s, size, enabled: on && !writing)),
+                ),
+              ]),
+      ),
+      SizedBox(width: gap),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _connectionCard(s),
+          Expanded(
+            child: WriteTile(session: s, onOpenSettings: () => showCarroAjustes(context, s), onStop: () => _stopAll(s)),
+          ),
+        ]),
+      ),
+      SizedBox(width: gap),
+      SizedBox(
+        width: rail,
+        child: !roomy
+            ? null
+            : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Expanded(child: PenTile(session: s)),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: BentoTile(
+                    icon: Ic.brake,
+                    label: 'Parar',
+                    value: writing ? 'Escritura' : 'Todo',
+                    active: true,
+                    accent: c.red,
+                    onTap: on ? () => _stopAll(s) : null,
+                  ),
+                ),
+              ]),
+      ),
+    ]);
+  }
+
+  /// Carrito 4x4: joystick a la izquierda; obstáculo, torreta y qué hace al centro; acelerador y botones a la derecha.
+  Widget _carBoard(BuildContext context, Session s, BoxConstraints box) {
+    final c = context.c;
+    final on = s.connected;
+    final dist = int.tryParse(s.values[CarPins.distance] ?? '');
+    // Reversa y luces: lo que dice la placa (las recuerda aunque se salga del panel).
+    final reverse = s.values[CarPins.reverse] == '1';
+    final lights = s.values[CarPins.lights] == '1';
+    // En teléfonos chicos (640 × 360) las columnas de los lados se angostan y la torreta se achica.
+    final side = (box.maxWidth * 0.28).clamp(168.0, 216.0);
+    final compact = box.maxWidth - 2 * side - 28 < 330;
+    final buttons = [
+      BentoTile(icon: Ic.reverse, label: 'Reversa', active: reverse, accent: c.amber, row: true, onTap: on ? () => s.send(CarPins.reverse, reverse ? 0 : 1) : null),
+      BentoTile(icon: Ic.headlights, label: 'Luces', active: lights, row: true, onTap: on ? () => s.send(CarPins.lights, lights ? 0 : 1) : null),
+      BentoTile(
+        icon: Ic.horn,
+        label: 'Bocina',
+        row: true,
+        onTap: on
+            ? () {
+                HapticFeedback.mediumImpact();
+                s.send(CarPins.horn, 1, remember: false);
+              }
+            : null,
+      ),
+      BentoTile(icon: Ic.brake, label: 'Freno', active: true, accent: c.red, row: true, onTap: on ? () => _brake(s) : null),
+    ];
+    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SizedBox(
+        width: side,
+        child: Column(children: [
+          _header(context, s, settings: 'Ruedas'),
+          Expanded(child: Center(child: _joystick(s, side < 190 ? side - 8 : 176, enabled: on))),
+        ]),
+      ),
+      const SizedBox(width: 14),
+      Expanded(
+        child: Column(children: [
+          _connectionCard(s),
+          // La velocidad ya la muestra el acelerador y la dirección el joystick: aquí solo lo que
+          // el conductor no ve desde lejos, la distancia al obstáculo.
+          _ObstacleBar(distance: dist),
+          const SizedBox(height: 10),
+          Expanded(
+            child: Row(children: [
+              // La torreta aparece solo si la placa dice que tiene una (envía V21 al conectar).
+              if (s.values.containsKey(CarPins.turret)) ...[
+                Panel(
+                  padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
+                  child: Row(children: [
+                    Dial360(
+                      value: _turret,
+                      size: compact ? 84 : 104,
+                      enabled: on,
+                      onChanged: (v) {
+                        setState(() => _turret = v);
+                        _sendThrottled(s, CarPins.turret, v);
+                      },
+                    ),
+                    if (!compact) ...[
+                      const SizedBox(width: 8),
+                      const Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Eyebrow('Torreta'),
+                        SizedBox(height: 4),
+                        Text('Giro 360°', style: T.callout),
+                      ]),
+                    ],
+                  ]),
+                ),
+                const SizedBox(width: 10),
+              ],
+              // Lo técnico (los mensajes con la placa) solo en el modo técnico: manejando importa qué hace.
+              Expanded(
+                child: AppScope.of(context).showPins
+                    ? _MiniLog(session: s)
+                    : _DriveStatus(session: s, x: _jx, y: _jy, throttle: _throttle, reverse: reverse),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+      const SizedBox(width: 14),
+      SizedBox(
+        width: side,
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Throttle(
+            value: _throttle,
+            enabled: on,
+            onChanged: (v) {
+              setState(() => _throttle = v);
+              _sendThrottled(s, CarPins.throttle, v, force: v == 0);
+            },
+          ),
+          const SizedBox(width: 10),
+          // Cuatro tarjetas iguales que se reparten el alto: lo que más se toca, a mano.
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (var i = 0; i < buttons.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                Expanded(child: buttons[i]),
+              ],
+            ]),
+          ),
+        ]),
+      ),
+    ]);
   }
 }
 
@@ -399,55 +476,6 @@ class _ObstacleBar extends StatelessWidget {
   }
 }
 
-class _DriveButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool active;
-  final Color? activeColor;
-  final VoidCallback? onTap;
-  const _DriveButton({required this.label, required this.icon, this.active = false, this.activeColor, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final accent = activeColor ?? c.text;
-    return Semantics(
-      button: true,
-      toggled: active,
-      label: label,
-      excludeSemantics: true,
-      child: Tap(
-        onTap: onTap,
-        scale: 0.95,
-        child: Opacity(
-          opacity: onTap == null ? 0.4 : 1,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            height: 46,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: active ? accent.withValues(alpha: 0.14) : c.surface,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: active ? accent : c.line2),
-            ),
-            child: Row(children: [
-              Icon(icon, size: 19, color: active ? accent : c.text),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(label.toUpperCase(), style: T.button.copyWith(color: active ? accent : c.text), maxLines: 1),
-                ),
-              ),
-            ]),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Qué hace el carrito, en grande, para verlo de reojo: «Adelante · 60 %», «Girando a la izquierda», «Quieto».
 /// Si la placa acaba de avisar algo («otro teléfono está manejando»), se muestra eso unos segundos.
 class _DriveStatus extends StatelessWidget {
@@ -458,32 +486,13 @@ class _DriveStatus extends StatelessWidget {
 
   static const _noticeFor = Duration(seconds: 6);
 
-  /// Último aviso de la placa, si es reciente: «ERR:otro telefono…» → «Otro telefono…».
-  String? _notice() {
-    for (final l in session.log) {
-      if (DateTime.now().difference(l.at) > _noticeFor) return null;
-      // Lo del saludo con la clave (una placa vieja responde «ERR:no entiendo AUTH») no le sirve al conductor.
-      if (l.incoming && l.text.startsWith('ERR:') && l.text.length > 4 && !l.text.contains('AUTH')) {
-        final t = l.text.substring(4);
-        return t[0].toUpperCase() + t.substring(1);
-      }
-    }
-    return null;
-  }
 
-  String _motion() {
-    if (!session.connected) return 'Sin conexión';
-    if (x.abs() > 20 && x.abs() >= y.abs()) return x > 0 ? 'Girando a la derecha' : 'Girando a la izquierda';
-    if (y > 10) return 'Adelante · $y %';
-    if (y < -10) return 'Atrás · ${-y} %';
-    if (throttle > 0) return reverse ? 'Reversa · $throttle %' : 'Adelante · $throttle %';
-    return 'Quieto';
-  }
+  String _motion() => session.connected ? motionText(x, y, throttle, reverse: reverse) : 'Sin conexión';
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final notice = _notice();
+    final notice = recentNotice(session, within: _noticeFor);
     return Panel(
       padding: const EdgeInsets.fromLTRB(18, 12, 14, 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -528,4 +537,13 @@ class _MiniLog extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// Cómo se mueve, en pocas palabras: «Adelante · 60 %», «Girando a la izquierda», «Quieto».
+String motionText(int x, int y, int throttle, {required bool reverse}) {
+  if (x.abs() > 20 && x.abs() >= y.abs()) return x > 0 ? 'Girando a la derecha' : 'Girando a la izquierda';
+  if (y > 10) return 'Adelante · $y %';
+  if (y < -10) return 'Atrás · ${-y} %';
+  if (throttle > 0) return reverse ? 'Reversa · $throttle %' : 'Adelante · $throttle %';
+  return 'Quieto';
 }

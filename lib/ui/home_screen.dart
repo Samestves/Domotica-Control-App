@@ -521,7 +521,8 @@ void _showDeviceOptions(BuildContext context, Session s) {
 Widget _firmwareRow(BuildContext context, BuildContext sheet, Session s) {
   final c = sheet.c;
   final d = s.device;
-  final update = AppScope.read(context).boardUpdate(d);
+  final app = AppScope.read(context);
+  final update = app.boardUpdate(d);
   return ListRow(
     icon: Ic.board,
     title: 'Programa de la placa',
@@ -529,11 +530,13 @@ Widget _firmwareRow(BuildContext context, BuildContext sheet, Session s) {
       // Conectada y sin decir su versión: tiene un programa anterior a casa-0.9 o carro-0.5.
       (null, _) when s.connected => 'Versión anterior: se actualiza con la página del instalador',
       (null, _) => 'Se ve al conectarse',
+      (final mine?, null) when !app.boardsKnown => '$mine · sin revisar (hace falta internet)',
       (final mine?, null) => '$mine · al día',
       (final mine?, final r?) => '$mine · hay ${r.version}',
     },
     trailing: update == null ? null : Eyebrow('Actualizar', color: c.green),
-    onTap: update == null
+    // Con versión conocida siempre abre la hoja: ahí se ve si está al día, o se revisa de nuevo.
+    onTap: d.firmware == null
         ? null
         : () {
             Navigator.pop(sheet);

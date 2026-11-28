@@ -43,7 +43,7 @@
                     En puertas y persianas, invertir = el servo gira al lado contrario.
                     Se rechazan los GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria), 21 y 22 (el módulo
                     PCA9685) y un GPIO o canal que ya use otra salida activa. El que se deja queda en reposo.
-    SYNC            la placa responde con su versión (VER:casa-1.0) y el estado actual de todo
+    SYNC            la placa responde con su versión (VER:casa-1.1) y el estado actual de todo
     TEST            mueve cada salida una por una para ver qué es cada cosa (ERR si ya hay una en curso)
     PING            la placa responde PONG
     OTA:<tamaño>:<md5>  recibe una versión nueva por Wi-Fi (ver ota.h). Mientras llega, las puertas y
@@ -70,6 +70,11 @@
   Wi-Fi: un teléfono a la vez. Si llega otro mientras el actual sigue usando la casa, el nuevo
   recibe «ERR:ya hay otro telefono conectado por Wi-Fi» y se cierra. Si el actual lleva más
   de 6 s sin mandar nada (la app manda PING cada 3 s), se cierra el actual y entra el nuevo.
+
+  Cambios de casa-1.1 (respecto de casa-1.0):
+    - Invertir una puerta cambia abrir por cerrar en su mismo recorrido (abre en 0° y cierra en 90°). Antes
+      reflejaba el ángulo (abría igual en 90° y cerraba en 180°): la puerta seguía diciendo lo contrario de lo
+      que hacía y al cerrar empujaba contra la pared. Las persianas siguen igual (0..180 al revés).
 
   Cambios de casa-1.0 (respecto de casa-0.9):
     - Cada servo se suelta 1 s después de moverse. Antes quedaba haciendo fuerza para siempre: una puerta
@@ -103,7 +108,7 @@
 
 // ============ CONFIGURACIÓN ============
 #define DEVICE_NAME  "Casa Domotica"
-#define FW_VERSION   "casa-1.0"
+#define FW_VERSION   "casa-1.1"
 #define USE_BLE      1        // 1 = conectar por Bluetooth LE
 #define USE_WIFI     1        // 1 = conectar también por Wi-Fi
 #define WIFI_PROPIA  1        // 1 = el ESP32 crea su propia red · 0 = se une a la red de abajo
@@ -122,7 +127,7 @@ struct Channel {
   uint8_t vpin;      // pin virtual (el mismo número que en Blynk)
   int8_t  pin;       // puertas y persianas: canal del PCA9685 (0 a 15) · luces y sirena: GPIO del ESP32
   Kind    kind;
-  bool    inverted;  // luces y sirena: se activan con señal baja (relés). Servos: giran al lado contrario
+  bool    inverted;  // luces y sirena: se activan con señal baja (relés). Servos: recorren su tramo al revés
   bool    enabled;   // false = no está conectado en la maqueta
   const char* name;
   int16_t value;     // puertas 0/1, persianas 0..180, luces y sirena 0/1
@@ -391,10 +396,11 @@ void writeDigital(const Channel& c, bool on) {
   if (c.enabled) digitalWrite(c.pin, (on != c.inverted) ? HIGH : LOW);
 }
 
-// Ángulo real del servo. Invertido = montado al revés: usa el ángulo opuesto (180 - ángulo).
+// Ángulo real del servo. Invertido = montado al revés: recorre su mismo tramo en sentido contrario. Una puerta
+// cambia abrir por cerrar (abre en DOOR_CLOSED y cierra en DOOR_OPEN); una persiana va de 180 a 0.
 int servoAngle(const Channel& c) {
-  int angle = c.kind == K_DOOR ? (c.value ? DOOR_OPEN : DOOR_CLOSED) : c.value;
-  return c.inverted ? 180 - angle : angle;
+  if (c.kind == K_DOOR) return (c.value != 0) != c.inverted ? DOOR_OPEN : DOOR_CLOSED;
+  return c.inverted ? 180 - c.value : c.value;
 }
 
 // Lleva una salida a su valor guardado. Con la alarma sonando, las luces las maneja el parpadeo.

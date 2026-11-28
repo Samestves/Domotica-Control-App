@@ -121,10 +121,28 @@ void main() {
       final app = await _app(t, theme: theme);
       final carro = app.devices.firstWhere((d) => d.profile == Profile.carro);
       app.session(carro).connect();
-      await t.pump(const Duration(seconds: 2));
+      // La demo «conecta» en 0,6 s y espera la clave 2,5 s (no la usa); después dice su lápiz: es el robot.
+      await t.pump(const Duration(seconds: 4));
       await t.pumpWidget(RepaintBoundary(key: _shot, child: ControlApp(state: app, home: CarroPanel(device: carro), forceTheme: theme)));
       await t.pump(const Duration(seconds: 1));
       await _snap(t, '07-carro-$tag');
+
+      // Con una palabra escrita: la vista previa con las letras del robot.
+      await t.enterText(find.byType(TextField), 'Hola Feria');
+      await t.pump(const Duration(milliseconds: 300));
+      await _snap(t, '07b-robot-texto-$tag');
+
+      // Escribiendo: el avance letra por letra.
+      await t.tap(find.bySemanticsLabel('Escribir'));
+      await t.pump(const Duration(milliseconds: 2900));
+      await _snap(t, '07c-robot-escribiendo-$tag');
+      await t.tap(find.bySemanticsLabel('Parar: Escritura'));
+      await t.pump(const Duration(seconds: 1));
+
+      // Sus ajustes: ruedas, lápiz y medidas.
+      await t.tap(find.byTooltip('Ajustes del robot'));
+      await t.pump(const Duration(seconds: 1));
+      await _snap(t, '07d-robot-ajustes-$tag');
       await _end(t, app);
     });
 

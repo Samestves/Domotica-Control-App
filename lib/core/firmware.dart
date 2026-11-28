@@ -90,12 +90,14 @@ class Firmware {
 
   // ---------------------------------------------------------------- red
 
-  /// Lee la lista publicada. Sin internet lanza [UpdateProblem].
-  static Future<Map<String, BoardRelease>> fetchCatalog() async {
+  /// Baja la lista publicada, tal cual (para guardarla y leerla con [parseCatalog]). Sin internet lanza [UpdateProblem].
+  static Future<Map<String, dynamic>> fetchCatalogJson() async {
     final body = await _get(Uri.parse(catalogUrl), (bytes) => utf8.decode(bytes));
     try {
-      return parseCatalog(jsonDecode(body) as Map<String, dynamic>);
+      return jsonDecode(body) as Map<String, dynamic>;
     } on FormatException {
+      throw const UpdateProblem('La lista de versiones llegó dañada. Prueba más tarde.');
+    } on TypeError {
       throw const UpdateProblem('La lista de versiones llegó dañada. Prueba más tarde.');
     }
   }

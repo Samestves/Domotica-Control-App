@@ -106,7 +106,6 @@ class _PinSheetState extends State<_PinSheet> {
     final c = context.c;
     final connected = _session.connected;
     final custom = _session.device.pins.containsKey(_spec.vpin);
-    final isLight = _spec.kind == ControlKind.light;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -144,9 +143,12 @@ class _PinSheetState extends State<_PinSheet> {
           padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
           child: Text(
             _error ??
-                (isLight
-                    ? 'Invertir: si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.'
-                    : 'Invertir: si el servo gira hacia el lado contrario, por cómo quedó montado.'),
+                switch (_spec.kind) {
+                  ControlKind.door => 'Invertir: si al abrir se cierra, y al revés (por cómo quedó montado el servo). '
+                      'Se mueve en el mismo tramo: no empuja contra la pared. Desde casa-1.1.',
+                  ControlKind.blind => 'Invertir: si al abrir se cierra, y al revés (por cómo quedó montado el servo).',
+                  ControlKind.light => 'Invertir: si al encender se apaga, y al revés. Pasa con la mayoría de los módulos de relé.',
+                },
             style: T.small.copyWith(color: _error == null ? c.text2 : c.red),
           ),
         ),

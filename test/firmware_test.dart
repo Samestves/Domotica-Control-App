@@ -111,6 +111,42 @@ void main() {
       expect(job.error, contains('volvió a casa-0.8'));
     });
 
+    test('si la placa tarda en volver tras el reinicio, la app sigue intentando y confirma la versión nueva', () async {
+      // Lo que pasó en la maqueta: su red se apaga al reiniciarse y los primeros intentos de conexión fallan.
+      final board = _Board(version: 'casa-0.8', key: '1234', downAfterRestart: 5);
+      final (job, session) = await _job(board, _release('casa-0.9', program));
+      await job.run();
+      expect(job.error, isNull);
+      expect(job.step, BoardUpdateStep.done, reason: 'tres reintentos de la conexión no alcanzan: la actualización no se rinde');
+      expect(session.device.firmware, 'casa-0.9');
+    });
+
+    test('si la placa no vuelve a tiempo queda «instalada», no fallida, y se confirma cuando vuelve', () async {
+      final board = _Board(version: 'casa-0.8', key: '1234', downAfterRestart: 1000);
+      final (job, session) = await _job(board, _release('casa-0.9', program));
+      await job.run();
+      expect(job.step, BoardUpdateStep.installed, reason: 'la placa ya revisó el programa: no es un fallo');
+      expect(job.busy, isFalse);
+      expect(job.error, isNull);
+
+      board.downAfterRestart = 0; // la placa vuelve: el usuario se conecta cuando quiere
+      await session.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(job.step, BoardUpdateStep.done, reason: 'en cuanto dice casa-0.9 se da por buena');
+    });
+
+    test('si después de quedar «instalada» la placa dice la versión vieja, la app lo avisa', () async {
+      final board = _Board(version: 'casa-0.8', key: '1234', downAfterRestart: 1000, rollback: true);
+      final (job, session) = await _job(board, _release('casa-0.9', program));
+      await job.run();
+      expect(job.step, BoardUpdateStep.installed);
+      board.downAfterRestart = 0;
+      await session.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(job.step, BoardUpdateStep.failed);
+      expect(job.error, contains('volvió a casa-0.8'));
+    });
+
     test('sin la clave correcta no se envía nada', () async {
       final board = _Board(version: 'casa-0.8', key: '9999');
       final (job, _) = await _job(board, _release('casa-0.9', program));
@@ -148,6 +184,7 @@ Future<(BoardUpdate, Session)> _job(_Board board, BoardRelease r) async {
     sendTimeout: const Duration(seconds: 2),
     restartDelay: Duration.zero,
     versionTimeout: const Duration(seconds: 2),
+    reconnectEvery: const Duration(milliseconds: 50),
   );
   await session.connect();
   return (job, session);
@@ -159,7 +196,11 @@ class _Board {
   final String key;
   final bool corrupt, rollback;
   final int? failAt;
-  _Board({required this.version, required this.key, this.corrupt = false, this.rollback = false, this.failAt});
+
+  /// Intentos de conexión que fallan después del reinicio, mientras su red vuelve a aparecer.
+  int downAfterRestart;
+  bool restarted = false;
+  _Board({required this.version, required this.key, this.corrupt = false, this.rollback = false, this.failAt, this.downAfterRestart = 0});
 
   _OtaLink? otaLink;
   int received = 0;
@@ -172,7 +213,13 @@ class _SessionLink extends DeviceLink {
   _SessionLink(this.board);
 
   @override
-  Future<void> connect() async => setState(LinkState.connected);
+  Future<void> connect() async {
+    if (board.restarted && board.downAfterRestart > 0) {
+      board.downAfterRestart--;
+      return setState(LinkState.error, 'No se pudo unir a «Casa Domotica».');
+    }
+    setState(LinkState.connected);
+  }
 
   @override
   Future<void> disconnect() async => setState(LinkState.disconnected);
@@ -249,6 +296,7 @@ class _OtaLink extends DeviceLink {
     final sum = md5.convert(board.corrupt ? [...data.skip(1), 0] : data).toString();
     if (sum != expectedMd5) return emitLine('OTA:ERR:la huella MD5 no coincide');
     emitLine('OTA:OK');
+    board.restarted = true;
     if (!board.rollback) board.version = 'casa-0.9';
     scheduleMicrotask(() => setState(LinkState.disconnected)); // se reinicia
   }

@@ -566,8 +566,22 @@ class AppState extends ChangeNotifier {
 
   // ---------- Programa de las placas ----------
 
-  /// Versión publicada de cada placa (`casa`, `carro`), según la página del instalador. Vacío hasta revisar.
+  static const _catalogKey = 'placas_catalogo';
+
+  /// Cada cuánto, como mucho, se vuelve a revisar la página del instalador al volver a la app.
+  static const boardsRecheck = Duration(minutes: 10);
+
+  /// Versión publicada de cada placa (`casa`, `carro`), según la página del instalador. Se guarda: con el
+  /// teléfono en la red de la placa (sin internet) la app sigue sabiendo qué versión hay.
   Map<String, BoardRelease> boardReleases = {};
+
+  /// true si la app sabe qué versiones hay publicadas (alguna vez pudo leer la lista). Sin eso, «al día» sería mentira.
+  bool get boardsKnown => _boardsKnown || boardReleases.isNotEmpty;
+  bool _boardsKnown = false;
+  DateTime? _boardsCheckedAt;
+
+  /// true mientras se lee la lista de versiones.
+  bool checkingBoards = false;
 
   /// La versión nueva que le sirve a esta placa, o null si ya la tiene (o no se puede actualizar por Wi-Fi).
   BoardRelease? boardUpdate(SavedDevice d) => Firmware.updateFor(d, boardReleases);
@@ -577,13 +591,35 @@ class AppState extends ChangeNotifier {
   /// La actualización en curso (o la última) de una placa, para que la hoja la muestre aunque se haya cerrado.
   BoardUpdate? boardJob(SavedDevice d) => _boardJobs[d.id];
 
-  Future<void> _checkBoards() async {
+  /// Vuelve a leer la lista si hace más de [boardsRecheck] que no se pudo (por ejemplo, al volver a la app).
+  Future<void> checkBoardsIfStale() async {
+    final at = _boardsCheckedAt;
+    if (at == null || DateTime.now().difference(at) > boardsRecheck) await checkBoards();
+  }
+
+  /// Lee la lista de versiones publicadas y la guarda. true si se pudo (hace falta internet).
+  Future<bool> checkBoards() async {
+    if (checkingBoards) return false;
+    checkingBoards = true;
+    notifyListeners();
     try {
-      boardReleases = await Firmware.fetchCatalog();
-      notifyListeners();
+      final json = await Firmware.fetchCatalogJson();
+      boardReleases = Firmware.parseCatalog(json);
+      _boardsKnown = true;
+      _boardsCheckedAt = DateTime.now();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_catalogKey, jsonEncode(json));
+      return true;
     } catch (_) {
-      return;
+      return false;
+    } finally {
+      checkingBoards = false;
+      notifyListeners();
     }
+  }
+
+  Future<void> _checkBoards() async {
+    if (!await checkBoards()) return;
     // Se baja ya, con internet: al actualizar, la app estará unida a la red de la placa, que no tiene.
     for (final d in devices) {
       final r = boardUpdate(d);
@@ -604,9 +640,12 @@ class AppState extends ChangeNotifier {
     job.run().then((_) {
       // Con la app en segundo plano, una notificación cuenta cómo salió.
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) return;
-      final ok = job.step == BoardUpdateStep.done;
-      Avisos.show(ok ? '«${d.name}» quedó actualizada' : 'No se pudo actualizar «${d.name}»',
-          ok ? 'Ya tiene ${r.version}.' : 'Sigue con ${d.firmware ?? 'su versión'}. Abre la app para ver qué pasó.');
+      final (title, body) = switch (job.step) {
+        BoardUpdateStep.done => ('«${d.name}» quedó actualizada', 'Ya tiene ${r.version}.'),
+        BoardUpdateStep.installed => ('«${d.name}» recibió ${r.version}', 'Se reinició. Abre la app y conéctate para comprobarla.'),
+        _ => ('No se pudo actualizar «${d.name}»', 'Sigue con ${d.firmware ?? 'su versión'}. Abre la app para ver qué pasó.'),
+      };
+      Avisos.show(title, body);
     });
     return job;
   }
@@ -696,6 +735,8 @@ class AppState extends ChangeNotifier {
     avisos = read(() => prefs.getBool(_avisosKey)) ?? true;
     Avisos.schedule(avisos); // sin esperar: Android guarda el horario aunque la app se cierre
     theme.value = ThemeMode.values.asNameMap()[read(() => prefs.getString(_themeKey))] ?? ThemeMode.system;
+    final catalog = read(() => Firmware.parseCatalog(jsonDecode(prefs.getString(_catalogKey) ?? '{}') as Map<String, dynamic>));
+    if (catalog != null && catalog.isNotEmpty) boardReleases = catalog;
     devices.clear();
     _unreadable.clear();
     if (raw != null) {

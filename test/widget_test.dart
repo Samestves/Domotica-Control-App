@@ -12,7 +12,9 @@ import 'package:control_domotica/models/device.dart';
 import 'package:control_domotica/state/app_state.dart';
 import 'package:control_domotica/ui/carro_panel.dart';
 import 'package:control_domotica/ui/casa_panel.dart';
+import 'package:control_domotica/ui/home_screen.dart';
 import 'package:control_domotica/ui/credits_screen.dart';
+import 'package:control_domotica/ui/widgets/board_update_sheet.dart';
 import 'package:control_domotica/ui/widgets/carro_ajustes.dart';
 import 'package:control_domotica/ui/widgets/casa_tiles.dart';
 import 'package:control_domotica/ui/widgets/drive_controls.dart';
@@ -580,12 +582,13 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 900));
       expect(s.connected, isTrue);
       expect(s.keyed, isFalse);
-      expect(invertedWheels(s), [false, false, false, false], reason: 'SYNC trae las ruedas invertidas');
+      // La demo es el robot que escribe (carro-0.6): rueda izquierda, rueda derecha y lápiz.
+      expect(invertFlags(s, 3), [false, true, false], reason: 'SYNC trae lo invertido: la rueda derecha va en espejo');
 
-      s.send(CarPins.invert, '0100');
+      s.send(CarPins.invert, '001');
       await Future<void>.delayed(const Duration(milliseconds: 200));
-      expect(s.values[CarPins.invert], '0100');
-      expect(invertedWheels(s), [false, true, false, false]);
+      expect(s.values[CarPins.invert], '001');
+      expect(invertFlags(s, 3), [false, false, true]);
       await s.disconnect();
     });
 
@@ -855,6 +858,52 @@ void main() {
     expect(find.text('casa-0.9'), findsOneWidget, reason: 'la hoja muestra la versión nueva');
     expect(find.textContaining('tiene casa-0.8'), findsOneWidget);
     expect(find.text('INSTALAR · 1,5 MB'), findsOneWidget);
+  });
+
+  testWidgets('la lista de versiones se recuerda: sin internet (en la red de la placa) el aviso sigue saliendo', (t) async {
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(800, 1400);
+    addTearDown(t.view.reset);
+    final casa = SavedDevice(id: 'c', name: 'Casa', profile: Profile.casa, transport: Transport.ble, firmware: 'casa-0.9');
+    final catalog = {
+      'boards': [
+        {
+          'id': 'casa',
+          'version': 'casa-1.0',
+          'files': [
+            {'name': 'app.bin', 'url': 'firmware/casa-1.0/app.bin', 'size': 1519952, 'md5': 'b' * 32},
+          ],
+        },
+      ],
+    };
+    SharedPreferences.setMockInitialValues({
+      'devices_v1': jsonEncode([casa.toJson()]),
+      'placas_catalogo': jsonEncode(catalog),
+    });
+    final app = AppState();
+    await app.load();
+    expect(app.boardsKnown, isTrue);
+    expect(app.boardUpdate(app.devices.single)?.version, 'casa-1.0', reason: 'leída de lo guardado, sin internet');
+    await t.pumpWidget(ControlApp(state: app));
+    expect(find.text('casa-1.0 · toca para instalar'), findsOneWidget);
+  });
+
+  testWidgets('sin haber podido leer la lista, la placa no se muestra «al día»: se ofrece revisar', (t) async {
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(800, 1400);
+    addTearDown(t.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final app = AppState();
+    await app.load();
+    final casa = SavedDevice(id: 'c', name: 'Casa', profile: Profile.casa, transport: Transport.ble, firmware: 'casa-0.9');
+    await app.add(casa);
+    expect(app.boardsKnown, isFalse);
+    await t.pumpWidget(ControlApp(state: app));
+    showBoardUpdateSheet(t.element(find.byType(HomeScreen)), casa);
+    await t.pumpAndSettle();
+    expect(find.text('Sin revisar'), findsOneWidget);
+    expect(find.text('Ya está al día'), findsNothing);
+    expect(find.text('REVISAR AHORA'), findsOneWidget);
   });
 
   testWidgets('las escenas de la casa mandan lo mismo que decirlas: «Buenas noches» cierra, apaga y arma', (t) async {

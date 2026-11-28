@@ -22,12 +22,15 @@
   la placa **prepara de nuevo el módulo PCA9685 si se reinicia**. Probada en la PC con su código real contra un PCA9685
   simulado; **todavía sin probar en la maqueta**. Los servos necesitan su propia fuente de 5 V y 2 A o más en la bornera
   verde del módulo (un cargador de celular sirve), con el GND unido al del ESP32.
+- **`casa-1.1`** = `casa-1.0` + **invertir una puerta cambia abrir por cerrar** en su mismo recorrido (abre en 0° y cierra en
+  90°). Antes invertir reflejaba el ángulo: abría igual y cerraba en 180°, así que la puerta seguía diciendo lo contrario de lo
+  que hacía y al cerrar empujaba contra la pared (le pasó al salón). Con `casa-1.1`, dejen **Invertir** activado en esa puerta.
 - **Carrito:** tiene `carro-0.4`, instalada con la página; conecta por Bluetooth y pide clave (necesita la app 0.9.0 o más nueva).
 - **`carro-0.5`** = `carro-0.4` + **cara en una pantalla OLED** (opcional) + actualización por Wi‑Fi. Compilada y revisada,
   **todavía sin probar**. Es la que instala la página.
 - Falta probar todo **conectado a la maqueta** y al carrito con sus motores.
 
-Pines de la casa con `casa-0.8`, `casa-0.9` y `casa-1.0`:
+Pines de la casa desde `casa-0.8` (hasta `casa-1.1`):
 
 | Pieza | Pin virtual | Dónde va |
 |---|---|---|
@@ -80,7 +83,12 @@ La primera vez se instala por cable con la página. Desde ahí, **el teléfono l
 2. Tocar el aviso → **Instalar**. La app se une un momento a la red de la placa (**Casa Domotica** o **Carrito 4x4**), aunque
    la placa esté guardada por Bluetooth. Si Android pregunta, toquen **Conectar**.
 3. La barra muestra lo que **la placa confirma que recibió**. La placa revisa la huella del archivo y recién entonces se reinicia.
-4. La app se vuelve a conectar y comprueba que la placa dice la versión nueva: **Listo**.
+4. La app se vuelve a conectar y comprueba que la placa dice la versión nueva: **Listo**. Desde la app 0.9.9, si la placa tarda en
+   volver (Android pregunta otra vez por su red), la app sigue intentando; si pasa minuto y medio queda **Instalada** (no
+   «fallida»: la placa ya revisó el programa) y se confirma sola en cuanto la placa vuelve a decir su versión.
+
+Desde la app 0.9.9 la lista de versiones **se guarda en el teléfono**: el aviso sigue apareciendo aunque el teléfono esté en la red
+de la placa (sin internet). Si la app nunca pudo leerla, la placa dice **sin revisar** (no «al día») y su hoja ofrece **Revisar ahora**.
 
 Si algo falla (se corta el Wi‑Fi, el archivo llegó dañado, la clave guardada no sirve), **la placa sigue con su versión**.
 Si la versión nueva se colgara al arrancar, la placa **vuelve sola a la anterior**. Mientras llega, la casa no mueve puertas ni
@@ -169,7 +177,41 @@ Usa el reconocimiento de voz de Google del teléfono: normalmente necesita inter
 Los ajustes que hagas desde la app quedan guardados en la placa y en el teléfono. Desde `casa-0.7` la placa no deja poner dos
 piezas en el mismo GPIO, y si se reinicia recuerda si la alarma estaba armada.
 
-## Carrito 4x4
+## Robot que escribe (`carro-0.6`, app 0.9.9)
+
+El robot es el panel **Auto Robot** de siempre, con otro programa: dos ruedas con motores paso a paso **28BYJ‑48** (cada uno con
+su plaquita **ULN2003**), un **marcador en el centro** que sube y baja con el motor amarillo por el **L298N**, y **un ojo en cada
+pantalla**. La red y el Bluetooth siguen llamándose **Carrito 4x4**, así la app lo encuentra igual. La app sabe que es el robot
+porque la placa dice su lápiz al conectarse, y muestra su tablero: **Manejar** (joystick), **Escribir**, **Lápiz** y **Parar**.
+
+**Escribir:** se teclea la palabra, la tarjeta muestra **cómo la va a dibujar** (con las mismas letras del robot) y **Escribir**. El
+robot empieza donde está: ahí va la esquina de abajo a la izquierda de la primera letra, **mirando hacia donde sigue el texto**
+(el punto verde de la vista previa). Las letras salen paradas hacia su izquierda. La tarjeta dice «Letra 3 de 5» y **Parar**
+lo detiene y sube el marcador. Letras: A‑Z, Ñ, 0‑9 y `. , ! ? - + :`, hasta 24 (minúsculas y tildes valen). «HOLA» con letras
+de 3 cm tarda poco más de un minuto.
+
+**Antes de escribir, una vez:** botón de ajustes (junto al nombre) → **Probar**, con el robot en el aire. La rueda izquierda y
+después la derecha dan un cuarto de vuelta **hacia adelante**, y el lápiz baja y sube. Lo que vaya al revés se **invierte** ahí.
+En la misma hoja van las **medidas**: diámetro de la rueda, distancia entre el centro de las dos ruedas (mm, con una regla), alto
+de las letras y cuánto tarda el lápiz en subir o bajar (de fábrica 65 mm, 120 mm, 30 mm y 1000 ms). Con medidas malas las letras
+salen deformes; con buenas, del tamaño justo.
+
+| Pieza | Va a |
+|---|---|
+| Rueda izquierda (ULN2003 IN1 a IN4) | GPIO 32, 33, 25, 26 |
+| Rueda derecha (ULN2003 IN1 a IN4) | GPIO 19, 18, 17, 16 |
+| Lápiz (L298N IN1, IN2; el puente de ENA puesto) | GPIO 27, 14 |
+| Ojo izquierdo (SDA · SCL) | GPIO 21 · 22 |
+| Ojo derecho (SDA · SCL) | GPIO 23 · 4 |
+| Energía | 12 V al L298N · 5 V (Mini360, medido antes) al VIN del ESP32 y a las dos ULN2003 · **todas las tierras unidas** |
+
+Seguridad: mientras escribe no obedece el joystick (hay que tocar **Parar**), y si se desconecta el teléfono que pidió escribir,
+se detiene. Con el lápiz abajo y el joystick también dibuja a mano alzada. Quietos, los motores apagan sus bobinas.
+
+Probado en la computadora con el programa real y un ESP32 simulado (39 comprobaciones: dibuja cada raya en su lugar, nunca se
+mueve con el lápiz a medio camino, PARAR, la prueba y el corte de señal). **Todavía no probado en el robot de verdad.**
+
+## Carrito 4x4 (`carro-0.5`)
 
 El carrito usa **la misma app**. Lo que cambia es el programa de su ESP32: `firmware/carro_esp32`, cargado en el DevKitC v4
 (versión cargada hoy: `carro-0.4`; nueva: `carro-0.5`, con cara y actualización por Wi‑Fi).

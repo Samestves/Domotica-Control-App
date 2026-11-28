@@ -24,18 +24,33 @@ class _BoardUpdateSheet extends StatelessWidget {
     final c = context.c;
 
     if (release == null) {
-      return _Frame(
-        eyebrow: device.name,
-        title: 'Ya está al día',
-        detail: device.firmware == null
-            ? 'Esta placa no dice su versión: tiene un programa anterior a casa-0.9 o carro-0.5. Esa primera vez se instala por cable, desde la página del instalador.'
-            : 'Tiene ${device.firmware}, la más nueva.',
-      );
+      if (device.firmware == null) {
+        return _Frame(
+          eyebrow: device.name,
+          title: 'Versión anterior',
+          detail: 'Esta placa no dice su versión: tiene un programa anterior a casa-0.9 o carro-0.5. Esa primera vez se '
+              'instala por cable, desde la página del instalador.',
+        );
+      }
+      if (!app.boardsKnown) {
+        return _Frame(
+          eyebrow: device.name,
+          title: 'Sin revisar',
+          detail: 'Tiene ${device.firmware}. Para saber si hay una versión nueva hace falta internet una vez: si el '
+              'teléfono está en la red de la placa, cámbialo a tu Wi-Fi o a datos.',
+          children: [
+            PillButton(app.checkingBoards ? 'Revisando…' : 'Revisar ahora',
+                icon: Ic.sync, expand: true, onTap: app.checkingBoards ? null : app.checkBoards),
+          ],
+        );
+      }
+      return _Frame(eyebrow: device.name, title: 'Ya está al día', detail: 'Tiene ${device.firmware}, la más nueva.');
     }
 
     final step = job?.step ?? BoardUpdateStep.ready;
     final pct = '${((job?.progress ?? 0) * 100).round()} %';
     final net = device.transport == Transport.wifi ? (device.ssid ?? 'la red de la placa') : BoardUpdate.boardSsid(device.profile);
+    final askAgain = device.transport == Transport.wifi ? ' Si Android pregunta por «$net», toca «Conectar».' : '';
     final (title, detail) = switch (step) {
       BoardUpdateStep.ready => (
           release.version,
@@ -48,7 +63,12 @@ class _BoardUpdateSheet extends StatelessWidget {
           'La app se une a la red «$net». Si Android pregunta, toca «Conectar».'
         ),
       BoardUpdateStep.sending => ('Enviando · $pct', 'La placa guarda la versión nueva aparte y sigue funcionando mientras tanto.'),
-      BoardUpdateStep.restarting => ('La placa se reinicia', 'Comprobando que arrancó con ${release.version}…'),
+      BoardUpdateStep.restarting => ('La placa se reinicia', 'Comprobando que arrancó con ${release.version}…$askAgain'),
+      BoardUpdateStep.installed => (
+          'Instalada',
+          'La placa recibió ${release.version} completa y revisada, y se reinició. Falta que vuelva a conectarse para '
+              'comprobarla: conéctate a «${device.name}» y esto se actualiza solo.'
+        ),
       BoardUpdateStep.done => ('Listo', '«${device.name}» ya tiene ${release.version}.'),
       BoardUpdateStep.failed => ('No se pudo actualizar', job?.error ?? 'Algo salió mal. La placa sigue con su versión.'),
     };
@@ -82,6 +102,7 @@ class _BoardUpdateSheet extends StatelessWidget {
               style: T.small.copyWith(color: c.text3), textAlign: TextAlign.center),
         ],
         if (step == BoardUpdateStep.done) PillButton('Listo', icon: Ic.check, expand: true, onTap: () => Navigator.pop(context)),
+        if (step == BoardUpdateStep.installed) PillButton('Cerrar', kind: PillKind.secondary, expand: true, onTap: () => Navigator.pop(context)),
         if (step == BoardUpdateStep.failed) ...[
           PillButton('Intentar otra vez', expand: true, onTap: () => app.updateBoard(device, release)),
           const SizedBox(height: 10),
@@ -123,7 +144,12 @@ class BoardUpdateBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final job = AppScope.of(context).boardJob(device);
-    final working = job?.busy ?? false;
+    final (eyebrow, color, line) = switch (job?.step) {
+      _ when job != null && job.busy => ('Actualizando', c.amber, '${device.name} · ${(job.progress * 100).round()} %'),
+      BoardUpdateStep.installed => ('Instalada en ${device.name}', c.green, '${release.version} · falta comprobarla al conectarse'),
+      BoardUpdateStep.failed => ('No se pudo actualizar ${device.name}', c.red, '${release.version} · toca para ver qué pasó'),
+      _ => ('Versión nueva para ${device.name}', c.green, '${release.version} · toca para instalar'),
+    };
     return Tap(
       onTap: () => showBoardUpdateSheet(context, device),
       child: Panel(
@@ -133,10 +159,9 @@ class BoardUpdateBanner extends StatelessWidget {
           const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Eyebrow(working ? 'Actualizando' : 'Versión nueva para ${device.name}', color: working ? c.amber : c.green),
+              Eyebrow(eyebrow, color: color),
               const SizedBox(height: 4),
-              Text(working ? '${device.name} · ${((job!.progress) * 100).round()} %' : '${release.version} · toca para instalar',
-                  style: T.callout, maxLines: 2),
+              Text(line, style: T.callout, maxLines: 2),
             ]),
           ),
           Icon(Ic.chevronRight, size: 18, color: c.text3),

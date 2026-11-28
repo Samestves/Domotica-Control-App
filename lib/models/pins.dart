@@ -16,8 +16,19 @@ class CasaPins {
 class CarPins {
   static const joystick = 20, turret = 21, distance = 22, lights = 23, throttle = 24, reverse = 25, horn = 26;
 
-  /// Ruedas invertidas: cuatro 0/1 en orden DI, TI, DD, TD (ej.: «0100»). La placa lo guarda.
+  /// Invertidos, un 0/1 por pieza. El carrito 4x4 (carro-0.5): cuatro ruedas DI, TI, DD, TD («0100»).
+  /// El robot (desde carro-0.6): rueda izquierda, rueda derecha y lápiz («010»). La placa lo guarda.
   static const invert = 27;
+
+  /// Robot que escribe (desde carro-0.6). La placa dice V28 al conectarse: así la app sabe que es el robot.
+  /// Lápiz: 1 = abajo (marca), 0 = arriba.
+  static const pen = 28;
+
+  /// Escribiendo: «3/5» = va en la letra 3 de 5; «0» = no está escribiendo.
+  static const writing = 29;
+
+  /// Medidas «rueda,eje,letra,lapiz»: mm, mm, mm y ms (ej.: «65,120,30,1000»). La placa las guarda.
+  static const measures = 30;
 
   /// Mientras el carro anda, la app repite la orden con esta frecuencia.
   /// Si la placa deja de recibirla por 1 s (Bluetooth cortado, app cerrada), frena sola.

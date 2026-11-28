@@ -13,7 +13,10 @@ import 'updater.dart';
 import 'wifi_link.dart';
 import 'wifi_net.dart';
 
-enum BoardUpdateStep { ready, downloading, connecting, sending, restarting, done, failed }
+/// [installed]: la placa recibió el programa completo, revisó su huella y se reinició, pero todavía no volvió a
+/// decir su versión (Android pregunta otra vez por su red, la placa tarda en arrancar). No es un fallo: se
+/// confirma sola, como [done] o [failed], en cuanto la placa diga su versión.
+enum BoardUpdateStep { ready, downloading, connecting, sending, restarting, installed, done, failed }
 
 /// Instala una versión nueva en una placa por Wi-Fi (el lado de la placa está en firmware/casa_esp32/ota.h):
 ///
@@ -22,7 +25,7 @@ enum BoardUpdateStep { ready, downloading, connecting, sending, restarting, done
 /// 3. le manda el programa; la placa lo escribe en su otro espacio de memoria y revisa la huella MD5;
 /// 4. la placa se reinicia y la app se vuelve a conectar como siempre, para comprobar que dice la versión nueva.
 ///
-/// Si algo falla en el camino, la placa sigue con su versión: nunca queda a medias.
+/// Si algo falla antes del paso 4, la placa sigue con su versión: nunca queda a medias.
 class BoardUpdate extends ChangeNotifier {
   final Session session;
   final BoardRelease release;
@@ -32,7 +35,9 @@ class BoardUpdate extends ChangeNotifier {
   final Future<List<int>> Function(BoardRelease, void Function(double))? download;
 
   /// Esperas. Las pruebas usan unas más cortas.
-  final Duration replyTimeout, sendTimeout, restartDelay, versionTimeout;
+  /// [versionTimeout] es cuánto se muestra «La placa se reinicia» antes de pasar a [BoardUpdateStep.installed];
+  /// mientras tanto, cada [reconnectEvery] se vuelve a intentar la conexión si quedó parada.
+  final Duration replyTimeout, sendTimeout, restartDelay, versionTimeout, reconnectEvery;
 
   BoardUpdate(
     this.session,
@@ -42,8 +47,12 @@ class BoardUpdate extends ChangeNotifier {
     this.replyTimeout = const Duration(seconds: 8),
     this.sendTimeout = const Duration(seconds: 90),
     this.restartDelay = const Duration(seconds: 3),
-    this.versionTimeout = const Duration(seconds: 30),
+    this.versionTimeout = const Duration(seconds: 90),
+    this.reconnectEvery = const Duration(seconds: 4),
   });
+
+  /// Escucha la versión que dice la placa después del reinicio, aunque la espera de [run] ya haya terminado.
+  StreamSubscription<Msg>? _versionWatch;
 
   BoardUpdateStep step = BoardUpdateStep.ready;
 
@@ -51,7 +60,10 @@ class BoardUpdate extends ChangeNotifier {
   double progress = 0;
   String? error;
 
-  bool get busy => step != BoardUpdateStep.ready && step != BoardUpdateStep.done && step != BoardUpdateStep.failed;
+  bool get busy => switch (step) {
+        BoardUpdateStep.downloading || BoardUpdateStep.connecting || BoardUpdateStep.sending || BoardUpdateStep.restarting => true,
+        BoardUpdateStep.ready || BoardUpdateStep.installed || BoardUpdateStep.done || BoardUpdateStep.failed => false,
+      };
 
   /// Trozos del envío: cada uno sale recién cuando el anterior salió del teléfono.
   static const chunk = 8 * 1024;
@@ -85,6 +97,7 @@ class BoardUpdate extends ChangeNotifier {
   Future<void> run() async {
     if (busy) return;
     error = null;
+    _stopWatchingVersion();
     DeviceLink? link;
     final wasConnected = session.linked || session.busy;
     try {
@@ -117,7 +130,6 @@ class BoardUpdate extends ChangeNotifier {
       if (device.transport != Transport.wifi) await WifiNet.releaseIfUnused();
       await Future<void>.delayed(restartDelay);
       await _confirmVersion();
-      _set(BoardUpdateStep.done, 1);
     } on UpdateProblem catch (e) {
       error = e.message;
       _set(BoardUpdateStep.failed);
@@ -178,20 +190,44 @@ class BoardUpdate extends ChangeNotifier {
     }
   }
 
-  /// Después del reinicio: se conecta como siempre y espera que la placa diga su versión.
+  /// Después del reinicio: se conecta como siempre y espera que la placa diga su versión. Mientras la placa
+  /// vuelve, la conexión se reintenta seguido. Si tarda más que [versionTimeout], queda
+  /// [BoardUpdateStep.installed] y se confirma en cuanto la placa diga su versión, cuando sea.
   Future<void> _confirmVersion() async {
-    final said = session.messages.firstWhere((m) => m.kind == 'VER').timeout(versionTimeout);
+    final said = Completer<void>();
+    _versionWatch = session.messages.where((m) => m.kind == 'VER').listen((m) {
+      _stopWatchingVersion();
+      if (m.value == release.version) {
+        _set(BoardUpdateStep.done, 1);
+      } else {
+        error = 'La placa volvió a ${m.value}: la versión nueva no arrancó bien y se descartó sola.';
+        _set(BoardUpdateStep.failed);
+      }
+      if (!said.isCompleted) said.complete();
+    });
+    // Sin esperar los reintentos de siempre (2, 5 y 10 s, y después se rinde): la placa vuelve en segundos.
+    final keepTrying = Timer.periodic(reconnectEvery, (_) {
+      if (!session.linked && session.state != LinkState.connecting) unawaited(session.connect());
+    });
     unawaited(session.connect());
-    final String version;
     try {
-      version = (await said).value;
+      await said.future.timeout(versionTimeout);
     } on TimeoutException {
-      throw const UpdateProblem(
-          'La placa recibió la versión nueva, pero no se pudo comprobar. Conéctate a ella: en sus opciones se ve su versión.');
+      _set(BoardUpdateStep.installed, 1);
+    } finally {
+      keepTrying.cancel();
     }
-    if (version != release.version) {
-      throw UpdateProblem('La placa volvió a $version: la versión nueva no arrancó bien y se descartó sola.');
-    }
+  }
+
+  void _stopWatchingVersion() {
+    _versionWatch?.cancel();
+    _versionWatch = null;
+  }
+
+  @override
+  void dispose() {
+    _stopWatchingVersion();
+    super.dispose();
   }
 
   static String _otaError(String value) {

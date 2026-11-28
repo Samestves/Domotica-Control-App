@@ -17,6 +17,8 @@ Future<void> main() async {
   }
   runApp(ControlApp(state: state));
   state.checkForUpdateQuietly(); // sin esperar: la app abre al instante
+  // Si al abrirla no había internet (el teléfono estaba en la red de una placa), se revisa al volver a ella.
+  AppLifecycleListener(onResume: state.checkBoardsIfStale);
 }
 
 /// Hace llegar el estado de la app a todas las pantallas.

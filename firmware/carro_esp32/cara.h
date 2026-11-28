@@ -1,16 +1,19 @@
 /*
-  Cara del carrito · pantalla OLED de 0,96" (128×64 puntos, I2C)
-  --------------------------------------------------------------
-  Ojos que parpadean, miran y cambian de ánimo según lo que hace el carrito. Es la misma cara del simulador
+  Cara del robot · una o dos pantallas OLED de 0,96" (128×64 puntos, I2C)
+  -----------------------------------------------------------------------
+  Ojos que parpadean, miran y cambian de ánimo según lo que hace el robot. Es la misma cara del simulador
   (docs/cara-carrito/index.html): al encender dibuja el logo de Control Domótica, que se cierra como un párpado
   y abre los ojos.
 
-  Cables: SDA → GPIO 21 · SCL → GPIO 22 · VCC → 3V3 · GND → GND. Sin librerías extra (solo Wire).
-  Las filas 0 a 15 son la franja de arriba (amarilla en la pantalla de dos colores): conexión, luces,
-  velocidad, distancia y mensajes. Las filas 16 a 63, los ojos.
+  Cables (VCC → 3V3 y GND → GND en las dos; sin librerías extra, solo Wire):
+    ojo izquierdo del robot (a la derecha de quien lo mira)   SDA → GPIO 21 · SCL → GPIO 22
+    ojo derecho del robot (a la izquierda de quien lo mira)   SDA → GPIO 23 · SCL → GPIO 4
+  Con las dos, cada pantalla muestra un ojo grande. Con una sola (cualquiera), esa muestra los dos ojos.
+  Las filas 0 a 15 son la franja de arriba (amarilla en la pantalla de dos colores): conexión, velocidad y
+  mensajes. Las filas 16 a 63, los ojos.
 
-  Sin pantalla el carrito funciona igual: si no responde, se la vuelve a buscar cada 3 s.
-  Nunca frena al carrito: cada vuelta de loop() envía como mucho una franja de 8 filas (unos 3 ms).
+  Sin pantallas el robot funciona igual: la que no responde se vuelve a buscar cada 3 s.
+  Nunca frena al robot: cada vuelta de loop() envía como mucho una franja de 8 filas (unos 3 ms).
 
   Otras pantallas:
     - 1,3" con chip SH1106 (132 columnas): poner OLED_SH1106 en 1.
@@ -20,10 +23,10 @@
 #include <Wire.h>
 
 #define OLED_SH1106 0                    // 1 = pantalla de 1,3" con chip SH1106
-const int OLED_SDA = 21, OLED_SCL = 22;
+const int OLED_SDA = 21, OLED_SCL = 22, OLED2_SDA = 23, OLED2_SCL = 4;
 
-// Lo que el carrito le cuenta a la cara está al final (caraBegin, caraLoop, caraLink...). Todo lo demás vive
-// dentro de «cara», para que nombres como line o text no choquen con los del programa del carrito.
+// Lo que el robot le cuenta a la cara está al final (caraBegin, caraLoop, caraLink...). Todo lo demás vive
+// dentro de «cara», para que nombres como line o text no choquen con los del programa del robot.
 enum CaraKey : uint8_t { CARA_KEY_ASK, CARA_KEY_OK, CARA_KEY_BAD };
 
 namespace cara {
@@ -32,39 +35,49 @@ namespace cara {
 const int W = 128, H = 64, BAND = 16, PAGES = H / 8;
 const uint32_t RETRY_MS = 3000, FRAME_MS = 33;   // buscar la pantalla otra vez · un cuadro cada 33 ms (30 por s)
 const uint8_t ADDRS[] = {0x3C, 0x3D};
-uint8_t fb[W * PAGES];                   // como en el chip: byte = 8 filas de una columna (bit 0 arriba)
-uint8_t addr = 0;                        // 0 = sin pantalla
-uint32_t retryAt = 0;
-int page = -1;                           // franja que falta enviar del cuadro actual (-1 = cuadro enviado)
 
-bool command(const uint8_t* bytes, size_t n) {
-  Wire.beginTransmission(addr);
-  Wire.write(0x00);                      // lo que sigue son órdenes
-  Wire.write(bytes, n);
-  return Wire.endTransmission() == 0;
+// Una pantalla en su propio bus I2C, con su imagen: byte = 8 filas de una columna (bit 0 arriba), como en el chip.
+struct Oled {
+  TwoWire& bus;
+  int sda, scl;
+  const char* name;
+  uint8_t addr = 0;                      // 0 = sin pantalla
+  uint32_t retryAt = 0;
+  uint8_t fb[W * PAGES];
+  Oled(TwoWire& b, int d, int c, const char* n) : bus(b), sda(d), scl(c), name(n) {}
+};
+Oled screens[2] = {{Wire, OLED_SDA, OLED_SCL, "ojo izquierdo"}, {Wire1, OLED2_SDA, OLED2_SCL, "ojo derecho"}};
+uint8_t* fb = screens[0].fb;             // donde dibujan las funciones de abajo
+int page = -1;                           // franja que falta enviar del cuadro actual: 0..2·PAGES-1 (-1 = enviado)
+
+bool command(Oled& o, const uint8_t* bytes, size_t n) {
+  o.bus.beginTransmission(o.addr);
+  o.bus.write(0x00);                     // lo que sigue son órdenes
+  o.bus.write(bytes, n);
+  return o.bus.endTransmission() == 0;
 }
 
 // Una franja de 8 filas. false si la pantalla no respondió.
-bool sendPage(int p) {
+bool sendPage(Oled& o, int p) {
   const uint8_t col = OLED_SH1106 ? 2 : 0;
   const uint8_t at[] = {(uint8_t)(0xB0 | p), (uint8_t)(col & 0x0F), (uint8_t)(0x10 | (col >> 4))};
-  if (!command(at, sizeof(at))) return false;
+  if (!command(o, at, sizeof(at))) return false;
   for (int x = 0; x < W; x += 64) {      // de a 64 bytes: el búfer de Wire es de 128
-    Wire.beginTransmission(addr);
-    Wire.write(0x40);                    // lo que sigue son puntos
-    Wire.write(fb + p * W + x, 64);
-    if (Wire.endTransmission() != 0) return false;
+    o.bus.beginTransmission(o.addr);
+    o.bus.write(0x40);                   // lo que sigue son puntos
+    o.bus.write(o.fb + p * W + x, 64);
+    if (o.bus.endTransmission() != 0) return false;
   }
   return true;
 }
 
-bool start() {
-  addr = 0;
+bool start(Oled& o) {
+  o.addr = 0;
   for (uint8_t a : ADDRS) {
-    Wire.beginTransmission(a);
-    if (Wire.endTransmission() == 0) { addr = a; break; }
+    o.bus.beginTransmission(a);
+    if (o.bus.endTransmission() == 0) { o.addr = a; break; }
   }
-  if (!addr) return false;
+  if (!o.addr) return false;
   const uint8_t init[] = {
     0xAE,                                // apagada mientras se prepara
     0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
@@ -76,12 +89,12 @@ bool start() {
     0xA1, 0xC8,                          // girada para que el conector quede arriba
     0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6,
   };
-  memset(fb, 0, sizeof(fb));
-  bool ok = command(init, sizeof(init));
-  for (int p = 0; ok && p < PAGES; p++) ok = sendPage(p);   // la memoria del chip arranca con basura
+  memset(o.fb, 0, sizeof(o.fb));
+  bool ok = command(o, init, sizeof(init));
+  for (int p = 0; ok && p < PAGES; p++) ok = sendPage(o, p);   // la memoria del chip arranca con basura
   const uint8_t on[] = {0xAF};
-  if (ok) ok = command(on, 1);
-  if (!ok) addr = 0;
+  if (ok) ok = command(o, on, 1);
+  if (!ok) o.addr = 0;
   return ok;
 }
 
@@ -163,7 +176,6 @@ void text(const char* s, int x, int y) {
 // Iconos de la franja de arriba: una fila por número, bit más alto = columna izquierda.
 const uint16_t ICON_BT[] = {0x18, 0x14, 0x52, 0x34, 0x18, 0x34, 0x52, 0x14, 0x18};   // 7 de ancho
 const uint16_t ICON_WIFI[] = {0x7C, 0x82, 0x139, 0x44, 0x38, 0x00, 0x10};            // 9 de ancho
-const uint16_t ICON_BULB[] = {0x1C, 0x22, 0x41, 0x41, 0x22, 0x1C, 0x1C, 0x00, 0x1C}; // 7 de ancho
 void icon(const uint16_t* rows, int n, int width, int x, int y) {
   for (int j = 0; j < n; j++)
     for (int i = 0; i < width; i++)
@@ -216,8 +228,8 @@ struct Face {
   Mood moodAfter = NORMAL; uint32_t moodUntil = 0;
   Mood chainMood = NORMAL; uint32_t chainAt = 0, chainMs = 0;   // un ánimo que sigue a otro (sorpresa → enojo)
   bool sleeping = false, opening = true; uint32_t lastInput = 0;
-  bool ble = false, wifi = false, lights = false;
-  int speed = 0, dist = 0; uint32_t distUntil = 0;
+  bool ble = false, wifi = false;
+  int speed = 0;
   uint32_t nextBlink = 4500, blinkEnd = 0, nextLook = 4200, holdLook = 4200;
   int8_t wink = 0;                       // -1 guiña el izquierdo, 1 el derecho, 0 parpadean los dos
   uint32_t shakeUntil = 0, bounceUntil = 0;
@@ -286,19 +298,22 @@ void update(uint32_t dt) {
   cur.lx = ease(cur.lx, tgt.lx, kl); cur.ly = ease(cur.ly, tgt.ly, kl);
 }
 
-void drawEyes() {
+// [only]: el ojo que se dibuja (-1 el de la izquierda de quien mira, 1 el de la derecha, 0 los dos). Un ojo
+// solo va en el centro y más grande: es el de su propia pantalla.
+void drawEyes(int only) {
   const Eyes& c = cur;
   uint32_t now = f.now;
   float cy0 = BAND + (H - BAND) / 2.f;
   float shake = now < f.shakeUntil ? sinf(now / 18.f) * 3 : 0;
   float bounce = now < f.bounceUntil ? -fabsf(sinf(now / 110.f)) * 4 : 0;
-  float glow = f.lights ? 1.05f : 1;     // con las luces encendidas, los ojos un poco más grandes
+  const float grow = only ? 1.25f : 1, gap = only ? 0 : 25, travel = only ? 22 : 14;
   for (int side = -1; side <= 1; side += 2) {
+    if (only && side != only) continue;
     float toward = (c.lx > 0) - (c.lx < 0) == side ? .14f : -.08f;   // el ojo hacia donde mira, más grande
     float big = c.curious * toward * min(1.f, fabsf(c.lx) * 2);
-    float size = 36 * c.scale * glow * (1 + big);
+    float size = 36 * c.scale * grow * (1 + big);
     float h = max(2.f, size * (1 - (side < 0 ? c.blinkL : c.blinkR)));
-    float cx = 64 + side * 25 + c.lx * 14 + shake;
+    float cx = 64 + side * gap + c.lx * travel + shake;
     float cy = cy0 + c.ly * 6 + bounce + (size - h) * .15f;
     float x = cx - size / 2, y = cy - h / 2, w = size;
     rrect(x, y, w, h, (12 + 6 * c.happy) * c.scale, true);
@@ -310,22 +325,18 @@ void drawEyes() {
   }
 }
 
-// Franja de arriba: conexión y luces a la izquierda, velocidad o distancia a la derecha, mensajes al centro.
-void drawBand() {
+// Franja de arriba: conexión a la izquierda, velocidad a la derecha, mensajes al centro. Con dos pantallas,
+// la de la izquierda (de quien mira) lleva la conexión y la de la derecha la velocidad: [icons] y [bars].
+void drawBand(bool icons, bool bars) {
   uint32_t now = f.now;
   bool showLabel = !f.sleeping && now < f.labelUntil;
   // Un mensaje largo (ACTUALIZANDO 45%) ocupa casi todo el ancho: los iconos esperan a que termine.
-  if (now >= BOOT_OPEN && !(showLabel && textW(f.label) > W - 2 * 22)) {
+  if (icons && now >= BOOT_OPEN && !(showLabel && textW(f.label) > W - 2 * 22)) {
     if (f.ble) icon(ICON_BT, 9, 7, 2, 3);
     else if (f.wifi) icon(ICON_WIFI, 7, 9, 1, 5);
     else text("X", 2, 4);
-    if (f.lights) icon(ICON_BULB, 9, 7, 14, 3);
   }
-  if (now < f.distUntil) {
-    char d[8];
-    snprintf(d, sizeof(d), "%dCM", f.dist);
-    text(d, W - 2 - textW(d), 4);
-  } else if (now >= BOOT_OPEN && !(showLabel && textW(f.label) > 64)) {
+  if (bars && now >= BOOT_OPEN && !(showLabel && textW(f.label) > 64)) {
     for (int i = 0; i < 5; i++) {        // cinco barras de velocidad
       int bh = 2 + i * 2;
       if (f.speed > i * 20) rect(W - 26 + i * 5, 12 - bh, 4, bh, true);
@@ -342,34 +353,47 @@ void drawBand() {
   }
 }
 
+// La imagen de cada pantalla que respondió. Con dos, cada una es un ojo; con una, esa lleva la cara entera.
 void draw() {
-  memset(fb, 0, sizeof(fb));
-  if (f.now < BOOT_CLOSE) drawLogo(f.now); else drawEyes();
-  drawBand();
+  const bool both = screens[0].addr && screens[1].addr;
+  for (int i = 0; i < 2; i++) {
+    if (!screens[i].addr) continue;
+    fb = screens[i].fb;
+    memset(fb, 0, sizeof(screens[i].fb));
+    const int eye = both ? (i == 0 ? 1 : -1) : 0;   // el ojo izquierdo del robot queda a la derecha de quien mira
+    if (f.now < BOOT_CLOSE) drawLogo(f.now); else drawEyes(eye);
+    drawBand(eye <= 0, eye >= 0);
+  }
 }
 
 // ===================== Lo que el carrito le cuenta a la cara =====================
 
+void report(const Oled& o, const char* what) {
+  Serial.println(String("Pantalla del ") + o.name + " (SDA " + o.sda + ", SCL " + o.scl + "): " + what);
+}
+
 void caraBegin() {
-  Wire.begin(OLED_SDA, OLED_SCL, 400000);
   f.t0 = millis();
   randomSeed(esp_random());
-  Serial.println(start() ? "Pantalla de la cara lista (SDA 21, SCL 22)."
-                         : "Sin pantalla de la cara (SDA 21, SCL 22): el carrito funciona igual.");
-  retryAt = millis() + RETRY_MS;
+  for (Oled& o : screens) {
+    o.bus.begin(o.sda, o.scl, 400000);
+    report(o, start(o) ? "lista." : "no responde; el robot funciona igual.");
+    o.retryAt = millis() + RETRY_MS;
+  }
 }
 
 void caraLoop(uint32_t ms) {
-  if (!addr) {                           // sin pantalla: se la vuelve a buscar de vez en cuando
-    if ((int32_t)(ms - retryAt) < 0) return;
-    retryAt = ms + RETRY_MS;
-    if (start()) Serial.println("Pantalla de la cara encontrada.");
-    page = -1;
-    return;
+  for (Oled& o : screens) {              // la que no está se vuelve a buscar de vez en cuando
+    if (o.addr || (int32_t)(ms - o.retryAt) < 0) continue;
+    o.retryAt = ms + RETRY_MS;
+    if (start(o)) { report(o, "encontrada."); page = -1; }
+    return;                              // una búsqueda por vuelta: cada una tarda unos milisegundos
   }
+  if (!screens[0].addr && !screens[1].addr) return;
   if (page >= 0) {                       // una franja por vuelta
-    if (!sendPage(page)) { addr = 0; retryAt = ms + RETRY_MS; Serial.println("La pantalla de la cara dejo de responder."); return; }
-    if (++page == PAGES) page = -1;
+    Oled& o = screens[page / PAGES];
+    if (o.addr && !sendPage(o, page % PAGES)) { o.addr = 0; o.retryAt = ms + RETRY_MS; report(o, "dejo de responder."); }
+    if (++page == 2 * PAGES) page = -1;
     return;
   }
   uint32_t now = ms - f.t0;
@@ -416,37 +440,34 @@ void caraDrive(int left, int right) {
   else { setMood(ENFOCADO); look(0, -.35f, 1500); }                                      // adelante
 }
 
-void caraLights(bool on) {
+// Prueba (TEST): 0 rueda izquierda, 1 derecha, 2 y 3 el lápiz, o -1 al terminar. Mira lo que se mueve.
+void caraTest(int part) {
+  static const char* NAME[] = {"RUEDA IZQ", "RUEDA DER", "LAPIZ", "LAPIZ"};
+  static const float X[] = {1, -1, 0, 0}, Y[] = {.6f, .6f, .9f, .9f};   // la izquierda del robot, a la derecha de quien mira
   wake();
-  f.lights = on;
-  setMood(SORPRESA, 350);
-  look(0, -.4f, 900);
-}
-
-void caraHorn() {
-  wake();
-  setMood(FELIZ, 900);
-  blink(-1);                             // guiño
-}
-
-void caraObstacle(int cm) {
-  wake();
-  setMood(SORPRESA);
-  f.chainMood = ENOJADO; f.chainMs = 1600; f.chainAt = f.now + 450;   // se asusta y después se enoja
-  look(0, -.2f, 1800);
-  f.shakeUntil = f.now + 900;
-  f.dist = cm;
-  f.distUntil = f.now + 2400;
-}
-
-void caraWheel(int wheel) {
-  static const char* NAME[] = {"DI", "TI", "DD", "TD"};
-  static const float X[] = {-1, -1, 1, 1}, Y[] = {-.7f, .9f, -.7f, .9f};
-  wake();
-  if (wheel < 0 || wheel > 3) { look(0, 0, 600); setMood(FELIZ, 900); say("LISTO", 1200); return; }
+  if (part < 0 || part > 3) { look(0, 0, 600); setMood(FELIZ, 900); say("LISTO", 1200); return; }
   setMood(NORMAL);
-  look(X[wheel], Y[wheel], 1700);        // mira la rueda que está girando
-  say(NAME[wheel], 1700);
+  look(X[part], Y[part], 1700);
+  say(NAME[part], 1700);
+}
+
+// El marcador baja o sube: mira hacia abajo un momento.
+void caraPen(bool down) {
+  wake();
+  look(0, down ? .9f : .3f, 900);
+  if (down) blink(0);
+}
+
+// Escribiendo: letra [letter] de [total]. letter 0 = terminó bien; -1 = se canceló.
+void caraWrite(int letter, int total) {
+  wake();
+  if (letter < 0) { setMood(TRISTE, 2500); say("PARADO", 2000); return; }
+  if (letter == 0) { setMood(FELIZ, 2200); f.bounceUntil = f.now + 1200; look(0, -.3f, 1500); say("LISTO", 2200); return; }
+  char s[32];                            // «ESCRIBIENDO 24/24» cabe en la franja (y en label)
+  snprintf(s, sizeof(s), "ESCRIBIENDO %d/%d", letter, total);
+  setMood(ENFOCADO);
+  look(0, .7f, 4000);
+  say(s, 60000);                         // hasta la letra siguiente
 }
 
 void caraUpdate(int pct) {
@@ -467,9 +488,8 @@ using cara::caraLoop;       // en cada vuelta de loop()
 using cara::caraLink;       // qué teléfonos están conectados (cada vez que cambia)
 using cara::caraKey;        // pide la clave, la aceptó o la rechazó
 using cara::caraWake;       // llegó una orden: si dormía, se despierta
-using cara::caraDrive;      // potencia de cada lado, -100 a 100
-using cara::caraLights;
-using cara::caraHorn;
-using cara::caraObstacle;
-using cara::caraWheel;      // prueba de ruedas: 0 a 3 (DI, TI, DD, TD), o -1 al terminar
+using cara::caraDrive;      // velocidad de cada rueda, -100 a 100
+using cara::caraTest;       // prueba: 0 a 3 (rueda izquierda, derecha, lápiz abajo, arriba), o -1 al terminar
+using cara::caraPen;        // el marcador baja (true) o sube
+using cara::caraWrite;      // escribiendo la letra n de total; 0 = terminó, -1 = se canceló
 using cara::caraUpdate;     // actualización por Wi-Fi: 0 a 100, o -1 si falló

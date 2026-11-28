@@ -1,100 +1,98 @@
 /*
-  Carrito 4x4 · programa para el ESP32 del carrito · versión carro-0.5
-  --------------------------------------------------------------------
-  Cuatro motores TT con dos puentes H L298N. Se maneja desde la misma app de la casa
-  (panel «Auto Robot») por Bluetooth LE o por Wi-Fi. Gira como un tanque: para doblar,
-  las ruedas de un lado van más lento o hacia atrás.
+  Auto Robot · programa para el ESP32 del robot que escribe · versión carro-0.6
+  -----------------------------------------------------------------------------
+  Dos ruedas con motores paso a paso 28BYJ-48 (cada uno con su plaquita ULN2003), un marcador en el centro
+  que sube y baja con un motor amarillo (TT) por un L298N, y una pantalla OLED para cada ojo. Se maneja desde
+  la app (panel «Auto Robot») por Bluetooth LE o por Wi-Fi, y escribe lo que le mandan desde la app.
 
-  Wi-Fi propio: el ESP32 crea la red «Carrito 4x4» (contraseña: carrito4x4).
-  La app se une a esa red y se conecta a la IP 192.168.4.1, puerto 3333.
+  Wi-Fi propio: el ESP32 crea la red «Carrito 4x4» (contraseña: carrito4x4); es el nombre de siempre, así la
+  app lo sigue encontrando. La app se une a esa red y se conecta a la IP 192.168.4.1, puerto 3333.
   Bluetooth y Wi-Fi funcionan a la vez: un teléfono por cada uno. Por Wi-Fi, si ya hay un teléfono
   con clave conectado, otro que llegue recibe «ERR:ya hay otro telefono conectado por Wi-Fi» y se
   corta (salvo que el primero lleve 6 s mudo). Un teléfono por Wi-Fi que pasa 6 s sin mandar nada
   se desconecta (la app manda PING cada 3 s).
 
-  Pines virtuales (los mismos del panel del carrito en la app):
+  Pines virtuales (los mismos del panel en la app):
     V20  joystick «x,y», cada uno de -100 a 100 (y positivo = adelante, x positivo = derecha)
-    V21  torreta (servo, opcional): 0..359
-    V22  distancia al obstáculo en cm (de la placa a la app; solo con sensor HC-SR04)
-    V23  luces: 1 / 0
-    V24  acelerador: 0..100 (velocidad fija hacia adelante, o hacia atrás con la reversa)
+    V24  acelerador: 0..100 (hacia adelante, o hacia atrás con la reversa)
     V25  reversa: 1 / 0 (cambia el sentido del acelerador; el joystick no se ve afectado)
-    V26  bocina: 1 = pitar un momento
-    V27  invertir ruedas: cuatro 0/1 en orden DI, TI, DD, TD. Ej.: V27:0100 invierte la trasera izquierda
+    V27  invertir: tres 0/1 en orden rueda izquierda, rueda derecha, lápiz. Ej.: V27:010 invierte la derecha
+    V28  lápiz: 1 = abajo (marca) · 0 = arriba. La placa lo dice cada vez que cambia
+    V29  escribiendo: «3/5» = va en la letra 3 de 5 · «0» = no está escribiendo
+    V30  medidas «rueda,eje,letra,lapiz»: diámetro de las ruedas en mm, distancia entre ellas (de centro a
+         centro) en mm, alto de las letras en mm y cuánto tarda el lápiz en subir o bajar en ms.
+         Ej.: V30:65,120,30,1000. Se guardan en la placa.
 
-  Clave del carrito (de 4 a 8 números; el mismo protocolo que la casa). Por Bluetooth y Wi-Fi el
-  carrito no obedece hasta recibirla, y cada conexión la entrega por su cuenta:
+  Escribir (letras de un solo trazo: letras.h y escritura.h):
+    ESCRIBIR:HOLA   dibuja el texto: A-Z, Ñ, 0-9 y . , ! ? - + : (minúsculas y tildes valen), hasta 24 letras.
+                    Responde OK:ESCRIBIENDO HOLA, avisa cada letra con V29 y al final dice OK:ESCRITO.
+                    Empieza donde está el robot: ahí va la esquina de abajo a la izquierda de la primera letra,
+                    y las letras salen paradas hacia su izquierda mientras avanza.
+    PARAR           detiene todo: la escritura (sube el marcador), las ruedas y la prueba.
+  Mientras escribe no obedece el joystick (avisa que hay que tocar Parar). Si se desconecta el teléfono
+  que lo pidió, se detiene. Con el lápiz abajo y el joystick también dibuja: a mano alzada.
+
+  Clave del robot (de 4 a 8 números; el mismo protocolo que la casa). Por Bluetooth y Wi-Fi el
+  robot no obedece hasta recibirla, y cada conexión la entrega por su cuenta:
     AUTH:123456     la app entrega la clave. Respuestas:
                       AUTH:OK          correcta
                       AUTH:MAL:2       incorrecta; quedan 2 intentos
                       AUTH:ESPERA:30   demasiados intentos; hay que esperar 30 s
-                      AUTH:NUEVA       el carrito todavía no tiene clave: hay que crearla
+                      AUTH:NUEVA       el robot todavía no tiene clave: hay que crearla
                       AUTH:PIDE        falta la clave (se envió una orden sin entregarla)
     CLAVE:123456    crea la clave, o la cambia si ya se entregó la actual. Responde AUTH:OK.
     Sin clave solo se contesta PING; cualquier otra orden responde AUTH:PIDE (o AUTH:NUEVA).
-    El Monitor Serie (cable USB) no necesita clave. Ahí, CLAVE:BORRAR deja el carrito sin clave.
+    El Monitor Serie (cable USB) no necesita clave. Ahí, CLAVE:BORRAR deja el robot sin clave.
     Sin computadora: mantener presionado BOOT 5 s con la placa encendida también la borra
-    (las luces parpadean 3 veces para confirmarlo).
+    (los ojos lo muestran pidiendo la clave).
 
   Seguridad:
     - Un solo conductor: el primero (Bluetooth, Wi-Fi o Monitor Serie) que manda joystick o acelerador
-      distinto de cero maneja; a los demás se les responde «ERR:otro telefono esta manejando el carrito».
-      Deja de ser el conductor si se desconecta o pasa 1 segundo sin mandar joystick ni acelerador.
-      Parar (V24:0, V20:0,0, el freno de la app) vale desde cualquiera.
-    - Si se corta el Bluetooth o el Wi-Fi del que maneja, los motores se detienen al instante.
-    - Si el conductor deja de enviar joystick o acelerador por 1 segundo mientras el carrito anda,
+      distinto de cero (o pide escribir) maneja; a los demás se les responde «ERR:otro telefono esta
+      manejando el carrito». Deja de serlo si se desconecta o pasa 1 segundo sin mandar joystick ni
+      acelerador (escribiendo, hasta que termina). Parar (V24:0, V20:0,0, PARAR) vale desde cualquiera.
+    - Si se corta el Bluetooth o el Wi-Fi del que maneja, las ruedas se detienen al instante.
+    - Si el conductor deja de enviar joystick o acelerador por 1 segundo mientras el robot anda,
       se detiene solo. PING y las demás órdenes no cuentan como señal.
-      (La app 0.7.2 o más nueva repite la orden mientras mantienes el joystick.)
     - Seguro de manejo: después de conectarse, desconectarse o frenar por falta de señal, no obedece
       movimientos hasta que el joystick (V20:0,0) y el acelerador (V24:0) lleguen en cero.
-    - Arranque suave: los motores no saltan de golpe a toda velocidad.
-    - Con sensor de distancia: no avanza si hay un obstáculo a menos de 15 cm (sí puede girar o retroceder)
-      y, si aparece uno mientras avanza, frena al instante. Si el sensor deja de contestar avisa con un
-      ERR (y con un OK cuando vuelve).
-    - Si el programa se traba más de 5 s, la placa se reinicia sola (watchdog) y los motores quedan quietos.
+    - Arranque suave: las ruedas no saltan de golpe a toda velocidad (un motor paso a paso que arranca
+      muy rápido se traba).
+    - Quietas, las bobinas de los motores se apagan: no se calientan ni gastan las pilas.
+    - Si el programa se traba más de 5 s, la placa se reinicia sola (watchdog) y las ruedas quedan quietas.
 
-  Ruedas: DI delantera izquierda · TI trasera izquierda · DD delantera derecha · TD trasera derecha
   Pines de fábrica (los de la guía de armado):
-            L298N   velocidad (EN)  sentido (IN)   sentido (IN)
-    DI      A       32              33             25
-    TI      A       26              27             14
-    DD      B       13               4             16
-    TD      B       17              18             19
-    Luces 23 · Bocina 5 · Torreta y sensor: sin conectar
+    rueda izquierda   ULN2003   IN1 32 · IN2 33 · IN3 25 · IN4 26
+    rueda derecha     ULN2003   IN1 19 · IN2 18 · IN3 17 · IN4 16
+    lápiz             L298N     IN1 27 · IN2 14 (el puente de ENA queda puesto)
+    ojos (cara.h)     izquierdo SDA 21 · SCL 22 · derecho SDA 23 · SCL 4
+  Energía: 12 V al L298N; 5 V (el Mini360, medido antes) al VIN del ESP32 y a las dos ULN2003; todas las
+  tierras (GND) unidas. Ningún motor va a los pines 5V o 3V3 del ESP32.
 
-  Cara (desde carro-0.5): una pantalla OLED de 0,96" con ojos que reaccionan a lo que hace el carrito
-  (ver cara.h). SDA en el GPIO 21 y SCL en el 22, por eso esos dos quedan reservados. Es opcional: sin
-  pantalla el carrito funciona igual.
-
-  Actualización por Wi-Fi (desde carro-0.5): la app le manda la versión nueva por la red del carrito
-  (ver ota.h). Mientras llega, el carrito queda quieto y no acepta manejo. La primera vez es por cable.
+  Actualización por Wi-Fi (desde carro-0.5): la app le manda la versión nueva por la red del robot
+  (ver ota.h). Mientras llega, el robot queda quieto y no acepta manejo ni escritura.
 
   Otros mensajes (por la app o el Monitor Serie a 115200; todos piden la clave menos PING):
-    SYNC                  la placa responde con su versión (VER:carro-0.5) y el estado actual
+    SYNC                  la placa responde con su versión (VER:carro-0.6) y el estado actual
     OTA:<tamaño>:<md5>    recibe una versión nueva por Wi-Fi (ver ota.h)
-    TEST                  mueve cada rueda hacia adelante, una por una, para ver cuál es cuál:
-                          OK:PRUEBA rueda <nombre> por cada una y al final OK:PRUEBA terminada.
-                          Se cancela con «ERR:prueba cancelada: ...» si llega joystick, acelerador o freno,
-                          otro TEST, o se desconecta el teléfono que la pidió.
-    PINES                 muestra los pines que está usando
+    TEST                  la rueda izquierda y después la derecha dan un cuarto de vuelta hacia ADELANTE, y el
+                          lápiz baja y sube: OK:PRUEBA <qué se mueve> por cada parte y al final
+                          OK:PRUEBA terminada. Se cancela con «ERR:prueba cancelada: ...» si llega joystick,
+                          acelerador o PARAR, otro TEST, o se desconecta el teléfono que la pidió.
+    PINES                 muestra los pines y las medidas que está usando
     PING                  responde PONG
-    RUEDA:DI:32,33,25     cambia los pines de una rueda (EN, IN1, IN2)
-    CFG:V23:23:0:1        luces en el GPIO 23, sin invertir (0), activadas (1). Igual V26 (bocina) y V21 (torreta)
-    SENSOR:15,34          sensor HC-SR04: TRIG en 15 y ECHO en 34 (¡ECHO con divisor de voltaje a 3,3 V!)
-    SENSOR:NO             quita el sensor
-    MINIMO:35             potencia mínima (%) con la que las ruedas empiezan a girar
-    FABRICA               vuelve a los pines de fábrica (la clave no se borra)
-  Los cambios se guardan en la placa. Los números se revisan (CFG:V23:abc da ERR en vez de usar 0),
-  los GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria) y 21 y 22 (la pantalla) no se aceptan, y una línea
+    MOTOR:I:32,33,25,26   cambia los pines de la rueda izquierda (IN1 a IN4 de su ULN2003); MOTOR:D:... la derecha
+    LAPIZ:27,14           cambia los pines del lápiz (IN1 e IN2 del L298N)
+    FABRICA               vuelve a los pines y medidas de fábrica (la clave no se borra)
+  Los cambios se guardan en la placa. Los números se revisan (MOTOR:I:abc da ERR en vez de usar 0), los
+  GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria) y 21, 22, 23 y 4 (las pantallas) no se aceptan, y una línea
   de más de 120 letras se descarta entera.
 
-  Cambios de carro-0.5 (respecto de carro-0.4):
-    - La cara en la pantalla OLED (cara.h) y la actualización por Wi-Fi desde la app (ota.h).
-    - Dice su versión al conectarse (VER:carro-0.5, con SYNC).
-    - Memoria en dos espacios de programa («Minimal SPIFFS» en vez de «Huge APP»), para poder recibir una
-      versión nueva mientras funciona. La clave y los ajustes están en otra zona: se conservan.
-    - Los GPIO 21 y 22 quedan para la pantalla. Si el sensor estaba en el 21, la pantalla no se usa hasta
-      moverlo (SENSOR:15,34); el carrito lo avisa por el Monitor Serie.
+  Cambios de carro-0.6 (respecto de carro-0.5):
+    - Es el programa del robot que escribe: dos motores paso a paso en vez de cuatro motores con L298N,
+      el lápiz, la escritura y un ojo en cada pantalla. Sin luces, bocina, torreta ni sensor de distancia.
+    - Los pines guardados por carro-0.5 (los de cuatro ruedas) no sirven para el robot: arranca con los de
+      fábrica. La clave se conserva.
 
   Placa: "ESP32 Dev Module" con Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)". Sin librerías extra.
     .\tool\compilar_firmware.ps1 -Placa carro
@@ -102,98 +100,107 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <soc/gpio_struct.h>
 #include "ota.h"
 #include "cara.h"
+#include "escritura.h"
 
 // ============ CONFIGURACIÓN ============
-#define FW_VERSION  "carro-0.5"
-#define DEVICE_NAME "Carrito 4x4"
-#define USE_WIFI    1                      // 1 = crear también la red Wi-Fi propia del carrito
+#define FW_VERSION  "carro-0.6"
+#define DEVICE_NAME "Carrito 4x4"              // la red y el Bluetooth de siempre: la app lo sigue encontrando
+#define USE_WIFI    1                          // 1 = crear también la red Wi-Fi propia del robot
 #if USE_WIFI
-#include <WiFi.h>                          // aquí arriba: el IDE declara rawSend(WiFiClient&...) al principio
+#include <WiFi.h>                              // aquí arriba: el IDE declara rawSend(WiFiClient&...) al principio
 #include <lwip/sockets.h>
 #endif
-const char*    AP_PASS = "carrito4x4";     // mínimo 8 letras
+const char*    AP_PASS = "carrito4x4";         // mínimo 8 letras
 const uint16_t TCP_PORT = 3333;
-const uint32_t SIGNAL_TIMEOUT_MS = 1000;   // sin joystick ni acelerador del conductor este tiempo => se detiene
-const uint32_t TCP_IDLE_MS = 6000;         // un teléfono por Wi-Fi que no manda nada este tiempo se desconecta
-const uint8_t  RAMP_STEP = 12;             // cuánto cambia la potencia cada 10 ms (arranque suave)
-const int      STOP_CM = 15;               // con sensor: no avanza si hay algo más cerca
-const uint8_t  SENSOR_FAILS = 10;          // lecturas seguidas sin respuesta => avisa que el sensor no responde
-const uint16_t HORN_MS = 350;
-const uint32_t MOTOR_FREQ = 1000;          // Hz del PWM de los motores (el L298N es lento)
-const uint16_t TEST_SPIN_MS = 1200, TEST_PAUSE_MS = 500;   // TEST: cuánto gira cada rueda y la pausa entre ruedas
-const unsigned MAX_LINE = 120;             // una línea más larga se descarta entera
+const uint32_t SIGNAL_TIMEOUT_MS = 1000;       // sin joystick ni acelerador del conductor este tiempo => se detiene
+const uint32_t TCP_IDLE_MS = 6000;             // un teléfono por Wi-Fi que no manda nada este tiempo se desconecta
+const uint16_t TEST_PAUSE_MS = 500;            // TEST: pausa entre una parte y la siguiente
+const int32_t  TEST_STEPS = 1024;              // TEST: un cuarto de vuelta
+const unsigned MAX_LINE = 120;                 // una línea más larga se descarta entera
 
-// Clave del carrito (igual que la casa)
+// Motores paso a paso. Una interrupción cada STEP_TICK_US da los pasos, aunque loop() esté ocupado (la
+// pantalla, el Wi-Fi): así el robot avanza parejo. Medio paso: 4096 por vuelta de la rueda (PASOS_VUELTA).
+const uint32_t STEP_TICK_US = 100;             // 10 000 revisiones por segundo
+const uint32_t TICK_HZ = 1000000 / STEP_TICK_US;
+const int32_t  DRIVE_MAX_RATE = 800;           // medios pasos por segundo con el joystick a fondo (~12 vueltas por minuto)
+const int32_t  DRIVE_RAMP = 20;                // cuánto puede cambiar la velocidad cada 5 ms (arranque suave)
+const int32_t  WRITE_MAX_RATE = 600, WRITE_MIN_RATE = 150;   // escribiendo: más lento y parejo
+const int32_t  WRITE_RAMP_STEPS = 120;         // pasos para llegar a la velocidad (y para frenar al final del trazo)
+const uint32_t COILS_OFF_MS = 300;             // quieto este tiempo: las bobinas se apagan
+
+// Clave del robot (igual que la casa)
 const uint8_t  MAX_FAILS = 3;
-const uint32_t LOCK_MS = 30000;            // espera tras 3 claves incorrectas
-const uint32_t RESET_HOLD_MS = 5000;       // BOOT presionado este tiempo borra la clave
+const uint32_t LOCK_MS = 30000;                // espera tras 3 claves incorrectas
+const uint32_t RESET_HOLD_MS = 5000;           // BOOT presionado este tiempo borra la clave
 const int      BOOT_PIN = 0;
 
-enum : uint8_t { VPIN_JOY = 20, VPIN_TURRET = 21, VPIN_DIST = 22, VPIN_LIGHTS = 23,
-                 VPIN_THROTTLE = 24, VPIN_REVERSE = 25, VPIN_HORN = 26, VPIN_INVERT = 27 };
+enum : uint8_t { VPIN_JOY = 20, VPIN_THROTTLE = 24, VPIN_REVERSE = 25, VPIN_INVERT = 27,
+                 VPIN_PEN = 28, VPIN_WRITE = 29, VPIN_MEASURES = 30 };
 
 // De dónde llegó una línea. Cada conexión entrega la clave por su cuenta (igual que la casa).
 enum Src : uint8_t { SRC_SERIAL, SRC_BLE, SRC_TCP, SRC_NONE };
 
 // ============ AJUSTES GUARDADOS ============
 struct Config {
-  uint8_t version;
-  int8_t  wheel[4][3];      // EN, IN1, IN2
-  uint8_t invertMask;       // bit 0 = DI, 1 = TI, 2 = DD, 3 = TD
-  int8_t  lights, horn, turret, trig, echo;   // -1 = sin conectar
-  uint8_t lightsInv, hornInv, turretInv;
-  uint8_t minPower;         // % con el que la rueda empieza a moverse
+  uint8_t  version;
+  int8_t   motor[2][4];     // IN1..IN4 de cada ULN2003: 0 = rueda izquierda, 1 = derecha
+  int8_t   pen[2];          // IN1 e IN2 del L298N
+  uint8_t  invertMask;      // bit 0 = rueda izquierda, 1 = rueda derecha, 2 = lápiz
+  uint16_t wheelMm, trackMm, letterMm, penMs;   // V30: rueda, eje, letra y lápiz
 };
-const uint8_t CONFIG_VERSION = 1;
+const uint8_t CONFIG_VERSION = 2;              // 1 = carro-0.5 (cuatro ruedas): no sirve, se usan los de fábrica
 const Config DEFAULTS = {
   CONFIG_VERSION,
-  { {32, 33, 25}, {26, 27, 14}, {13, 4, 16}, {17, 18, 19} },
-  0,
-  23, 5, -1, -1, -1,
-  0, 0, 0,
-  35,
+  { {32, 33, 25, 26}, {19, 18, 17, 16} },
+  {27, 14},
+  0b010,                    // los motores van en espejo: la rueda derecha gira al revés para ir adelante
+  65, 120, 30, 1000,
 };
 Config cfg;
 Preferences prefs;
 
-const char* WHEEL_CODE[4] = {"DI", "TI", "DD", "TD"};
-const char* WHEEL_NAME[4] = {"delantera izquierda", "trasera izquierda", "delantera derecha", "trasera derecha"};
+const char* WHEEL_CODE[2] = {"I", "D"};
+const char* WHEEL_NAME[2] = {"rueda izquierda", "rueda derecha"};
 
 // ============ ESTADO ============
-int joyX = 0, joyY = 0, throttle = 0, turretAngle = 0;
-bool reverseGear = false, lightsOn = false;
-int16_t target[4] = {0, 0, 0, 0};    // -255..255
-int16_t current[4] = {0, 0, 0, 0};
-int distanceCm = -1;
+int joyX = 0, joyY = 0, throttle = 0;
+bool reverseGear = false;
+int32_t driveTarget[2] = {0, 0};     // medios pasos por segundo que piden el joystick y el acelerador
+int32_t driveRate[2] = {0, 0};       // los que se están dando (se acercan a driveTarget de a poco)
 uint32_t lastRx = 0;                 // última orden de joystick o acelerador del conductor (watchdog de señal)
-uint32_t lastRamp = 0, hornUntil = 0, lastSensor = 0, lastDistReport = 0;
-int lastDistSent = -100;
-bool lastObstacle = false;
-uint8_t sensorFails = 0;             // lecturas seguidas en que el sensor no contestó
-bool turretWarned = false;   // el aviso de «sin torreta» se da una vez por conexión
+String lastPrinted;
 
-// Un solo conductor: solo el origen que está manejando puede mover el carrito (parar puede cualquiera).
+// Un solo conductor: solo el origen que está manejando puede mover el robot (parar puede cualquiera).
 Src driver = SRC_NONE;
 uint8_t waitNeutral = 0;     // orígenes (bit 1 << Src) que quisieron manejar mientras otro manejaba: deben soltar los controles antes de tomarlo
 uint8_t warnedSrc = 0;       // a quién ya se le avisó que no puede manejar (un aviso, no uno cada 90 ms)
 
-// Prueba de ruedas (TEST), atendida desde loop() sin bloquear.
-int8_t testWheel = -1;       // rueda que está en prueba (-1 = sin prueba)
-bool testPaused = false;     // true = en la pausa después de girar
+// Prueba (TEST), atendida desde loop() sin bloquear: 0 rueda izquierda, 1 derecha, 2 lápiz abajo, 3 arriba.
+int8_t testPart = -1;        // -1 = sin prueba
+bool testPaused = false;     // true = en la pausa después de una parte
 uint32_t testUntil = 0;
 Src testSrc = SRC_SERIAL;    // quién la pidió: si se desconecta, se cancela
 
-bool testRunning() { return testWheel >= 0; }
+bool testRunning() { return testPart >= 0; }
 
-// Clave del carrito
+// Escritura en curso (ver ESCRIBIR)
+Escritor writer;
+Conversor wheels;
+bool writing = false;
+bool writeStepBusy = false;  // el paso actual (un trazo o el lápiz) todavía se está haciendo
+int writeLetter = 0, writeTotal = 0;
+Src writerSrc = SRC_NONE;
+
+// Clave del robot
 volatile bool authed[3] = {true, false, false};   // el cable USB no necesita clave
-String carKey;                                    // "" = el carrito todavía no tiene clave
+String carKey;                                    // "" = el robot todavía no tiene clave
 uint8_t failCount = 0;
 uint32_t lockStart = 0;
 
-// Seguro de manejo: después de conectarse, desconectarse o frenar por falta de señal, el carrito
+// Seguro de manejo: después de conectarse, desconectarse o frenar por falta de señal, el robot
 // no obedece movimientos hasta que el joystick (V20:0,0) y el acelerador (V24:0) lleguen en cero.
 // Así no arranca solo si un teléfono reconecta con el acelerador puesto.
 bool driveLocked = true, lockJoyNeutral = false, lockThrottleNeutral = false, lockWarned = false;
@@ -202,7 +209,6 @@ void lockDriving() {
   driveLocked = true;
   lockJoyNeutral = lockThrottleNeutral = lockWarned = false;
 }
-String lastPrinted;
 
 volatile bool bleConnected = false;
 
@@ -221,7 +227,8 @@ const char* gpioProblem(int gpio, bool output = true) {
   if (gpio < 0 || gpio > 39) return "el ESP32 tiene GPIO del 0 al 39";
   if (gpio == 1 || gpio == 3) return "los GPIO 1 y 3 los usa el Monitor Serie (cable USB)";
   if (gpio >= 6 && gpio <= 11) return "los GPIO 6 a 11 los usa la memoria de la placa";
-  if (gpio == OLED_SDA || gpio == OLED_SCL) return "los GPIO 21 y 22 son de la pantalla de la cara (SDA y SCL)";
+  if (gpio == OLED_SDA || gpio == OLED_SCL || gpio == OLED2_SDA || gpio == OLED2_SCL)
+    return "los GPIO 21, 22, 23 y 4 son de las pantallas de los ojos (SDA y SCL)";
   if (gpio == 20 || gpio == 24 || (gpio >= 28 && gpio <= 31)) return "ese GPIO no existe en el ESP32";
   if (output && gpio >= 34) return "los GPIO 34 a 39 solo sirven como entrada";
   return nullptr;
@@ -242,176 +249,345 @@ void saveConfig() {
   prefs.end();
 }
 
-// ¿Lo usa otra pieza? Devuelve su nombre, o nullptr.
+// ¿Lo usa otra pieza? Devuelve su nombre, o "".
 String pinOwner(int gpio) {
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 3; j++)
-      if (cfg.wheel[i][j] == gpio) return String("rueda ") + WHEEL_CODE[i];
-  if (cfg.lights == gpio) return "luces";
-  if (cfg.horn == gpio) return "bocina";
-  if (cfg.turret == gpio) return "torreta";
-  if (cfg.trig == gpio) return "TRIG del sensor";
-  if (cfg.echo == gpio) return "ECHO del sensor";
+  for (int i = 0; i < 2; i++)
+    for (int j = 0; j < 4; j++)
+      if (cfg.motor[i][j] == gpio) return WHEEL_NAME[i];
+  if (cfg.pen[0] == gpio || cfg.pen[1] == gpio) return "lapiz";
   return "";
 }
 
-// Igual que pinOwner, pero sin armar textos (se llama en cada vuelta del loop).
-bool pinInUse(int gpio) {
-  for (int i = 0; i < 4; i++)
-    for (int j = 0; j < 3; j++)
-      if (cfg.wheel[i][j] == gpio) return true;
-  return cfg.lights == gpio || cfg.horn == gpio || cfg.turret == gpio || cfg.trig == gpio || cfg.echo == gpio;
-}
+bool pinInUse(int gpio) { return pinOwner(gpio).length() > 0; }
 
-// Suelta un pin que deja de usarse sin dejarlo flotando: una entrada del L298N al aire puede mover
-// un motor sola. Queda como salida en su nivel «apagado» (LOW; HIGH para luces o bocina invertidas).
-// ECHO y los GPIO 34-39 quedan como entrada (no deben o no pueden ser salida), y el GPIO 0 vuelve
-// a ser el botón BOOT (en el DevKit ya tiene resistencia a 3,3 V; en LOW borraría la clave).
-void releasePin(int gpio, bool offLevel, bool input) {
+// Suelta un pin que deja de usarse sin dejarlo flotando: una entrada del ULN2003 o del L298N al aire puede
+// mover un motor sola. Queda como salida en LOW; el GPIO 0 vuelve a ser el botón BOOT (en el DevKit ya tiene
+// resistencia a 3,3 V; en LOW borraría la clave).
+void releasePin(int gpio) {
   if (gpio < 0) return;
-  ledcDetachPin(gpio);
   if (gpio == BOOT_PIN) { pinMode(gpio, INPUT_PULLUP); return; }
-  if (input || gpio >= 34) { pinMode(gpio, INPUT); return; }
   pinMode(gpio, OUTPUT);
-  digitalWrite(gpio, offLevel ? HIGH : LOW);
+  digitalWrite(gpio, LOW);
 }
 
+// ============ MOTORES PASO A PASO (28BYJ-48 con ULN2003) ============
+// Medio paso: 8 combinaciones de las 4 bobinas por ciclo. Bit 0 = IN1. En DRAM: la interrupción la lee
+// incluso mientras se escribe la memoria de programa (los ajustes, una versión nueva).
+DRAM_ATTR const uint8_t HALF_STEP[8] = {0b0001, 0b0011, 0b0010, 0b0110, 0b0100, 0b1100, 0b1000, 0b1001};
+
+struct Stepper {
+  // Qué GPIO prender y cuáles apagar en cada fase, listos para la interrupción (GPIO 0-31 y 32-39).
+  uint32_t onLo[8], offLo[8], onHi[8], offHi[8];
+  uint32_t allLo, allHi;                 // las cuatro bobinas, para apagarlas
+  volatile int32_t rate;                 // medios pasos por segundo; + = hacia adelante del robot
+  volatile int32_t left;                 // pasos que faltan de un movimiento contado; -1 = sin límite (joystick)
+  volatile bool inverted, energized;
+  uint32_t acc;
+  uint8_t phase;
+};
+Stepper motor[2];
+portMUX_TYPE stepMux = portMUX_INITIALIZER_UNLOCKED;
+hw_timer_t* stepTimer = nullptr;
+uint32_t idleSince[2] = {0, 0};          // desde cuándo está quieta cada rueda (para apagar sus bobinas)
+int32_t moveTotal = 0;                   // pasos del movimiento contado más largo (para la rampa)
+
+void IRAM_ATTR onStepTick() {
+  portENTER_CRITICAL_ISR(&stepMux);
+  for (int i = 0; i < 2; i++) {
+    Stepper& m = motor[i];
+    const int32_t r = m.rate;
+    if (r == 0) continue;
+    m.acc += r > 0 ? r : -r;
+    if (m.acc < TICK_HZ) continue;
+    m.acc -= TICK_HZ;
+    m.phase = (m.phase + ((r > 0) != m.inverted ? 1 : 7)) & 7;
+    GPIO.out_w1tc = m.offLo[m.phase];
+    GPIO.out1_w1tc.val = m.offHi[m.phase];
+    GPIO.out_w1ts = m.onLo[m.phase];
+    GPIO.out1_w1ts.val = m.onHi[m.phase];
+    m.energized = true;
+    if (m.left > 0 && --m.left == 0) { m.rate = 0; m.acc = 0; }
+  }
+  portEXIT_CRITICAL_ISR(&stepMux);
+}
+
+// Apaga las bobinas de la rueda [i]. Llamar con stepMux tomado. (Recibe el número y no la rueda: el IDE
+// declara las funciones al principio del archivo, antes de que exista Stepper.)
+void coilsOff(int i) {
+  GPIO.out_w1tc = motor[i].allLo;
+  GPIO.out1_w1tc.val = motor[i].allHi;
+  motor[i].energized = false;
+}
+
+// Prepara los pines de una rueda: salidas en LOW y las máscaras de cada fase.
 void setupWheel(int i) {
-  int en = cfg.wheel[i][0], a = cfg.wheel[i][1], b = cfg.wheel[i][2];
-  pinMode(a, OUTPUT); digitalWrite(a, LOW);
-  pinMode(b, OUTPUT); digitalWrite(b, LOW);
-  ledcSetup(i, MOTOR_FREQ, 8);          // canales 0..3: un canal por rueda
-  ledcAttachPin(en, i);
-  ledcWrite(i, 0);
+  Stepper& m = motor[i];
+  for (int k = 0; k < 4; k++) { pinMode(cfg.motor[i][k], OUTPUT); digitalWrite(cfg.motor[i][k], LOW); }
+  portENTER_CRITICAL(&stepMux);
+  m.rate = 0; m.left = -1; m.acc = 0;
+  m.allLo = m.allHi = 0;
+  for (int ph = 0; ph < 8; ph++) {
+    m.onLo[ph] = m.offLo[ph] = m.onHi[ph] = m.offHi[ph] = 0;
+    for (int k = 0; k < 4; k++) {
+      const int g = cfg.motor[i][k];
+      const bool on = HALF_STEP[ph] & (1 << k);
+      uint32_t& slot = g < 32 ? (on ? m.onLo[ph] : m.offLo[ph]) : (on ? m.onHi[ph] : m.offHi[ph]);
+      slot |= 1UL << (g & 31);
+      (g < 32 ? m.allLo : m.allHi) |= 1UL << (g & 31);
+    }
+  }
+  m.inverted = isInverted(i);
+  coilsOff(i);
+  portEXIT_CRITICAL(&stepMux);
 }
 
-void setupOutput(int8_t gpio, bool inverted) {
-  if (gpio < 0) return;
-  pinMode(gpio, OUTPUT);
-  digitalWrite(gpio, inverted ? HIGH : LOW);
+void setupSteppers() {
+  stepTimer = timerBegin(0, 80, true);             // 80 MHz / 80 = una cuenta por µs
+  timerAttachInterrupt(stepTimer, &onStepTick, true);
+  timerAlarmWrite(stepTimer, STEP_TICK_US, true);
+  timerAlarmEnable(stepTimer);
 }
 
-// Torreta: servo normal (180°) en el canal 6, a 50 Hz.
-const int SERVO_CH = 6;
-void writeTurret() {
-  if (cfg.turret < 0) return;
-  int a = constrain(turretAngle, 0, 359) * 180 / 359;
-  if (cfg.turretInv) a = 180 - a;
-  uint32_t us = 500 + (uint32_t)a * 1900 / 180;
-  ledcWrite(SERVO_CH, us * 65535 / 20000);
-}
-void setupTurret() {
-  if (cfg.turret < 0) return;
-  ledcSetup(SERVO_CH, 50, 16);
-  ledcAttachPin(cfg.turret, SERVO_CH);
-  writeTurret();
+// Velocidad de una rueda: [count] pasos y se detiene sola, o -1 = sin límite (manejo).
+void setMotor(int i, int32_t rate, int32_t count) {
+  portENTER_CRITICAL(&stepMux);
+  motor[i].left = count;
+  motor[i].rate = count == 0 ? 0 : rate;
+  portEXIT_CRITICAL(&stepMux);
 }
 
-void setupSensor() {
-  sensorFails = 0;
-  if (cfg.trig < 0 || cfg.echo < 0) { distanceCm = -1; return; }
-  pinMode(cfg.trig, OUTPUT);
-  digitalWrite(cfg.trig, LOW);
-  pinMode(cfg.echo, INPUT);
+// Un movimiento contado (un trazo, un giro o la prueba): pasos de cada rueda, + = adelante. Las dos van a la
+// misma velocidad, así un giro en el lugar no corre el marcador. La rampa la lleva loopMotion().
+void startMove(int32_t l, int32_t r) {
+  moveTotal = max(abs(l), abs(r));
+  setMotor(0, l > 0 ? WRITE_MIN_RATE : -WRITE_MIN_RATE, abs(l));
+  setMotor(1, r > 0 ? WRITE_MIN_RATE : -WRITE_MIN_RATE, abs(r));
 }
 
-void setupAll() {
-  for (int i = 0; i < 4; i++) setupWheel(i);
-  setupOutput(cfg.lights, cfg.lightsInv);
-  setupOutput(cfg.horn, cfg.hornInv);
-  setupTurret();
-  setupSensor();
-}
+bool moveDone() { return motor[0].left <= 0 && motor[1].left <= 0; }
 
-void releaseAll() {
-  for (int i = 0; i < 4; i++) for (int j = 0; j < 3; j++) releasePin(cfg.wheel[i][j], LOW, false);
-  releasePin(cfg.lights, cfg.lightsInv, false);
-  releasePin(cfg.horn, cfg.hornInv, false);
-  releasePin(cfg.turret, LOW, false);
-  releasePin(cfg.trig, LOW, false);
-  releasePin(cfg.echo, LOW, true);
-}
-
-// ============ MOTORES ============
-// Aplica la potencia actual a una rueda: signo = sentido, valor = velocidad.
-void applyWheel(int i) {
-  int v = current[i];
-  if (isInverted(i)) v = -v;
-  digitalWrite(cfg.wheel[i][1], v > 0 ? HIGH : LOW);
-  digitalWrite(cfg.wheel[i][2], v < 0 ? HIGH : LOW);
-  ledcWrite(i, abs(v));
-}
-
-// De porcentaje (-100..100) a potencia (-255..255), saltando la zona en que el motor no alcanza a moverse.
-int16_t toPower(int pct) {
-  if (pct == 0) return 0;
-  int minPwm = cfg.minPower * 255 / 100;
-  int p = map(abs(pct), 1, 100, minPwm, 255);
-  return pct > 0 ? p : -p;
+void haltWheels() {
+  for (int i = 0; i < 2; i++) { driveTarget[i] = driveRate[i] = 0; setMotor(i, 0, -1); }
 }
 
 int deadzone(int v, int dz) { return abs(v) < dz ? 0 : v; }
 
-bool obstacleAhead() { return distanceCm > 0 && distanceCm < STOP_CM; }
-
-// Joystick + acelerador => potencia de cada lado (manejo tipo tanque).
+// Joystick + acelerador => velocidad de cada rueda (gira como un tanque).
 void computeTargets() {
   int y = deadzone(constrain(joyY, -100, 100), 10);
   int x = deadzone(constrain(joyX, -100, 100), 10);
   int th = deadzone(constrain(throttle, 0, 100), 5);
 
   int forward = abs(y) >= th ? y : (reverseGear ? -th : th);
-  if (forward > 0 && obstacleAhead()) forward = 0;   // puede girar o retroceder, pero no avanzar
-
   int left = forward + x, right = forward - x;
   int biggest = max(abs(left), abs(right));
   if (biggest > 100) { left = left * 100 / biggest; right = right * 100 / biggest; }
 
-  target[0] = target[1] = toPower(left);
-  target[2] = target[3] = toPower(right);
+  driveTarget[0] = left * DRIVE_MAX_RATE / 100;
+  driveTarget[1] = right * DRIVE_MAX_RATE / 100;
 
   String now = "Ruedas: izquierda " + String(left) + " % · derecha " + String(right) + " %";
   if (now != lastPrinted) { Serial.println(now); lastPrinted = now; caraDrive(left, right); }
 }
 
 bool moving() {
-  for (int i = 0; i < 4; i++) if (target[i] != 0 || current[i] != 0) return true;
+  for (int i = 0; i < 2; i++) if (driveTarget[i] || driveRate[i] || motor[i].rate) return true;
   return false;
 }
 
-// Detiene todo al instante (sin rampa). También termina la prueba de ruedas, si estaba corriendo.
+// Detiene las ruedas al instante (sin rampa: a la velocidad de estos motores no hace falta). También termina
+// la prueba, si estaba corriendo. La escritura la detiene stopWriting().
 void stopNow(const char* why) {
   bool was = moving();
-  testWheel = -1;
+  testPart = -1;
   joyX = joyY = throttle = 0;
-  for (int i = 0; i < 4; i++) { target[i] = current[i] = 0; applyWheel(i); }
+  haltWheels();
   lastPrinted = "";
   caraDrive(0, 0);
   if (was && why) sendLine(String("ERR:") + why);
 }
 
-// Cancela la prueba de ruedas (si está corriendo): motores quietos y un ERR que dice por qué.
+// Cancela la prueba (si está corriendo): ruedas quietas y un ERR que dice por qué.
 void abortTest(const char* why) {
   if (!testRunning()) return;
   stopNow(nullptr);
+  caraTest(-1);
   sendLine(String("ERR:prueba cancelada: ") + why);
 }
 
-// Arranque y frenado suaves: la potencia se acerca a la pedida poco a poco.
-void loopRamp(uint32_t now) {
-  if (now - lastRamp < 10) return;
-  lastRamp = now;
-  for (int i = 0; i < 4; i++) {
-    int d = target[i] - current[i];
-    if (d == 0) continue;
-    current[i] += constrain(d, -(int)RAMP_STEP, (int)RAMP_STEP);
-    applyWheel(i);
+// Cada 5 ms: la rampa de los movimientos contados (arranca y frena suave en cada trazo) o la del manejo.
+// Y las ruedas que quedaron quietas apagan sus bobinas.
+void loopMotion(uint32_t now) {
+  static uint32_t last = 0;
+  if (now - last < 5) return;
+  last = now;
+  if (writing || testRunning()) {
+    int32_t remaining = max((int32_t)motor[0].left, (int32_t)motor[1].left);
+    if (remaining > 0) {
+      int32_t edge = min(moveTotal - remaining, remaining);
+      int32_t v = WRITE_MIN_RATE + (WRITE_MAX_RATE - WRITE_MIN_RATE) * min(edge, WRITE_RAMP_STEPS) / WRITE_RAMP_STEPS;
+      portENTER_CRITICAL(&stepMux);
+      for (Stepper& m : motor) if (m.left > 0) m.rate = m.rate > 0 ? v : -v;
+      portEXIT_CRITICAL(&stepMux);
+    }
+  } else {
+    for (int i = 0; i < 2; i++) {
+      int32_t d = driveTarget[i] - driveRate[i];
+      if (d == 0) continue;
+      driveRate[i] += constrain(d, -DRIVE_RAMP, DRIVE_RAMP);
+      setMotor(i, driveRate[i], -1);
+    }
+  }
+  for (int i = 0; i < 2; i++) {
+    if (motor[i].rate != 0) { idleSince[i] = now; continue; }
+    if (!motor[i].energized || now - idleSince[i] < COILS_OFF_MS) continue;
+    portENTER_CRITICAL(&stepMux);
+    if (motor[i].rate == 0) coilsOff(i);
+    portEXIT_CRITICAL(&stepMux);
+  }
+}
+
+// ============ LÁPIZ (motor amarillo con el L298N) ============
+// Sube o baja andando cfg.penMs y se detiene. No tiene sensor: la placa recuerda dónde quedó (también al
+// apagarse), y si se le pide lo contrario a mitad de camino vuelve solo lo que ya anduvo.
+bool penDown = false;        // dónde está, o hacia dónde va
+int8_t penDir = 0;           // +1 bajando, -1 subiendo, 0 quieto
+uint32_t penStart = 0, penFor = 0;
+
+void writePen(int8_t dir) {
+  if (isInverted(2)) dir = -dir;
+  digitalWrite(cfg.pen[0], dir > 0 ? HIGH : LOW);
+  digitalWrite(cfg.pen[1], dir < 0 ? HIGH : LOW);
+}
+
+void setupPen() {
+  for (int k = 0; k < 2; k++) pinMode(cfg.pen[k], OUTPUT);
+  writePen(0);
+}
+
+void reportPen() { sendLine("V" + String(VPIN_PEN) + ":" + String(penDown ? 1 : 0)); }
+
+void loadPen() {
+  prefs.begin("carro", true);
+  penDown = prefs.getBool("lapiz", false);
+  prefs.end();
+}
+
+void savePen() {
+  prefs.begin("carro", false);
+  if (prefs.getBool("lapiz", false) != penDown) prefs.putBool("lapiz", penDown);   // solo si cambió
+  prefs.end();
+}
+
+void movePen(bool down) {
+  if (down == penDown) return;
+  uint32_t now = millis();
+  penFor = penDir ? min(now - penStart, penFor) : cfg.penMs;
+  penDown = down;
+  penDir = down ? 1 : -1;
+  penStart = now;
+  writePen(penDir);
+  reportPen();
+  caraPen(down);
+}
+
+bool penBusy() { return penDir != 0; }
+
+void loopPen(uint32_t now) {
+  if (!penDir || now - penStart < penFor) return;
+  penDir = 0;
+  writePen(0);
+  if (!writing) savePen();   // escribiendo se guarda al final: cada trazo sería una escritura en la memoria
+}
+
+void setupAll() {
+  for (int i = 0; i < 2; i++) setupWheel(i);
+  setupPen();
+}
+
+void releaseAll() {
+  haltWheels();
+  for (int i = 0; i < 2; i++) for (int k = 0; k < 4; k++) releasePin(cfg.motor[i][k]);
+  writePen(0);
+  penDir = 0;
+  for (int k = 0; k < 2; k++) releasePin(cfg.pen[k]);
+}
+
+// ============ ESCRIBIR ============
+void releaseDriver() { driver = SRC_NONE; warnedSrc = 0; }
+
+String writeProgress() { return writing ? String(writeLetter) + "/" + String(writeTotal) : String("0"); }
+void reportWriting() { sendLine("V" + String(VPIN_WRITE) + ":" + writeProgress()); }
+
+// ESCRIBIR:<texto>. Quien lo pide queda como conductor hasta que termina.
+void startWriting(Src src, const String& text) {
+  if (writing) { reply(src, "ERR:ya esta escribiendo: toca Parar primero"); return; }
+  if (driver != SRC_NONE && driver != src) { reply(src, "ERR:otro telefono esta manejando el carrito"); return; }
+  int n = writer.empezar(text.c_str(), cfg.letterMm, penDown);
+  if (n == 0) { reply(src, "ERR:no hay letras para escribir: usa A-Z, N, 0-9 y . , ! ? - + :"); return; }
+  abortTest("llego un texto para escribir");
+  stopNow(nullptr);
+  wheels.reiniciar();
+  writing = true;
+  writeStepBusy = false;
+  writeLetter = 0;
+  writeTotal = n;
+  writerSrc = driver = src;
+  sendLine("OK:ESCRIBIENDO " + text);
+}
+
+// Detiene la escritura y sube el marcador. [why] = el motivo para el ERR, o nullptr si se pidió parar.
+void stopWriting(const char* why) {
+  if (!writing) return;
+  writing = false;
+  writeStepBusy = false;
+  haltWheels();
+  movePen(false);
+  reportWriting();
+  caraWrite(-1, 0);
+  sendLine(why ? String("ERR:escritura cancelada: ") + why : String("OK:escritura cancelada"));
+  releaseDriver();
+}
+
+// Paso a paso: espera a que termine el trazo (o el lápiz) y pide el siguiente al planificador.
+void loopWriting() {
+  if (!writing) return;
+  if (writeStepBusy) {
+    if (!moveDone() || penBusy()) return;
+    writeStepBusy = false;
+  }
+  Paso p;
+  if (!writer.siguiente(p)) {
+    writing = false;
+    reportWriting();
+    savePen();
+    caraWrite(0, writeTotal);
+    sendLine("OK:ESCRITO");
+    releaseDriver();
+    return;
+  }
+  switch (p.tipo) {
+    case PASO_LETRA:
+      writeLetter = (int)p.valor;
+      reportWriting();
+      caraWrite(writeLetter, writeTotal);
+      return;
+    case PASO_LAPIZ:
+      movePen(p.valor > .5f);
+      writeStepBusy = true;
+      return;
+    case PASO_GIRO:
+    case PASO_AVANCE: {
+      int32_t l, r;
+      wheels.pasos(p, Medidas{(float)cfg.wheelMm, (float)cfg.trackMm}, l, r);
+      startMove(l, r);
+      writeStepBusy = true;
+      return;
+    }
   }
 }
 
 // ============ CONDUCTOR ============
-void releaseDriver() { driver = SRC_NONE; warnedSrc = 0; }
-
 // Avisa una sola vez a un origen que su orden de manejo no se aplica.
 void warnOnce(Src src, const char* text) {
   if (warnedSrc & (1 << src)) return;
@@ -421,8 +597,13 @@ void warnOnce(Src src, const char* text) {
 
 // Llegó joystick o acelerador. Parar vale desde cualquier origen; moverse, solo desde el conductor
 // (el primero que se mueve cuando no hay otro). Solo el conductor renueva el watchdog de señal.
+// Escribiendo, el joystick no cuenta (ni para parar: la app manda «quieto» al abrir el panel).
 // Devuelve false si la orden se ignora.
 bool acceptDrive(Src src, bool stop) {
+  if (writing) {
+    if (!stop) warnOnce(src, "ERR:el robot esta escribiendo: toca Parar para manejar");
+    return false;
+  }
   abortTest(stop ? "llego una orden de parar" : "llego una orden de manejo");
   uint8_t bit = 1 << src;
   if (stop) {
@@ -446,12 +627,13 @@ bool acceptDrive(Src src, bool stop) {
 }
 
 // Un teléfono se conectó, se desconectó o perdió la clave: se olvida lo que mandó a medias y, si
-// era el que manejaba (o nadie manejaba), el carrito se detiene con el seguro puesto.
+// era el que manejaba (o nadie manejaba), el robot se detiene con el seguro puesto.
 void sourceChanged(Src s) {
   clearLine(s);
   waitNeutral &= ~(1 << s);
   warnedSrc &= ~(1 << s);
-  turretWarned = false;
+  if (writing && s == writerSrc) stopWriting("se desconecto el telefono que lo pidio");
+  if (writing) return;   // escribe para otro teléfono: sigue
   if (testRunning()) {
     if (s == testSrc) abortTest("se desconecto el telefono que la pidio");
     return;
@@ -464,76 +646,11 @@ void sourceChanged(Src s) {
 }
 
 // Watchdog de señal: solo lo renuevan el joystick y el acelerador del conductor (no PING ni otras
-// órdenes, así un teléfono en segundo plano que solo manda PING no deja el carrito andando).
+// órdenes, así un teléfono en segundo plano que solo manda PING no deja el robot andando).
 void loopSafety(uint32_t now) {
-  if (testRunning() || now - lastRx <= SIGNAL_TIMEOUT_MS) return;   // la prueba de ruedas no necesita señal
-  // También si quedó algo pedido sin moverse (por ejemplo, el acelerador puesto frente a un obstáculo).
+  if (writing || testRunning() || now - lastRx <= SIGNAL_TIMEOUT_MS) return;   // escribir y probar no necesitan señal
   if (moving() || joyX || joyY || throttle) { stopNow("sin señal: el carrito se detuvo"); lockDriving(); }
   if (driver != SRC_NONE) releaseDriver();
-}
-
-// ============ LUCES, BOCINA, SENSOR ============
-void writeLights(bool on) {
-  if (cfg.lights >= 0) digitalWrite(cfg.lights, (on != (bool)cfg.lightsInv) ? HIGH : LOW);
-}
-
-void setLights(bool on) {
-  lightsOn = on;
-  writeLights(on);
-}
-
-void setHorn(bool on) {
-  if (cfg.horn >= 0) digitalWrite(cfg.horn, (on != (bool)cfg.hornInv) ? HIGH : LOW);
-}
-
-void loopHorn(uint32_t now) {
-  if (hornUntil && (int32_t)(now - hornUntil) >= 0) { hornUntil = 0; setHorn(false); }
-}
-
-const char* SENSOR_ERR = "ERR:el sensor de distancia no responde: revisa TRIG, ECHO y sus 5 V";
-
-// Dispara el HC-SR04 y mide el eco (como mucho ~35 ms). Devuelve los µs del eco, 0 si no volvió eco
-// dentro de ~4 m (nada adelante) o -1 si el sensor no contestó: el ECHO nunca subió o sigue arriba.
-// (pulseIn daba 0 en los dos casos y no permitía saber si el sensor estaba desconectado.)
-long echoMicros() {
-  if (digitalRead(cfg.echo) == HIGH) return -1;
-  digitalWrite(cfg.trig, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(cfg.trig, LOW);
-  uint32_t t0 = micros();
-  while (digitalRead(cfg.echo) == LOW) if (micros() - t0 > 10000) return -1;
-  uint32_t t1 = micros();
-  while (digitalRead(cfg.echo) == HIGH) if (micros() - t1 > 25000) return 0;
-  return (long)(micros() - t1);
-}
-
-void loopSensor(uint32_t now) {
-  if (cfg.trig < 0 || cfg.echo < 0 || now - lastSensor < 80) return;
-  lastSensor = now;
-  long us = echoMicros();
-  if (us >= 0) {
-    if (sensorFails >= SENSOR_FAILS) sendLine("OK:el sensor de distancia volvio a responder");
-    sensorFails = 0;
-  } else if (sensorFails < SENSOR_FAILS && ++sensorFails == SENSOR_FAILS) {
-    sendLine(SENSOR_ERR);   // una sola vez, hasta que vuelva a responder
-  }
-  distanceCm = us > 0 ? (int)(us / 58) : 400;
-  bool obstacle = obstacleAhead();
-  if (obstacle != lastObstacle && !testRunning()) {
-    lastObstacle = obstacle;
-    if (obstacle) caraObstacle(distanceCm);
-    computeTargets();
-    // Obstáculo adelante: el avance se corta al instante, sin rampa (girar o retroceder sigue con rampa).
-    if (obstacle)
-      for (int i = 0; i < 4; i++)
-        if (current[i] > 0 && current[i] > target[i]) { current[i] = target[i] > 0 ? target[i] : 0; applyWheel(i); }
-  }
-  bool changed = abs(distanceCm - lastDistSent) >= 2;
-  if ((changed && now - lastDistReport > 300) || now - lastDistReport > 2000) {
-    lastDistReport = now;
-    lastDistSent = distanceCm;
-    sendLine("V" + String(VPIN_DIST) + ":" + String(distanceCm));
-  }
 }
 
 // ============ CLAVE (igual que la casa) ============
@@ -605,7 +722,7 @@ void handleAuth(Src src, const String& given) {
 void handleNewKey(Src src, const String& key) {
   if (src == SRC_SERIAL && key.equalsIgnoreCase("BORRAR")) {
     storeKey("", SRC_SERIAL);
-    reply(src, "OK:el carrito quedo sin clave");
+    reply(src, "OK:el robot quedo sin clave");
     return;
   }
   if (carKey.length() && !authed[src]) { reply(src, "AUTH:PIDE"); return; }
@@ -613,23 +730,14 @@ void handleNewKey(Src src, const String& key) {
   storeKey(key, src);
   authed[src] = true;
   replyAuth(src, "AUTH:OK", CARA_KEY_OK);
-  Serial.println("Clave del carrito guardada");
+  Serial.println("Clave del robot guardada");
 }
 
 // Mantener BOOT presionado 5 s borra la clave, por si se olvida y no hay computadora a mano.
-// Las luces parpadean 3 veces para confirmarlo, sin delay(): el loop sigue atendiendo los motores.
-uint8_t blinkLeft = 0;
-uint32_t blinkNext = 0;
-
+// Los ojos lo muestran pidiendo la clave.
 void loopResetButton(uint32_t now) {
   static uint32_t pressStart = 0;
   static bool done = false;
-  if (blinkLeft && (int32_t)(now - blinkNext) >= 0) {
-    blinkLeft--;
-    blinkNext = now + 250;
-    if (blinkLeft) writeLights(blinkLeft % 2 == 0);   // 6 prendidas, 5 apagadas, ... 1 apagadas
-    else setLights(lightsOn);                         // 0: como estaban
-  }
   if (pinInUse(BOOT_PIN)) { pressStart = 0; return; }   // el GPIO 0 se usa para otra cosa
   if (digitalRead(BOOT_PIN) == HIGH) { pressStart = 0; done = false; return; }
   if (pressStart == 0) pressStart = now | 1;
@@ -637,76 +745,81 @@ void loopResetButton(uint32_t now) {
   done = true;
   storeKey("", SRC_SERIAL);
   Serial.println("Clave borrada con el boton BOOT");
-  blinkLeft = 7;
-  blinkNext = now;
+  caraKey(CARA_KEY_ASK);
 }
 
 // ============ MENSAJES ============
 String invertString() {
   String s;
-  for (int i = 0; i < 4; i++) s += isInverted(i) ? '1' : '0';
+  for (int i = 0; i < 3; i++) s += isInverted(i) ? '1' : '0';
   return s;
+}
+
+String measuresString() {
+  return String(cfg.wheelMm) + "," + String(cfg.trackMm) + "," + String(cfg.letterMm) + "," + String(cfg.penMs);
 }
 
 void sync() {
   sendLine("VER:" FW_VERSION);
-  sendLine("V" + String(VPIN_LIGHTS) + ":" + String(lightsOn ? 1 : 0));
   sendLine("V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0));
   sendLine("V" + String(VPIN_THROTTLE) + ":" + String(throttle));
   sendLine("V" + String(VPIN_INVERT) + ":" + invertString());
-  if (cfg.turret >= 0) sendLine("V" + String(VPIN_TURRET) + ":" + String(turretAngle));   // la app muestra la torreta solo si existe
-  if (distanceCm >= 0) sendLine("V" + String(VPIN_DIST) + ":" + String(distanceCm));
-  if (cfg.trig >= 0 && sensorFails >= SENSOR_FAILS) sendLine(SENSOR_ERR);   // para el teléfono que recién llega
+  sendLine("V" + String(VPIN_MEASURES) + ":" + measuresString());
+  reportPen();       // la app muestra el lápiz y la escritura porque la placa los dice
+  reportWriting();
 }
 
-String pinText(int8_t g) { return g < 0 ? String("-") : String((int)g); }
+String pinList(const int8_t* pins, int n) {
+  String s;
+  for (int k = 0; k < n; k++) s += (k ? "," : "") + String((int)pins[k]);
+  return s;
+}
 
 void showPins() {
-  for (int i = 0; i < 4; i++)
-    sendLine(String("OK:") + WHEEL_CODE[i] + " EN " + pinText(cfg.wheel[i][0]) + " IN " + pinText(cfg.wheel[i][1]) + "," + pinText(cfg.wheel[i][2]) +
-             (isInverted(i) ? " invertida" : ""));
-  sendLine("OK:luces " + pinText(cfg.lights) + " · bocina " + pinText(cfg.horn) + " · torreta " + pinText(cfg.turret) +
-           " · sensor " + pinText(cfg.trig) + "," + pinText(cfg.echo) + " · minimo " + String(cfg.minPower) + " %");
+  for (int i = 0; i < 2; i++)
+    sendLine(String("OK:") + WHEEL_NAME[i] + " IN " + pinList(cfg.motor[i], 4) + (isInverted(i) ? " invertida" : ""));
+  sendLine("OK:lapiz IN " + pinList(cfg.pen, 2) + (isInverted(2) ? " invertido" : ""));
+  sendLine("OK:medidas rueda " + String(cfg.wheelMm) + " mm · eje " + String(cfg.trackMm) + " mm · letra " +
+           String(cfg.letterMm) + " mm · lapiz " + String(cfg.penMs) + " ms");
 }
 
-// Prueba de ruedas: cada rueda gira hacia adelante TEST_SPIN_MS y queda quieta TEST_PAUSE_MS, una por
-// una. La sigue loopTest() sin bloquear, así el loop sigue atendiendo el freno, las conexiones y la clave.
-// (Antes se borraba lo que llegaba durante la prueba; ya no hace falta: ahora cada orden se atiende
-// en el momento, y borrar la cola de Bluetooth perdería los avisos de conexión.)
-void spinTestWheel(int w) {
-  testWheel = w;
+// Prueba: cada parte se mueve sola y hay una pausa entre una y otra. La sigue loopTest() sin bloquear, así
+// el loop sigue atendiendo PARAR, las conexiones y la clave.
+const char* TEST_NAME[4] = {"rueda izquierda", "rueda derecha", "lapiz abajo", "lapiz arriba"};
+
+void startTestPart(int k) {
+  testPart = k;
   testPaused = false;
-  caraWheel(w);   // la cara mira la rueda que gira
-  sendLine(String("OK:PRUEBA rueda ") + WHEEL_NAME[w]);
-  current[w] = toPower(60);
-  applyWheel(w);
-  testUntil = millis() + TEST_SPIN_MS;
+  caraTest(k);
+  sendLine(String("OK:PRUEBA ") + TEST_NAME[k]);
+  if (k == 0) startMove(TEST_STEPS, 0);
+  else if (k == 1) startMove(0, TEST_STEPS);
+  else movePen(k == 2);
 }
 
 void startTest(Src src) {
+  if (writing) { reply(src, "ERR:espera a que termine de escribir (o toca Parar)"); return; }
   if (testRunning()) { abortTest("se pidio TEST otra vez mientras corria"); return; }
   stopNow(nullptr);
   releaseDriver();
   testSrc = src;
-  sendLine("OK:PRUEBA cada rueda debe girar hacia ADELANTE");
-  spinTestWheel(0);
+  sendLine("OK:PRUEBA cada rueda debe girar hacia ADELANTE y el lapiz bajar y subir");
+  startTestPart(0);
 }
 
 void loopTest(uint32_t now) {
-  if (!testRunning() || (int32_t)(now - testUntil) < 0) return;
-  int w = testWheel;
-  if (!testPaused) {          // terminó de girar: la rueda se detiene y empieza la pausa
-    current[w] = 0;
-    applyWheel(w);
+  if (!testRunning()) return;
+  if (!testPaused) {                      // terminó de moverse: empieza la pausa
+    if (!moveDone() || penBusy()) return;
     testPaused = true;
     testUntil = now + TEST_PAUSE_MS;
-  } else if (w < 3) {
-    spinTestWheel(w + 1);
-  } else {
-    testWheel = -1;
-    caraWheel(-1);
-    sendLine("OK:PRUEBA terminada. Si una rueda giro hacia atras, activa Invertir en esa rueda");
+    return;
   }
+  if ((int32_t)(now - testUntil) < 0) return;
+  if (testPart < 3) { startTestPart(testPart + 1); return; }
+  testPart = -1;
+  caraTest(-1);
+  sendLine("OK:PRUEBA terminada. Si una rueda giro hacia atras o el lapiz subio al bajar, activa Invertir");
 }
 
 // Número entero estricto: solo dígitos, con un «-» delante si hace falta. "abc", "" o "12x" no valen
@@ -738,9 +851,9 @@ int parseList(const String& s, int* out, int maxN) {
 }
 
 // Revisa una lista de pines nuevos para una pieza. Devuelve el problema, o "" si están bien.
-String checkPins(const int* pins, int n, const bool* output, const String& self) {
+String checkPins(const int* pins, int n, const String& self) {
   for (int k = 0; k < n; k++) {
-    const char* p = gpioProblem(pins[k], output[k]);
+    const char* p = gpioProblem(pins[k]);
     if (p) return "GPIO " + String(pins[k]) + ": " + p;
     String owner = pinOwner(pins[k]);
     if (owner.length() && owner != self) return "el GPIO " + String(pins[k]) + " ya lo usa " + owner;
@@ -749,101 +862,77 @@ String checkPins(const int* pins, int n, const bool* output, const String& self)
   return "";
 }
 
-void handleWheelPins(const String& arg) {   // DI:32,33,25
+// Antes de cambiar pines: nada se mueve con los viejos.
+void stopEverything(const char* why) {
+  stopWriting(why);
+  abortTest(why ? why : "se pidio parar");
+  stopNow(nullptr);
+}
+
+void handleMotorPins(const String& arg) {   // I:32,33,25,26
   int colon = arg.indexOf(':');
   String code = arg.substring(0, colon);
   code.toUpperCase();
-  int w = -1;
-  for (int i = 0; i < 4; i++) if (code == WHEEL_CODE[i]) w = i;
-  int pins[3];
-  if (w < 0 || colon < 0 || parseList(arg.substring(colon + 1), pins, 3) != 3) { sendLine("ERR:usa RUEDA:DI:32,33,25"); return; }
-  const bool out[3] = {true, true, true};
-  String problem = checkPins(pins, 3, out, String("rueda ") + WHEEL_CODE[w]);
+  int w = code == WHEEL_CODE[0] ? 0 : (code == WHEEL_CODE[1] ? 1 : -1);
+  int pins[4];
+  if (w < 0 || colon < 0 || parseList(arg.substring(colon + 1), pins, 4) != 4) { sendLine("ERR:usa MOTOR:I:32,33,25,26 (o MOTOR:D:...)"); return; }
+  String problem = checkPins(pins, 4, WHEEL_NAME[w]);
   if (problem.length()) { sendLine("ERR:" + problem); return; }
-  abortTest("cambiaron los pines de una rueda");
-  stopNow(nullptr);
-  for (int j = 0; j < 3; j++) releasePin(cfg.wheel[w][j], LOW, false);
-  for (int j = 0; j < 3; j++) cfg.wheel[w][j] = pins[j];
+  stopEverything("cambiaron los pines de una rueda");
+  for (int k = 0; k < 4; k++) releasePin(cfg.motor[w][k]);
+  for (int k = 0; k < 4; k++) cfg.motor[w][k] = pins[k];
   setupWheel(w);
   saveConfig();
-  sendLine(String("OK:rueda ") + WHEEL_CODE[w] + " EN " + pins[0] + " IN " + pins[1] + "," + pins[2]);
+  sendLine(String("OK:") + WHEEL_NAME[w] + " IN " + pinList(cfg.motor[w], 4));
 }
 
-void handleCfg(const String& arg) {         // V23:23:0:1
-  int vpin, gpio, inv, en;
-  int a = arg.indexOf(':'), b = arg.indexOf(':', a + 1), c = arg.indexOf(':', b + 1);
-  if (a < 0 || b < 0 || c < 0 || (arg[0] != 'V' && arg[0] != 'v') ||
-      !parseIntStrict(arg.substring(1, a), vpin) || !parseIntStrict(arg.substring(a + 1, b), gpio) ||
-      !parseIntStrict(arg.substring(b + 1, c), inv) || !parseIntStrict(arg.substring(c + 1), en) ||
-      inv < 0 || inv > 1 || en < 0 || en > 1) { sendLine("ERR:CFG " + arg); return; }
-  int8_t* slot; uint8_t* slotInv; const char* name;
-  if (vpin == VPIN_LIGHTS) { slot = &cfg.lights; slotInv = &cfg.lightsInv; name = "luces"; }
-  else if (vpin == VPIN_HORN) { slot = &cfg.horn; slotInv = &cfg.hornInv; name = "bocina"; }
-  else if (vpin == VPIN_TURRET) { slot = &cfg.turret; slotInv = &cfg.turretInv; name = "torreta"; }
-  else { sendLine("ERR:CFG V" + String(vpin) + " no se configura asi"); return; }
-  if (en) {
-    const bool out[1] = {true};
-    String problem = checkPins(&gpio, 1, out, name);
-    if (problem.length()) { sendLine("ERR:" + problem); return; }
-  }
-  int8_t pin = en ? gpio : -1;
-  if (*slot != pin || *slotInv != inv) {   // solo se toca y se graba si cambió (la app lo reenvía al conectar)
-    releasePin(*slot, vpin == VPIN_TURRET ? LOW : *slotInv, false);
-    *slot = pin;
-    *slotInv = inv;
-    if (vpin == VPIN_TURRET) setupTurret(); else setupOutput(*slot, *slotInv);
-    if (vpin == VPIN_LIGHTS) setLights(lightsOn);
-    saveConfig();
-  }
-  sendLine(String("OK:") + name + (en ? " GPIO " + String(gpio) + (inv ? " inv" : "") : String(" sin conectar")));
-}
-
-void handleSensor(String arg) {             // 21,34  o  NO
-  arg.trim();
-  arg.toUpperCase();
-  releasePin(cfg.trig, LOW, false);
-  releasePin(cfg.echo, LOW, true);
-  if (arg == "NO") {
-    cfg.trig = cfg.echo = -1;
-    distanceCm = -1;
-    sensorFails = 0;
-    saveConfig();
-    sendLine("OK:sensor quitado");
-    return;
-  }
+void handlePenPins(const String& arg) {     // 27,14
   int pins[2];
-  int8_t oldTrig = cfg.trig, oldEcho = cfg.echo;
-  cfg.trig = cfg.echo = -1;   // para que no choquen consigo mismos
-  const bool out[2] = {true, false};
-  String problem = parseList(arg, pins, 2) == 2 ? checkPins(pins, 2, out, "sensor") : String("usa SENSOR:21,34");
-  if (problem.length()) {
-    cfg.trig = oldTrig; cfg.echo = oldEcho;
-    setupSensor();
-    sendLine("ERR:" + problem);
-    return;
-  }
-  cfg.trig = pins[0];
-  cfg.echo = pins[1];
-  setupSensor();
+  if (parseList(arg, pins, 2) != 2) { sendLine("ERR:usa LAPIZ:27,14"); return; }
+  String problem = checkPins(pins, 2, "lapiz");
+  if (problem.length()) { sendLine("ERR:" + problem); return; }
+  stopEverything("cambiaron los pines del lapiz");
+  writePen(0);
+  penDir = 0;
+  for (int k = 0; k < 2; k++) releasePin(cfg.pen[k]);
+  for (int k = 0; k < 2; k++) cfg.pen[k] = pins[k];
+  setupPen();
   saveConfig();
-  sendLine("OK:sensor TRIG " + String(pins[0]) + " ECHO " + String(pins[1]));
+  sendLine("OK:lapiz IN " + pinList(cfg.pen, 2));
 }
 
-void handleInvert(String v) {               // 0100
+void handleInvert(String v) {               // 010
   v.trim();
-  if (v.length() != 4) { sendLine("ERR:V27 necesita cuatro 0/1, por ejemplo 0100"); return; }
   uint8_t mask = 0;
-  for (int i = 0; i < 4; i++) {
-    if (v[i] != '0' && v[i] != '1') { sendLine("ERR:V27 necesita cuatro 0/1, por ejemplo 0100"); return; }
+  bool ok = v.length() == 3;
+  for (unsigned i = 0; ok && i < 3; i++) {
+    ok = v[i] == '0' || v[i] == '1';
     if (v[i] == '1') mask |= 1 << i;
   }
+  if (!ok) { sendLine("ERR:V27 necesita tres 0/1 (rueda izquierda, rueda derecha, lapiz), por ejemplo 010"); return; }
   if (mask != cfg.invertMask) {   // solo se graba si cambió (cada escritura gasta la memoria de la placa)
-    abortTest("cambio el sentido de una rueda");
-    stopNow(nullptr);
+    stopEverything("cambio el sentido de una rueda o del lapiz");
     cfg.invertMask = mask;
+    for (int i = 0; i < 2; i++) motor[i].inverted = isInverted(i);
     saveConfig();
   }
   sendLine("V" + String(VPIN_INVERT) + ":" + invertString());
+}
+
+void handleMeasures(const String& v) {      // 65,120,30,1000
+  int m[4];
+  if (parseList(v, m, 4) != 4 || m[0] < 20 || m[0] > 150 || m[1] < 40 || m[1] > 400 || m[2] < 10 || m[2] > 200 ||
+      m[3] < 100 || m[3] > 5000) {
+    sendLine("ERR:V30 es rueda,eje,letra,lapiz en mm, mm, mm y ms: por ejemplo 65,120,30,1000");
+    return;
+  }
+  if (writing) {
+    sendLine("ERR:espera a que termine de escribir para cambiar las medidas");
+  } else if (m[0] != cfg.wheelMm || m[1] != cfg.trackMm || m[2] != cfg.letterMm || m[3] != cfg.penMs) {
+    cfg.wheelMm = m[0]; cfg.trackMm = m[1]; cfg.letterMm = m[2]; cfg.penMs = m[3];
+    saveConfig();
+  }
+  sendLine("V" + String(VPIN_MEASURES) + ":" + measuresString());
 }
 
 // Con el seguro puesto: anota si este control llegó en cero y quita el seguro cuando los dos lo hicieron.
@@ -862,7 +951,7 @@ bool unlockWith(bool neutral, bool& seen) {
 }
 
 // Con el seguro puesto solo cuenta lo que manda el conductor (o cualquiera, si nadie maneja).
-// Mientras hay seguro el carrito ya está detenido, así que ignorar el «parar» de otro no cambia nada.
+// Mientras hay seguro el robot ya está detenido, así que ignorar el «parar» de otro no cambia nada.
 bool lockedFor(Src src, bool neutral, bool& seen) {
   if (!driveLocked) return false;
   if (driver != SRC_NONE && driver != src) return true;
@@ -881,14 +970,21 @@ void otaReply(const String& answer) {
   else if (answer.startsWith("OTA:ERR:")) caraUpdate(-1);
 }
 
-// OTA:<tamaño>:<md5>. Solo por Wi-Fi (por Bluetooth tardaría minutos), y el carrito se detiene antes.
+// OTA:<tamaño>:<md5>. Solo por Wi-Fi (por Bluetooth tardaría minutos), y el robot se detiene antes.
 void handleOta(Src src, const String& arg) {
   if (src != SRC_TCP) { reply(src, "OTA:ERR:se actualiza por Wi-Fi"); return; }
-  abortTest("llego una version nueva");
-  stopNow(nullptr);
+  stopEverything("llego una version nueva");
+  if (penBusy()) { writePen(0); penDir = 0; }   // el marcador queda donde está
   lockDriving();
   releaseDriver();
   otaReply(otaBegin(arg));
+}
+
+// Órdenes que mueven algo: mientras llega una versión nueva no se aceptan.
+bool movesSomething(const String& up) {
+  return up == "TEST" || up == "FABRICA" || up.startsWith("MOTOR:") || up.startsWith("LAPIZ:") ||
+         up.startsWith("ESCRIBIR:") || up.startsWith("V" + String(VPIN_JOY) + ":") ||
+         up.startsWith("V" + String(VPIN_THROTTLE) + ":") || up.startsWith("V" + String(VPIN_PEN) + ":");
 }
 
 void handleLine(Src src, String line) {
@@ -905,37 +1001,27 @@ void handleLine(Src src, String line) {
 
   if (up == "SYNC") { sync(); return; }
   if (up.startsWith("OTA:")) { handleOta(src, line.substring(4)); return; }
-  if (otaActive() && (up == "TEST" || up == "FABRICA" || up.startsWith("RUEDA:") ||
-                      up.startsWith("V" + String(VPIN_JOY) + ":") || up.startsWith("V" + String(VPIN_THROTTLE) + ":"))) {
-    warnOnce(src, OTA_BUSY);   // quieto mientras llega la versión nueva
-    return;
-  }
+  if (otaActive() && movesSomething(up)) { warnOnce(src, OTA_BUSY); return; }   // quieto mientras llega la versión nueva
+  if (up == "PARAR") { stopEverything(nullptr); reply(src, "OK:PARADO"); return; }
+  if (up.startsWith("ESCRIBIR:")) { startWriting(src, line.substring(9)); return; }
   if (up == "TEST") { startTest(src); return; }
   if (up == "PINES") { showPins(); return; }
   if (up == "FABRICA") {
-    abortTest("cambiaron los pines");
-    stopNow(nullptr); releaseAll(); cfg = DEFAULTS; saveConfig(); setupAll();
-    sendLine("OK:pines de fabrica"); showPins();
+    stopEverything("cambiaron los pines");
+    releaseAll(); cfg = DEFAULTS; saveConfig(); setupAll();
+    sendLine("OK:pines y medidas de fabrica"); showPins();
+    sync();
     return;
   }
-  if (up.startsWith("RUEDA:")) { handleWheelPins(line.substring(6)); return; }
-  if (up.startsWith("CFG:")) { handleCfg(line.substring(4)); return; }
-  if (up.startsWith("SENSOR:")) { handleSensor(line.substring(7)); return; }
-  if (up.startsWith("MINIMO:")) {
-    int m;
-    if (!parseIntStrict(line.substring(7), m) || m < 0 || m > 90) { sendLine("ERR:MINIMO va de 0 a 90"); return; }
-    if (m != cfg.minPower) { cfg.minPower = m; saveConfig(); }
-    computeTargets();
-    sendLine("OK:minimo " + String(m) + " %");
-    return;
-  }
+  if (up.startsWith("MOTOR:")) { handleMotorPins(line.substring(6)); return; }
+  if (up.startsWith("LAPIZ:")) { handlePenPins(line.substring(6)); return; }
 
   int colon = line.indexOf(':');
   int vpin;
-  if (line[0] != 'V' || colon < 2 || !parseIntStrict(line.substring(1, colon), vpin)) { sendLine("ERR:no entiendo " + line); return; }
+  if (up[0] != 'V' || colon < 2 || !parseIntStrict(line.substring(1, colon), vpin)) { sendLine("ERR:no entiendo " + line); return; }
   String v = line.substring(colon + 1);
   int n = 0;   // valor de los pines que llevan un solo número
-  bool single = vpin == VPIN_TURRET || vpin == VPIN_LIGHTS || vpin == VPIN_THROTTLE || vpin == VPIN_REVERSE || vpin == VPIN_HORN;
+  bool single = vpin == VPIN_THROTTLE || vpin == VPIN_REVERSE || vpin == VPIN_PEN;
   if (single && !parseIntStrict(v, n)) { sendLine("ERR:V" + String(vpin) + " necesita un numero"); return; }
 
   switch (vpin) {
@@ -967,25 +1053,16 @@ void handleLine(Src src, String line) {
         return;
       }
       reverseGear = n != 0; computeTargets(); sendLine("V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0)); return;
-    case VPIN_LIGHTS:
-      setLights(n != 0);
-      caraLights(lightsOn);
-      sendLine("V" + String(VPIN_LIGHTS) + ":" + String(lightsOn ? 1 : 0));
-      return;
-    case VPIN_HORN:
-      if (n) { setHorn(true); hornUntil = millis() + HORN_MS; caraHorn(); } else { setHorn(false); hornUntil = 0; }
-      return;
-    case VPIN_TURRET:
-      if (cfg.turret < 0) {
-        if (!turretWarned) sendLine("ERR:la torreta no esta conectada (CFG:V21:<gpio>:0:1)");
-        turretWarned = true;
-        return;
-      }
-      turretAngle = constrain(n, 0, 359);
-      writeTurret();
+    case VPIN_PEN:
+      if (writing) { reply(src, "ERR:el robot esta escribiendo: el lapiz lo maneja el"); reportPen(); return; }
+      if (driver != SRC_NONE && driver != src) { warnOnce(src, "ERR:otro telefono esta manejando el carrito"); reportPen(); return; }
+      abortTest("se movio el lapiz");
+      if ((n != 0) == penDown) reportPen();   // ya estaba así: igual se confirma
+      movePen(n != 0);
       return;
     case VPIN_INVERT: handleInvert(v); return;
-    default: sendLine("ERR:V" + String(vpin) + " no existe en el carrito"); return;
+    case VPIN_MEASURES: handleMeasures(v); return;
+    default: sendLine("ERR:V" + String(vpin) + " no existe en el robot"); return;
   }
 }
 
@@ -1197,40 +1274,27 @@ void sendLine(const String& line) {
 }
 
 // ============ PROGRAMA PRINCIPAL ============
-// La pantalla usa los GPIO 21 y 22. Un ajuste guardado antes de carro-0.5 pudo poner algo ahí (el sensor
-// del ejemplo usaba el 21): en ese caso se respeta ese ajuste y la cara no se usa hasta moverlo.
-bool faceOn = false;
-
-void setupFace() {
-  if (pinInUse(OLED_SDA) || pinInUse(OLED_SCL)) {
-    Serial.println("Aviso: la pantalla de la cara usa los GPIO 21 y 22, pero " + pinOwner(pinInUse(OLED_SDA) ? OLED_SDA : OLED_SCL) +
-                   " esta en uno de ellos. Muevelo (por ejemplo SENSOR:15,34) para usar la cara.");
-    return;
-  }
-  faceOn = true;
-  caraBegin();
-}
-
 void setup() {
   loadConfig();
-  setupAll();            // motores quietos lo antes posible
-  setLights(false);
-  setHorn(false);
+  setupAll();            // ruedas quietas y lápiz detenido lo antes posible
+  loadPen();
   if (!pinInUse(BOOT_PIN)) pinMode(BOOT_PIN, INPUT_PULLUP);   // botón BOOT: 5 s presionado borra la clave
   loadKey();
 
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n== " DEVICE_NAME " (" FW_VERSION ") ==");
-  setupFace();           // antes que el Bluetooth: el logo aparece enseguida
+  Serial.println("\n== Auto Robot (" FW_VERSION ") ==");
+  caraBegin();           // antes que el Bluetooth: el logo aparece enseguida
+  setupSteppers();
   setupBle();
 #if USE_WIFI
   setupWifi();
 #endif
   showPins();
-  Serial.println(carKey.length() ? "El carrito tiene clave." : "El carrito no tiene clave: el primer telefono que se conecte la crea.");
-  Serial.println("Escribe mensajes aqui mismo para probar, por ejemplo: V20:0,60 (adelante) o TEST");
-  enableLoopWDT();       // si loop() se traba más de 5 s, la placa se reinicia (los motores quedan quietos)
+  Serial.println(penDown ? "El lapiz quedo abajo la ultima vez." : "El lapiz esta arriba.");
+  Serial.println(carKey.length() ? "El robot tiene clave." : "El robot no tiene clave: el primer telefono que se conecte la crea.");
+  Serial.println("Escribe mensajes aqui mismo para probar, por ejemplo: V20:0,60 (adelante), TEST o ESCRIBIR:HOLA");
+  enableLoopWDT();       // si loop() se traba más de 5 s, la placa se reinicia (las ruedas quedan quietas)
 }
 
 void loop() {
@@ -1242,11 +1306,11 @@ void loop() {
   uint32_t now = millis();   // después de leer: lastRx nunca queda «en el futuro»
   loopSafety(now);
   loopTest(now);
-  loopSensor(now);
-  if (!testRunning()) loopRamp(now);   // durante la prueba las ruedas las maneja loopTest
-  loopHorn(now);
+  loopWriting();
+  loopMotion(now);
+  loopPen(now);
   loopResetButton(now);
   String otaNews = otaLoop(now);
   if (otaNews.length()) otaReply(otaNews);
-  if (faceOn) caraLoop(now);
+  caraLoop(now);
 }

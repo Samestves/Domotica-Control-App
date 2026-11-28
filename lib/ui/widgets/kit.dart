@@ -82,6 +82,11 @@ class Ic {
   static const distance = IconData(0xe1d6, fontFamily: 'PhosphorLight') /* crosshair */;
   static const steering = IconData(0xe9ac, fontFamily: 'PhosphorLight') /* steeringWheel */;
   static const wheels = IconData(0xe434, fontFamily: 'PhosphorLight') /* slidersHorizontal */;
+  static const pen = IconData(0xe3ac, fontFamily: 'PhosphorLight') /* penNib */;
+  static const penFill = IconData(0xe3ac, fontFamily: 'PhosphorFill') /* penNib */;
+  static const send = IconData(0xe396, fontFamily: 'PhosphorLight') /* paperPlaneRight */;
+  static const write = IconData(0xe662, fontFamily: 'PhosphorLight') /* scribbleLoop */;
+  static const ruler = IconData(0xe6b8, fontFamily: 'PhosphorLight') /* ruler */;
 }
 
 /// «⋯»: abre las opciones de algo. Sin borde, para que no compita con lo principal; [label] es su nombre para el
