@@ -48,40 +48,40 @@
       "name": "Auto Robot",
       "short": "El carrito",
       "icon": "car-profile",
-      "version": "carro-0.6",
+      "version": "carro-0.7",
       "notes": [
-        "El robot que escribe: dos motores paso a paso, el marcador que sube y baja, y escribe lo que le mandas desde la app 0.9.9.",
-        "Un ojo en cada pantalla (izquierdo SDA 21 · SCL 22, derecho SDA 23 · SCL 4). Sin pantallas funciona igual.",
-        "Se actualiza por Wi-Fi desde la app y conserva la clave. Los pines son los nuevos del robot (ver la guía)."
+        "Sabe dónde está en la hoja (con el 0,0 de la app 0.9.11): no sale del papel y avisa si un texto no cabe.",
+        "Va a un punto de la hoja y queda derecho para escribir, y la app ve su cara en vivo.",
+        "Se actualiza por Wi-Fi desde la app y conserva la clave, los pines y las medidas."
       ],
       "files": [
         {
           "name": "bootloader.bin",
-          "url": "firmware/carro-0.6/bootloader.bin",
+          "url": "firmware/carro-0.7/bootloader.bin",
           "address": 4096,
           "size": 18960,
           "md5": "81da22449acfb2451d39eaa91ecd2570"
         },
         {
           "name": "partitions.bin",
-          "url": "firmware/carro-0.6/partitions.bin",
+          "url": "firmware/carro-0.7/partitions.bin",
           "address": 32768,
           "size": 3072,
           "md5": "2ddc2d5f85b2c5288013adbe45d9cb7b"
         },
         {
           "name": "boot_app0.bin",
-          "url": "firmware/carro-0.6/boot_app0.bin",
+          "url": "firmware/carro-0.7/boot_app0.bin",
           "address": 57344,
           "size": 8192,
           "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "name": "app.bin",
-          "url": "firmware/carro-0.6/app.bin",
+          "url": "firmware/carro-0.7/app.bin",
           "address": 65536,
-          "size": 1549952,
-          "md5": "aafa52f46107adacceb279264ea8c073"
+          "size": 1564800,
+          "md5": "a29f9e449820d6767195906847b9ce57"
         }
       ]
     }
