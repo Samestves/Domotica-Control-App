@@ -3,7 +3,7 @@ description: "App para controlar la maqueta domótica y el carro robot por Bluet
 publish_to: 'none'
 
 # version: nombre+nÃºmero de compilaciÃ³n. Mantener igual a lib/version.dart.
-version: 0.9.9+29
+version: 0.9.10+30
 
 environment:
   sdk: ^3.13.4

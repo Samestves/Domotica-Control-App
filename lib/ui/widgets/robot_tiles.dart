@@ -348,63 +348,78 @@ class _WriteTileState extends State<WriteTile> {
       ),
     );
 
+    // Título y alto de las letras (un toque abre las medidas).
+    final header = Row(children: [
+      Icon(Ic.write, size: 18, color: c.text2),
+      const SizedBox(width: 8),
+      const Expanded(child: Eyebrow('Escribir', maxLines: 1)),
+      const SizedBox(width: 12),
+      Flexible(
+        child: Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: Tap(
+            onTap: widget.onOpenSettings,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Ic.ruler, size: 15, color: c.text3),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text('Letras de ${m.letterText}', style: T.small.copyWith(color: c.text3), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    ]);
+
     return Panel(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: LayoutBuilder(builder: (context, box) {
         final roomy = box.maxHeight >= 210;
+        // Con el teclado abierto puede quedar muy poco alto: solo el campo y su botón. El título y lo de abajo se
+        // achican a nada en su lugar (no se quitan): así el campo no cambia de posición ni pierde el foco.
+        final tiny = box.maxHeight < 130;
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            Icon(Ic.write, size: 18, color: c.text2),
-            const SizedBox(width: 8),
-            const Expanded(child: Eyebrow('Escribir', maxLines: 1)),
-            const SizedBox(width: 12),
-            // El alto de las letras, a la vista: un toque abre las medidas.
-            Flexible(
-              child: Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: Tap(
-                  onTap: widget.onOpenSettings,
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Ic.ruler, size: 15, color: c.text3),
-                    const SizedBox(width: 5),
-                    Flexible(
-                      child: Text('Letras de ${m.letterText}', style: T.small.copyWith(color: c.text3), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ),
-                  ]),
+          SizedBox(
+            child: tiny
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: header,
+                  ),
+          ),
+          // El campo va siempre en el mismo lugar (una fila, primero): si cambiara de lugar al subir el teclado,
+          // se rearmaría, perdería el foco y el teclado bajaría al instante. Con poco alto, el botón va a su lado.
+          Row(children: [Expanded(child: field), if (!roomy) ...[const SizedBox(width: 10), button]]),
+          if (!tiny) ...[
+            if (box.maxHeight >= 150) ...[
+              const SizedBox(height: 10),
+              Expanded(child: LetrasPreview(text: shown, progress: progress)),
+            ] else
+              const Spacer(),
+            const SizedBox(height: 10),
+            if (writing) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: (progress.$1 - .5) / progress.$2,
+                  minHeight: 4,
+                  color: c.amber,
+                  backgroundColor: c.surface2,
                 ),
               ),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          if (roomy) field else Row(children: [Expanded(child: field), const SizedBox(width: 10), button]),
-          if (box.maxHeight >= 150) ...[
-            const SizedBox(height: 10),
-            Expanded(child: LetrasPreview(text: shown, progress: progress)),
-          ] else
-            const Spacer(),
-          const SizedBox(height: 10),
-          if (writing) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: (progress.$1 - .5) / progress.$2,
-                minHeight: 4,
-                color: c.amber,
-                backgroundColor: c.surface2,
+              const SizedBox(height: 8),
+            ],
+            Row(children: [
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  layoutBuilder: _alignStart,
+                  child: Text(status, key: ValueKey(status), style: T.small.copyWith(color: statusColor), maxLines: 2),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
+              if (roomy) ...[const SizedBox(width: 10), button],
+            ]),
           ],
-          Row(children: [
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                layoutBuilder: _alignStart,
-                child: Text(status, key: ValueKey(status), style: T.small.copyWith(color: statusColor), maxLines: 2),
-              ),
-            ),
-            if (roomy) ...[const SizedBox(width: 10), button],
-          ]),
         ]);
       }),
     );

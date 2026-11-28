@@ -21,6 +21,7 @@ void main() {
       expect(newer('v0.9.0'), isFalse);
       expect(newer('v0.8.9+30'), isFalse, reason: 'una versión vieja nunca se ofrece');
       expect(newer('basura'), isFalse);
+      expect(Updater.isNewer('v0.9.10+30', current: 'Alpha 0.9.9', currentBuild: 29), isTrue, reason: '10 es más que 9: números, no letras');
     });
   });
 

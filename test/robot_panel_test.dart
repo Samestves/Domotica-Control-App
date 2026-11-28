@@ -135,6 +135,25 @@ void main() {
     await close(t, s);
   });
 
+  testWidgets('el teclado no se cierra solo: al abrirse, el campo sigue siendo el mismo y con el foco', (t) async {
+    // El bug de la 0.9.9: al subir el teclado la tarjeta cambiaba de forma, el campo se rearmaba, perdía el foco
+    // y el teclado bajaba al instante (y volvía a empezar).
+    final (s, _) = await open(t);
+    await t.showKeyboard(find.byType(TextField));
+    final field = t.state<EditableTextState>(find.byType(EditableText));
+    expect(t.testTextInput.isVisible, isTrue);
+    for (final inset in [220.0, 300.0, 0.0, 220.0]) {
+      t.view.viewInsets = FakeViewPadding(bottom: inset); // el teclado sube (o Android lo acomoda)
+      await t.pump();
+      expect(t.state<EditableTextState>(find.byType(EditableText)), same(field), reason: 'con el teclado a $inset: el mismo campo');
+      expect(field.widget.focusNode.hasFocus, isTrue, reason: 'con el teclado a $inset: sigue con el foco');
+      expect(t.testTextInput.isVisible, isTrue, reason: 'con el teclado a $inset: el teclado sigue arriba');
+    }
+    t.view.resetViewInsets();
+    await t.pump();
+    await close(t, s);
+  });
+
   testWidgets('con el teclado abierto queda solo escribir, sin perder el texto', (t) async {
     final (s, _) = await open(t);
     await t.enterText(find.byType(TextField), 'SOL');
