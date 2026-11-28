@@ -6,11 +6,11 @@
       "name": "Casa domótica",
       "short": "La casa",
       "icon": "house-simple",
-      "version": "casa-0.9",
+      "version": "casa-1.0",
       "notes": [
-        "Desde esta versión se actualiza por Wi-Fi desde la app 0.9.6: esta es la última vez por cable.",
-        "Dice su versión a la app al conectarse.",
-        "Conserva la clave y los ajustes que ya tenía la placa."
+        "Cada servo se suelta un segundo después de moverse: ya no se queda empujando ni gastando corriente.",
+        "Si el módulo de los servos se reinicia, la placa lo prepara de nuevo sola.",
+        "Se actualiza por Wi-Fi desde la app y conserva la clave y los ajustes que ya tenía la placa."
       ]
     },
     {

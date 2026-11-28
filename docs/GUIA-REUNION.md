@@ -14,14 +14,20 @@
 - **`casa-0.8`** (servos por el **módulo PCA9685**, como pidieron): compilada y revisada, **todavía sin probar**.
   Sin el módulo conectado, las puertas y persianas no se mueven (las luces y la alarma sí); en cuanto lo conectan, la placa
   lo encuentra sola en 2 segundos, sin volver a instalar.
-- **`casa-0.9`** = `casa-0.8` + **actualización por Wi‑Fi** desde la app, y dice su versión. Compilada y revisada,
-  **todavía sin probar**. Es la que instala la página: **la última vez por cable**.
+- **`casa-0.9`** = `casa-0.8` + **actualización por Wi‑Fi** desde la app, y dice su versión. **Instalada por el equipo
+  en la maqueta:** luces, sirena y seguridad responden. Las puertas abren, pero después de cerrar una ya no se movía
+  ninguna: los servos comían de la fuentecita de la protoboard (da para uno) y el que cerraba contra la pared se
+  quedaba empujando para siempre.
+- **`casa-1.0`** = `casa-0.9` + cada servo **se suelta 1 s después de moverse** (ya no se queda empujando ni gastando) y
+  la placa **prepara de nuevo el módulo PCA9685 si se reinicia**. Probada en la PC con su código real contra un PCA9685
+  simulado; **todavía sin probar en la maqueta**. Los servos necesitan su propia fuente de 5 V y 2 A o más en la bornera
+  verde del módulo (un cargador de celular sirve), con el GND unido al del ESP32.
 - **Carrito:** tiene `carro-0.4`, instalada con la página; conecta por Bluetooth y pide clave (necesita la app 0.9.0 o más nueva).
 - **`carro-0.5`** = `carro-0.4` + **cara en una pantalla OLED** (opcional) + actualización por Wi‑Fi. Compilada y revisada,
   **todavía sin probar**. Es la que instala la página.
 - Falta probar todo **conectado a la maqueta** y al carrito con sus motores.
 
-Pines de la casa con `casa-0.8` y `casa-0.9`:
+Pines de la casa con `casa-0.8`, `casa-0.9` y `casa-1.0`:
 
 | Pieza | Pin virtual | Dónde va |
 |---|---|---|

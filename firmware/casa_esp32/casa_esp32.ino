@@ -25,8 +25,11 @@
     Los servos comen de la bornera verde del módulo (V+), con una fuente de 5 V; nunca del ESP32.
     Se mueven de a uno, con 150 ms entre uno y otro: así el pico de corriente es el de un solo servo
     y alcanza una sola fuente para todo, incluso al encender o con varias órdenes juntas.
+    Cada servo hace fuerza 1 s, lo que tarda en llegar, y después se suelta: la puerta o persiana
+    queda donde llegó por el roce de sus engranajes, y el servo no gasta corriente esperando.
     Si el módulo no responde, las órdenes a los servos contestan ERR y la placa lo vuelve a buscar
-    cada 2 s; cuando aparece, cada servo vuelve a su posición.
+    cada 2 s; cuando aparece, cada servo vuelve a su posición. Lo mismo si se reinició (por ejemplo,
+    porque le faltó corriente un instante): se nota antes de mover el siguiente servo.
 
   Seguridad (igual que en su versión de Blynk): con la seguridad armada, si el garaje
   o la puerta principal quedan abiertos 20 s, suena la sirena y las luces parpadean.
@@ -40,7 +43,7 @@
                     En puertas y persianas, invertir = el servo gira al lado contrario.
                     Se rechazan los GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria), 21 y 22 (el módulo
                     PCA9685) y un GPIO o canal que ya use otra salida activa. El que se deja queda en reposo.
-    SYNC            la placa responde con su versión (VER:casa-0.9) y el estado actual de todo
+    SYNC            la placa responde con su versión (VER:casa-1.0) y el estado actual de todo
     TEST            mueve cada salida una por una para ver qué es cada cosa (ERR si ya hay una en curso)
     PING            la placa responde PONG
     OTA:<tamaño>:<md5>  recibe una versión nueva por Wi-Fi (ver ota.h). Mientras llega, las puertas y
@@ -68,6 +71,14 @@
   recibe «ERR:ya hay otro telefono conectado por Wi-Fi» y se cierra. Si el actual lleva más
   de 6 s sin mandar nada (la app manda PING cada 3 s), se cierra el actual y entra el nuevo.
 
+  Cambios de casa-1.0 (respecto de casa-0.9):
+    - Cada servo se suelta 1 s después de moverse. Antes quedaba haciendo fuerza para siempre: una puerta
+      que al cerrar topa con la pared lo dejaba empujando, gastando su máximo de corriente, y con una
+      fuente chica los demás servos se quedaban sin fuerza (abría bien, y después de cerrar ya nada se movía).
+    - Si el módulo PCA9685 se reinicia (queda dormido y sin pulsos, aunque siga respondiendo), la placa lo
+      nota antes del siguiente movimiento, lo prepara de nuevo y lleva cada servo a su posición.
+      Antes seguía mandándole órdenes que no hacían nada.
+
   Cambios de casa-0.9 (respecto de casa-0.8):
     - Se actualiza por Wi-Fi desde la app (OTA, ver ota.h): el teléfono le manda el programa nuevo, la
       placa revisa su huella MD5 y solo entonces se reinicia con él. Si la versión nueva se cuelga al
@@ -92,7 +103,7 @@
 
 // ============ CONFIGURACIÓN ============
 #define DEVICE_NAME  "Casa Domotica"
-#define FW_VERSION   "casa-0.9"
+#define FW_VERSION   "casa-1.0"
 #define USE_BLE      1        // 1 = conectar por Bluetooth LE
 #define USE_WIFI     1        // 1 = conectar también por Wi-Fi
 #define WIFI_PROPIA  1        // 1 = el ESP32 crea su propia red · 0 = se une a la red de abajo
@@ -155,9 +166,13 @@ const uint32_t SERVO_HZ = 50;                // un pulso cada 20 ms
 const uint32_t SERVO_MIN_US = 500, SERVO_MAX_US = 2400;   // 0° y 180°: los mismos de casa-0.7
 const unsigned long PCA_RETRY_MS = 2000;     // si no responde, se vuelve a buscar cada 2 s
 const unsigned long SERVO_GAP_MS = 150;      // pausa entre un servo y el siguiente
+const unsigned long SERVO_HOLD_MS = 1000;    // fuerza tras moverse: le alcanza para llegar; después se suelta
+const uint8_t MODE1_SLEEP = 0x10, MODE1_AI = 0x20;   // bits del registro MODE1: dormido y auto-incremento
 bool pcaOk = false;
 unsigned long pcaTriedAt = 0;
 uint32_t servoDue = 0;                       // servos con un movimiento pendiente (un bit por canal de ch)
+uint32_t servoHolding = 0;                   // servos que todavía hacen fuerza (un bit por canal de ch)
+unsigned long servoMovedAt[N];               // cuándo empezó a moverse cada servo que hace fuerza
 unsigned long lastServoMove = 0;
 int servoNext = 0;                           // por dónde sigue la ronda, para que ninguno espere siempre
 
@@ -260,12 +275,29 @@ bool pcaInit() {
   Wire.beginTransmission(PCA_ADDR);
   if (Wire.endTransmission() != 0) return false;
   const uint8_t prescale = (uint8_t)(25000000UL / (4096UL * SERVO_HZ) - 1);   // 121: reloj interno de 25 MHz
-  bool ok = pcaWrite8(0x00, 0x10)          // MODE1: dormido, para poder cambiar la frecuencia
+  bool ok = pcaWrite8(0x00, MODE1_SLEEP)   // MODE1: dormido, para poder cambiar la frecuencia
             && pcaWrite8(0xFE, prescale)   // PRE_SCALE
             && pcaWrite8(0x01, 0x04)       // MODE2: salidas tótem (las que usan los servos)
-            && pcaWrite8(0x00, 0x20);      // MODE1: despierto y con auto-incremento
+            && pcaWrite8(0x00, MODE1_AI);  // MODE1: despierto y con auto-incremento
   delayMicroseconds(600);                  // el oscilador tarda 500 µs en arrancar
   return ok;
+}
+
+// true si el módulo sigue como lo dejó pcaInit(): despierto y con auto-incremento. Si se quedó sin
+// corriente un instante, vuelve a como sale de fábrica (dormido, sin pulsos) aunque siga respondiendo.
+bool pcaAwake() {
+  Wire.beginTransmission(PCA_ADDR);
+  Wire.write(0x00);                        // MODE1
+  if (Wire.endTransmission(false) != 0 || Wire.requestFrom(PCA_ADDR, (uint8_t)1) != 1) return false;
+  return (Wire.read() & (MODE1_SLEEP | MODE1_AI)) == MODE1_AI;
+}
+
+const char* PCA_GONE = "El modulo PCA9685 dejo de responder: revisa SDA (21), SCL (22) y su alimentacion.";
+
+// El módulo no respondió o se reinició: pcaReady() lo vuelve a preparar y lleva cada servo a su posición.
+void pcaLost(const char* why) {
+  pcaOk = false;
+  Serial.println(why);
 }
 
 // Pulso de un canal, en 4096 pasos por período: sube en `on` y baja en `off`. off = 4096: sin pulsos.
@@ -286,7 +318,7 @@ uint16_t pulseTicks(int angle) {
 }
 
 // Canal sin pulsos: el servo queda suelto y no hace fuerza.
-void pcaRelease(int channel) { pcaSet(channel, 0, 4096); }
+bool pcaRelease(int channel) { return pcaSet(channel, 0, 4096); }
 
 void queueServo(const Channel& c) { servoDue |= 1UL << indexOf(&c); }
 
@@ -311,19 +343,46 @@ void loopServos(unsigned long now) {
   if (servoDue == 0 || otaActive() || now - lastServoMove < SERVO_GAP_MS || !pcaReady()) return;
   for (int k = 0; k < N; k++) {
     int i = (servoNext + k) % N;
-    if (!(servoDue & (1UL << i))) continue;
-    servoDue &= ~(1UL << i);
+    const uint32_t bit = 1UL << i;
+    if (!(servoDue & bit)) continue;
+    servoDue &= ~bit;
     Channel& c = ch[i];
     if (!c.enabled) continue;
-    servoNext = i + 1;
-    if (!pcaSet(c.pin, 0, pulseTicks(servoAngle(c)))) {
-      servoDue |= 1UL << i;   // se reintenta cuando el módulo vuelva
-      pcaOk = false;
-      Serial.println("El modulo PCA9685 dejo de responder: revisa SDA (21), SCL (22) y su alimentacion.");
+    // Un módulo reiniciado acepta las órdenes pero no genera pulsos: se revisa antes de cada movimiento.
+    // Si falla, este servo conserva su turno: es el primero en moverse cuando el módulo vuelva.
+    if (!pcaAwake()) {
+      servoDue |= bit;
+      servoNext = i;
+      pcaLost("El modulo PCA9685 se reinicio o no responde: lo preparo de nuevo. Si se repite, revisa su fuente de 5 V.");
       return;
     }
+    if (!pcaSet(c.pin, 0, pulseTicks(servoAngle(c)))) {
+      servoDue |= bit;
+      servoNext = i;
+      pcaLost(PCA_GONE);
+      return;
+    }
+    servoNext = i + 1;
     lastServoMove = now;
+    servoMovedAt[i] = now;
+    servoHolding |= bit;
     return;
+  }
+}
+
+// Suelta cada servo SERVO_HOLD_MS después de moverse, cuando ya llegó. Haciendo fuerza para siempre, uno
+// que topa (una puerta apretada contra la pared) gasta su máximo de corriente sin parar y deja sin fuerza
+// a los demás. Suelto, la puerta o persiana queda donde llegó por el roce de sus engranajes.
+void loopServoRelease(unsigned long now) {
+  if (servoHolding == 0 || !pcaOk) return;
+  for (int i = 0; i < N; i++) {
+    const uint32_t bit = 1UL << i;
+    if (!(servoHolding & bit) || now - servoMovedAt[i] < SERVO_HOLD_MS) continue;
+    if (!pcaRelease(ch[i].pin)) {
+      pcaLost(PCA_GONE);
+      return;   // al volver, pcaReady() lleva cada servo a su posición y se suelta de nuevo
+    }
+    servoHolding &= ~bit;
   }
 }
 
@@ -363,7 +422,9 @@ void setupChannel(Channel& c) {
 // en un relé activo en bajo LOW lo encendería). Servos: su canal del módulo sin pulsos, no hacen fuerza.
 void releasePin(Channel& c) {
   if (isServo(c)) {
-    servoDue &= ~(1UL << indexOf(&c));
+    const uint32_t bit = 1UL << indexOf(&c);
+    servoDue &= ~bit;
+    servoHolding &= ~bit;   // ya queda suelto aquí; soltarlo después pisaría su canal nuevo
     if (!pcaOwner(c.pin, &c) && pcaOk) pcaRelease(c.pin);
     return;
   }
@@ -638,6 +699,7 @@ void loopTest(unsigned long now) {
     Channel& c = ch[testIndex];
     sendLine("OK:TEST V" + String(c.vpin) + " " + c.name + (isServo(c) ? " canal " : " GPIO ") + String(c.pin));
     if (isServo(c)) {
+      servoHolding &= ~(1UL << testIndex);   // que no lo suelte a mitad de la prueba una orden anterior
       if (pcaReady()) pcaSet(c.pin, 0, pulseTicks(90));
       lastServoMove = now;   // la pausa entre servos también cuenta para la prueba
       testWait = 700;
@@ -1099,6 +1161,7 @@ void loop() {
   loopSecurity(now);
   loopFlash(now);
   loopServos(now);
+  loopServoRelease(now);
   loopTest(now);
   loopResetButton(now);
   String otaNews = otaLoop(now);
