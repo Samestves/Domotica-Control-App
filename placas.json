@@ -1,45 +1,45 @@
 {
-  "updated": "24-11-2026",
+  "updated": "28-11-2026",
   "boards": [
     {
       "id": "casa",
       "name": "Casa domótica",
       "short": "La casa",
       "icon": "house-simple",
-      "version": "casa-0.9",
+      "version": "casa-1.0",
       "notes": [
-        "Desde esta versión se actualiza por Wi-Fi desde la app 0.9.6: esta es la última vez por cable.",
-        "Dice su versión a la app al conectarse.",
-        "Conserva la clave y los ajustes que ya tenía la placa."
+        "Cada servo se suelta un segundo después de moverse: ya no se queda empujando ni gastando corriente.",
+        "Si el módulo de los servos se reinicia, la placa lo prepara de nuevo sola.",
+        "Se actualiza por Wi-Fi desde la app y conserva la clave y los ajustes que ya tenía la placa."
       ],
       "files": [
         {
           "name": "bootloader.bin",
-          "url": "firmware/casa-0.9/bootloader.bin",
+          "url": "firmware/casa-1.0/bootloader.bin",
           "address": 4096,
           "size": 18960,
           "md5": "81da22449acfb2451d39eaa91ecd2570"
         },
         {
           "name": "partitions.bin",
-          "url": "firmware/casa-0.9/partitions.bin",
+          "url": "firmware/casa-1.0/partitions.bin",
           "address": 32768,
           "size": 3072,
           "md5": "2ddc2d5f85b2c5288013adbe45d9cb7b"
         },
         {
           "name": "boot_app0.bin",
-          "url": "firmware/casa-0.9/boot_app0.bin",
+          "url": "firmware/casa-1.0/boot_app0.bin",
           "address": 57344,
           "size": 8192,
           "md5": "e6327541e2dc394ca2c3b3280ac0f39f"
         },
         {
           "name": "app.bin",
-          "url": "firmware/casa-0.9/app.bin",
+          "url": "firmware/casa-1.0/app.bin",
           "address": 65536,
-          "size": 1518032,
-          "md5": "d839c1896b6cab676dd41796d5c7bc1a"
+          "size": 1519952,
+          "md5": "2151bcf5a4161c04c23d51c246be87d9"
         }
       ]
     },
