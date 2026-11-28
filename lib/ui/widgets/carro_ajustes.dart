@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/pins.dart';
+import '../../models/robot.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
 import 'clave.dart';
@@ -150,6 +151,7 @@ class _CarroAjustesState extends State<_CarroAjustes> {
                     style: T.small.copyWith(color: c.text2), textAlign: TextAlign.center),
               ),
             if (robot) ...[const SizedBox(height: 18), _MeasuresEditor(session: _s)],
+            if (robot && robotKnowsPaper(_s)) ...[const SizedBox(height: 18), _PaperEditor(session: _s)],
             const SizedBox(height: 18),
             RowGroup(children: [
               if (on && _s.keyed)
@@ -320,6 +322,131 @@ class _MeasuresEditorState extends State<_MeasuresEditor> {
       if (problem != null) ...[
         const SizedBox(height: 8),
         Text(problem, style: T.small.copyWith(color: c.amber), textAlign: TextAlign.center),
+      ],
+    ]);
+  }
+}
+
+/// La hoja donde escribe el robot (desde carro-0.7). Con ella y el 0,0, el robot no saca el marcador del papel
+/// y avisa si un texto no cabe. Las comunes se eligen con un toque; otra medida se escribe y se guarda.
+class _PaperEditor extends StatefulWidget {
+  final Session session;
+  const _PaperEditor({required this.session});
+
+  @override
+  State<_PaperEditor> createState() => _PaperEditorState();
+}
+
+class _PaperEditorState extends State<_PaperEditor> {
+  static const _other = 'Otra', _none = 'Sin hoja';
+  late String _choice;
+  final _width = TextEditingController(), _height = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    final paper = robotPaper(widget.session);
+    _choice = paper == null ? _none : (Paper.presets.containsValue(paper) ? paper.name : _other);
+    _width.text = '${paper?.width ?? 300}';
+    _height.text = '${paper?.height ?? 200}';
+    for (final f in [_width, _height]) {
+      f.addListener(() => setState(() {}));
+    }
+  }
+
+  @override
+  void dispose() {
+    _width.dispose();
+    _height.dispose();
+    super.dispose();
+  }
+
+  Paper? get _typed {
+    final w = int.tryParse(_width.text.trim()), h = int.tryParse(_height.text.trim());
+    bool ok(int? v) => v != null && v >= Paper.minMm && v <= Paper.maxMm;
+    return ok(w) && ok(h) ? Paper(w!, h!) : null;
+  }
+
+  void _send(Paper? p) {
+    HapticFeedback.selectionClick();
+    widget.session.send(CarPins.paper, p?.wire ?? '0,0');
+  }
+
+  void _pick(String choice) {
+    setState(() => _choice = choice);
+    if (choice == _none) return _send(null);
+    final preset = Paper.presets[choice];
+    if (preset != null) _send(preset);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final s = widget.session;
+    final usable = s.connected && !robotBusy(s);
+    final saved = robotPaper(s), typed = _typed;
+
+    Widget field(String label, TextEditingController ctrl) => Expanded(
+          child: Panel(
+            radius: R.tile,
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Eyebrow(label, maxLines: 1),
+              TextField(
+                controller: ctrl,
+                enabled: usable,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
+                style: T.heading,
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.only(top: 6),
+                  suffixText: 'mm',
+                  suffixStyle: T.small.copyWith(color: c.text3),
+                ),
+              ),
+            ]),
+          ),
+        );
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 4),
+        child: SheetHeader(
+          eyebrow: 'Hoja',
+          title: 'El papel',
+          detail: 'Con la hoja y el 0,0 el robot no saca el marcador del papel y avisa si un texto no cabe. '
+              'Se pone acostada: el robot escribe a lo largo.',
+        ),
+      ),
+      const SizedBox(height: 12),
+      IgnorePointer(
+        ignoring: !usable,
+        child: Opacity(
+          opacity: usable ? 1 : .5,
+          child: Segmented<String>(
+            value: _choice,
+            items: {for (final k in [...Paper.presets.keys, _other, _none]) k: k},
+            onChanged: _pick,
+          ),
+        ),
+      ),
+      if (_choice == _other) ...[
+        const SizedBox(height: 10),
+        Row(children: [field('A lo largo', _width), const SizedBox(width: 10), field('A lo ancho', _height)]),
+        const SizedBox(height: 10),
+        PillButton(
+          'Guardar hoja',
+          icon: Ic.ruler,
+          expand: true,
+          kind: PillKind.secondary,
+          onTap: usable && typed != null && typed != saved ? () => _send(typed) : null,
+        ),
+        if (typed == null) ...[
+          const SizedBox(height: 8),
+          Text('De ${Paper.minMm} a ${Paper.maxMm} mm por lado', style: T.small.copyWith(color: c.amber), textAlign: TextAlign.center),
+        ],
       ],
     ]);
   }

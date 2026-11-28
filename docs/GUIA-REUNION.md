@@ -208,6 +208,26 @@ salen deformes; con buenas, del tamaño justo.
 Seguridad: mientras escribe no obedece el joystick (hay que tocar **Parar**), y si se desconecta el teléfono que pidió escribir,
 se detiene. Con el lápiz abajo y el joystick también dibuja a mano alzada. Quietos, los motores apagan sus bobinas.
 
+### La hoja (`carro-0.7`, app 0.9.11)
+
+Arriba del panel se elige **Manejar** (joystick, acelerador, reversa, velocidad lenta, lápiz, parar, la hoja y la cara en vivo) o
+**Escribir** (el texto con su vista previa, la hoja, el lápiz y parar). Para escribir en el papel:
+
+1. En los ajustes del robot, la **hoja**: Carta, A4, Oficio u otra medida (acostada: el robot escribe a lo largo).
+2. Se pone el robot con el **marcador en la esquina de abajo a la izquierda**, mirando a lo largo de la hoja, y se toca **0,0**.
+3. Desde ahí el robot sabe dónde está contando los pasos de las ruedas (no tiene sensores): la app lo muestra en la hoja, con
+   la tinta de lo que dibuja. El joystick **no saca el marcador del papel** (girar en el lugar sí se puede).
+4. Un toque en la hoja e **Ir aquí**: el robot va a ese punto y queda derecho. **Alinear** lo endereza donde está.
+5. **Escribir** muestra en la hoja dónde caerá el texto: verde si cabe, rojo si no. Si no cabe, no deja empezar (las letras se
+   achican con un toque: 2, 3, 4 o 5 cm).
+
+Si las ruedas patinan o alguien levanta el robot, se pierde la cuenta: hay que poner el 0,0 otra vez. La prueba de las ruedas
+(Probar) también lo borra, porque giran en el aire. Con **Velocidad lenta** el joystick vale un tercio: sirve para ubicarlo.
+
+Probado en la computadora con el programa real y un ESP32 simulado: 68 comprobaciones del programa del robot (28 nuevas: dónde
+está, la cerca, ir a un punto, si cabe el texto y la cara) y 18 de las cuentas de la hoja. **Todavía no probado en el robot de
+verdad.**
+
 Probado en la computadora con el programa real y un ESP32 simulado (39 comprobaciones: dibuja cada raya en su lugar, nunca se
 mueve con el lápiz a medio camino, PARAR, la prueba y el corte de señal). **Todavía no probado en el robot de verdad.**
 

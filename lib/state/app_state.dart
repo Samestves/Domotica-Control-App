@@ -69,6 +69,14 @@ class Session extends ChangeNotifier {
   final _messages = StreamController<Msg>.broadcast();
   Stream<Msg> get messages => _messages.stream;
 
+  /// Pines que llegan varias veces por segundo (dónde está el robot, su cara). Se guardan en [values] sin
+  /// anotarlos en los mensajes ni redibujar toda la app: avisan por [telemetry], y los escuchan solo las
+  /// tarjetas que los muestran.
+  static const telemetryPins = {CarPins.pose, CarPins.face, CarPins.faceLabel};
+
+  /// Cambia cada vez que llega uno de [telemetryPins].
+  final telemetry = ValueNotifier<int>(0);
+
   /// Crea la conexión de una placa. Las pruebas pueden pasar otra para simular fallos.
   final DeviceLink Function(SavedDevice) _linkFor;
 
@@ -398,8 +406,14 @@ class Session extends ChangeNotifier {
   void _onLine(String line) {
     _silentBeats = 0;
     if (line == 'PONG') return; // respuesta al latido: no hace falta mostrarla
-    _addLog(true, line);
     final m = Msg.parse(line);
+    if (m.isPin && telemetryPins.contains(m.pin)) {
+      values[m.pin!] = m.value;
+      if (!_messages.isClosed) _messages.add(m);
+      telemetry.value++;
+      return;
+    }
+    _addLog(true, line);
     if (!_messages.isClosed) _messages.add(m);
     if (m.kind == 'AUTH') {
       _onClaveReply(m.value);
@@ -490,6 +504,10 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Manda una línea sin anotarla ni redibujar: para pedir datos que llegan solos (por ejemplo, CARA:1). Se
+  /// puede llamar en cualquier momento, también mientras se arma o se cierra una pantalla.
+  void sendSilently(String line) => _link?.sendLine(line);
+
   void clearAlert() {
     lastAlert = null;
     notifyListeners();
@@ -515,6 +533,7 @@ class Session extends ChangeNotifier {
     _claveTimer?.cancel();
     _changeTimer?.cancel();
     _messages.close();
+    telemetry.dispose();
     _teardown();
     super.dispose();
   }

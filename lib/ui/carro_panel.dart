@@ -14,6 +14,7 @@ import 'widgets/carro_ajustes.dart';
 import 'widgets/clave.dart';
 import 'widgets/drive_controls.dart';
 import 'widgets/kit.dart';
+import 'widgets/robot_paper.dart';
 import 'widgets/robot_tiles.dart';
 import 'widgets/status.dart';
 
@@ -41,15 +42,31 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
   /// Avisos de la placa (por ejemplo, «suelta el joystick y el acelerador»).
   StreamSubscription? _messages;
 
+  /// Tablero del robot de cada placa (manejar o escribir), mientras la app está abierta.
+  static final _robotModes = <String, RobotMode>{};
+  RobotMode get _mode => _robotModes[widget.device.id] ?? RobotMode.drive;
+
+  /// Velocidad lenta: el joystick y el acelerador valen un tercio, para ubicar el robot en la hoja con precisión.
+  bool _slow = false;
+  static const _slowFactor = .35;
+
+  /// Lo que dibujó el robot, para verlo en la hoja: se arma con cada posición que dice la placa.
+  final _trail = RobotTrail();
+
+  /// El texto que se está escribiendo en el modo escribir: la hoja muestra dónde caería.
+  final _draft = ValueNotifier<String>('');
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final s = AppScope.read(context).session(widget.device);
     if (s == _session) return;
     _session?.removeListener(_onSession);
+    _session?.telemetry.removeListener(_onTelemetry);
     _messages?.cancel();
     _messages = s.messages.listen(_onMessage);
     _session = s..addListener(_onSession);
+    s.telemetry.addListener(_onTelemetry);
     _wasOn = s.connected;
     // Al abrir el panel, la placa recibe «quieto» antes de cualquier movimiento.
     if (s.connected) WidgetsBinding.instance.addPostFrameCallback((_) => _sendNeutral());
@@ -68,6 +85,7 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
   /// Si se corta la conexión, el acelerador y el joystick vuelven a cero: al reconectar, el carro
   /// no arranca solo con la orden vieja. Al volver la conexión, la placa recibe «quieto».
   void _onSession() {
+    _onTelemetry(); // el lápiz pudo bajar justo donde está: ahí empieza la tinta
     final on = _session?.connected ?? false;
     if (on == _wasOn || !mounted) return;
     _wasOn = on;
@@ -76,6 +94,12 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     } else {
       setState(_zeroControls);
     }
+  }
+
+  /// Cada posición nueva del robot: si el marcador está abajo, es tinta en la hoja.
+  void _onTelemetry() {
+    final s = _session;
+    if (s != null && isRobot(s)) _trail.add(robotPose(s), penDown: s.values[CarPins.pen] == '1');
   }
 
   /// La placa puso el seguro (se cortó la señal): la app suelta sus controles y le avisa «quieto».
@@ -115,8 +139,8 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
   void _repeat() {
     final s = _session;
     if (s == null || !s.connected || !_foreground) return;
-    if (_jx != 0 || _jy != 0) s.send(CarPins.joystick, '$_jx,$_jy', quiet: true);
-    if (_throttle != 0) s.send(CarPins.throttle, _throttle, quiet: true);
+    if (_jx != 0 || _jy != 0) s.send(CarPins.joystick, _joyWire(_jx, _jy), quiet: true);
+    if (_throttle != 0) s.send(CarPins.throttle, _scaled(_throttle), quiet: true);
   }
 
   @override
@@ -125,6 +149,9 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     _messages?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _session?.removeListener(_onSession);
+    _session?.telemetry.removeListener(_onTelemetry);
+    _trail.dispose();
+    _draft.dispose();
     // Al salir: detener el carro (justo después, para no redibujar mientras se cierra la pantalla)
     // y volver a la orientación normal.
     final s = _session;
@@ -134,6 +161,10 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     Pantalla.encendida(false);
     super.dispose();
   }
+
+  /// En velocidad lenta, un tercio de lo pedido (el robot se ubica con precisión en la hoja).
+  int _scaled(int v) => _slow ? (v * _slowFactor).round() : v;
+  String _joyWire(int x, int y) => '${_scaled(x)},${_scaled(y)}';
 
   /// Limita los mensajes continuos (joystick, dial, acelerador) a uno cada 90 ms por pin.
   void _sendThrottled(Session s, int pin, Object v, {bool force = false}) {
@@ -179,7 +210,7 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
             _jx = x;
             _jy = y;
           });
-          _sendThrottled(s, CarPins.joystick, '$x,$y', force: x == 0 && y == 0);
+          _sendThrottled(s, CarPins.joystick, _joyWire(x, y), force: x == 0 && y == 0);
         },
       );
 
@@ -249,59 +280,196 @@ class _CarroPanelState extends State<CarroPanel> with WidgetsBindingObserver {
     if (notice != null) return notice;
     final p = writingProgress(s);
     if (p != null) return 'Escribiendo · letra ${p.$1} de ${p.$2}';
-    return motionText(_jx, _jy, 0, reverse: false);
+    if (robotGoing(s)) return 'Yendo al punto de la hoja';
+    final motion = motionText(_jx, _jy, _throttle, reverse: s.values[CarPins.reverse] == '1');
+    return _slow && motion != 'Quieto' ? '$motion · lento' : motion;
   }
 
-  /// Robot: manejar a la izquierda, escribir al centro (lo más grande) y lápiz y parar a la derecha.
-  /// Con el teclado abierto queda poco alto: solo se ve escribir. Las columnas de los lados quedan vacías en
+  void _setMode(RobotMode m) {
+    if (m == _mode) return;
+    // Al cambiar de tablero el robot recibe «quieto»: el joystick o el acelerador no quedan puestos.
+    setState(() {
+      _robotModes[widget.device.id] = m;
+      _zeroControls();
+    });
+    _sendNeutral();
+  }
+
+  /// Arriba: volver, el nombre y su conexión, el selector Manejar / Escribir y los ajustes.
+  Widget _robotTopBar(BuildContext context, Session s) => Row(children: [
+        RoundButton(icon: Ic.back, tooltip: 'Volver', size: 40, onTap: () => Navigator.pop(context)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Row(children: [
+            Flexible(child: Text(widget.device.name, style: T.callout, maxLines: 1, overflow: TextOverflow.ellipsis)),
+            if (s.connected) ...[const SizedBox(width: 10), ConnectionTag(session: s)],
+          ]),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 250,
+          child: Segmented<RobotMode>(
+            value: _mode,
+            items: const {RobotMode.drive: 'Manejar', RobotMode.write: 'Escribir'},
+            icons: const {RobotMode.drive: Ic.steering, RobotMode.write: Ic.write},
+            onChanged: _setMode,
+          ),
+        ),
+        const SizedBox(width: 12),
+        RoundButton(icon: Ic.wheels, tooltip: 'Ajustes del robot', size: 40, onTap: () => showCarroAjustes(context, s)),
+      ]);
+
+  /// El robot: arriba el selector de modo y abajo su tablero, que cambia con una transición suave.
+  /// Con el teclado abierto queda poco alto: la barra de arriba y las columnas de los lados se achican a nada en
   /// su lugar (no se quitan), así la tarjeta de escribir no se rearma y no pierde el texto ni el teclado.
   Widget _robotBoard(BuildContext context, Session s, BoxConstraints box) {
-    final c = context.c;
-    final on = s.connected;
-    final writing = writingProgress(s) != null;
     final roomy = box.maxHeight >= 200;
-    final side = roomy ? (box.maxWidth * 0.26).clamp(170.0, 230.0) : 0.0;
-    final rail = roomy ? (box.maxWidth * 0.17).clamp(116.0, 150.0) : 0.0;
-    final gap = roomy ? 12.0 : 0.0;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SizedBox(child: roomy ? Padding(padding: const EdgeInsets.only(bottom: 10), child: _robotTopBar(context, s)) : null),
+      _connectionCard(s),
+      Expanded(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 240),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, a) => FadeTransition(
+            opacity: a,
+            child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child),
+          ),
+          layoutBuilder: (current, previous) => Stack(fit: StackFit.expand, children: [...previous, ?current]),
+          child: KeyedSubtree(
+            key: ValueKey(_mode),
+            child: LayoutBuilder(
+              builder: (context, b) => _mode == RobotMode.drive ? _driveBoard(context, s, b) : _writeBoard(context, s, b, roomy: roomy),
+            ),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  /// Manejar, como un control remoto: el joystick a la izquierda; la cara, la hoja y el lápiz al centro; el
+  /// acelerador y reversa, velocidad y parar a la derecha. En teléfonos angostos la cara no entra y el lápiz va
+  /// debajo de la hoja.
+  Widget _driveBoard(BuildContext context, Session s, BoxConstraints box) {
+    final c = context.c;
+    final on = s.connected, busy = robotBusy(s);
+    final reverse = s.values[CarPins.reverse] == '1';
+    const gap = 10.0, throttleW = 64.0;
+    final joyW = (box.maxWidth * .30).clamp(176.0, 270.0);
+    final railW = (box.maxWidth * .16).clamp(108.0, 150.0);
+    final centerW = box.maxWidth - joyW - throttleW - railW - 4 * gap;
+    final wide = centerW >= 300;
+    // La cara: dos pantallas de 2:1, una al lado de la otra, más su título.
+    final faceH = ((centerW - 38) / 4 + 46).clamp(96.0, 150.0);
+    final paper = PaperTile(session: s, trail: _trail, onOpenSettings: () => showCarroAjustes(context, s));
+    final pen = PenTile(session: s);
+    final stopValue = writingProgress(s) != null ? 'Escritura' : (robotGoing(s) ? 'Camino' : 'Todo');
     return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SizedBox(
-        width: side,
-        child: !roomy
-            ? null
-            : Column(children: [
-                _header(context, s, settings: 'Ajustes del robot'),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: DriveTile(session: s, status: _robotStatus(s), joystick: (size) => _joystick(s, size, enabled: on && !writing)),
-                ),
-              ]),
+        width: joyW,
+        child: DriveTile(session: s, status: _robotStatus(s), joystick: (size) => _joystick(s, size, enabled: on && !busy)),
       ),
-      SizedBox(width: gap),
+      const SizedBox(width: gap),
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _connectionCard(s),
+          if (wide) ...[SizedBox(height: faceH, child: FaceTile(session: s)), const SizedBox(height: gap)],
           Expanded(
-            child: WriteTile(session: s, onOpenSettings: () => showCarroAjustes(context, s), onStop: () => _stopAll(s)),
+            child: wide
+                ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Expanded(child: paper),
+                    const SizedBox(width: gap),
+                    SizedBox(width: 118, child: pen),
+                  ])
+                : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Expanded(child: paper),
+                    const SizedBox(height: gap),
+                    SizedBox(height: 72, child: pen),
+                  ]),
           ),
         ]),
       ),
-      SizedBox(width: gap),
+      const SizedBox(width: gap),
       SizedBox(
-        width: rail,
+        width: throttleW,
+        child: Throttle(
+          value: _throttle,
+          enabled: on && !busy,
+          onChanged: (v) {
+            setState(() => _throttle = v);
+            _sendThrottled(s, CarPins.throttle, _scaled(v), force: v == 0);
+          },
+        ),
+      ),
+      const SizedBox(width: gap),
+      SizedBox(
+        width: railW,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(
+            child: BentoTile(
+              icon: Ic.reverse,
+              label: 'Reversa',
+              value: reverse ? 'Puesta' : 'No',
+              active: reverse,
+              accent: c.amber,
+              onTap: on ? () => s.send(CarPins.reverse, reverse ? 0 : 1) : null,
+            ),
+          ),
+          const SizedBox(height: gap),
+          Expanded(
+            child: BentoTile(
+              icon: Ic.speed,
+              label: 'Velocidad',
+              value: _slow ? 'Lenta' : 'Normal',
+              active: _slow,
+              accent: c.green,
+              onTap: on ? () => setState(() => _slow = !_slow) : null,
+            ),
+          ),
+          const SizedBox(height: gap),
+          Expanded(
+            child: BentoTile(icon: Ic.brake, label: 'Parar', value: stopValue, active: true, accent: c.red, onTap: on ? () => _stopAll(s) : null),
+          ),
+        ]),
+      ),
+    ]);
+  }
+
+  /// Escribir: el texto con su vista previa (lo más grande) y a la derecha la hoja con dónde caería, el lápiz y
+  /// parar. Con el teclado abierto ([roomy] falso) la columna de la derecha se achica a nada en su lugar.
+  Widget _writeBoard(BuildContext context, Session s, BoxConstraints box, {required bool roomy}) {
+    final c = context.c;
+    final on = s.connected;
+    const gap = 10.0;
+    final railW = roomy ? (box.maxWidth * .34).clamp(220.0, 320.0) : 0.0;
+    final stopValue = writingProgress(s) != null ? 'Escritura' : (robotGoing(s) ? 'Camino' : 'Todo');
+    return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Expanded(
+        child: WriteTile(session: s, draft: _draft, onOpenSettings: () => showCarroAjustes(context, s), onStop: () => _stopAll(s)),
+      ),
+      SizedBox(width: roomy ? gap : 0),
+      SizedBox(
+        width: railW,
         child: !roomy
             ? null
             : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Expanded(child: PenTile(session: s)),
-                const SizedBox(height: 10),
                 Expanded(
-                  child: BentoTile(
-                    icon: Ic.brake,
-                    label: 'Parar',
-                    value: writing ? 'Escritura' : 'Todo',
-                    active: true,
-                    accent: c.red,
-                    onTap: on ? () => _stopAll(s) : null,
+                  child: ValueListenableBuilder(
+                    valueListenable: _draft,
+                    builder: (context, draft, _) =>
+                        PaperTile(session: s, trail: _trail, text: draft, onOpenSettings: () => showCarroAjustes(context, s)),
                   ),
+                ),
+                const SizedBox(height: gap),
+                SizedBox(
+                  height: 76,
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Expanded(child: PenTile(session: s)),
+                    const SizedBox(width: gap),
+                    Expanded(
+                      child: BentoTile(icon: Ic.brake, label: 'Parar', value: stopValue, active: true, accent: c.red, onTap: on ? () => _stopAll(s) : null),
+                    ),
+                  ]),
                 ),
               ]),
       ),

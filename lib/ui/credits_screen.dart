@@ -16,7 +16,9 @@ class Credits {
     'Antoni Cortéz',
     'Diana Yegüez',
     'Edglis Felicce',
+    'Karlibet Vega',
     'Samuel Esteves',
+    'Victoria Santodomingo',
   ];
 }
 
@@ -33,20 +35,23 @@ Future<void> showCredits(BuildContext context) {
 }
 
 /// Momento (0 a 1 de la entrada) en que se enciende la estrella de cada integrante y aparece su nombre.
-const _starAt = [0.08, 0.2, 0.3, 0.4, 0.5, 0.6];
+const _starAt = [0.08, 0.17, 0.25, 0.33, 0.41, 0.49, 0.57, 0.65];
 
-/// Dónde queda cada estrella (0 a 1). El orden sigue el de [_starAt]:
-/// primero la señal del centro y después la casa, punto por punto.
+/// Dónde queda cada estrella (0 a 1): los ocho puntos del logo. El orden sigue el de [_starAt]: primero la
+/// señal del centro y después la casa, punto por punto. Las esquinas de arriba de las paredes quedan sobre el
+/// techo, así la línea que las une sigue el alero.
 const _starPos = [
   Offset(0.5, 0.68), // señal
-  Offset(0.16, 0.43), // alero izquierdo
+  Offset(0.03, 0.47), // punta izquierda del alero
   Offset(0.5, 0.06), // techo
-  Offset(0.84, 0.43), // alero derecho
+  Offset(0.97, 0.47), // punta derecha del alero
+  Offset(0.84, 0.36), // pared derecha, arriba
   Offset(0.84, 0.95), // piso derecho
   Offset(0.16, 0.95), // piso izquierdo
+  Offset(0.16, 0.36), // pared izquierda, arriba
 ];
 
-/// Cielo negro con estrellas. Seis se encienden una por una, se unen y forman la casa;
+/// Cielo negro con estrellas. Ocho se encienden una por una, se unen y forman la casa del logo;
 /// con cada una aparece el nombre de quien la hizo. Siempre en oscuro, sin importar el tema.
 class CreditsScreen extends StatefulWidget {
   const CreditsScreen({super.key});
@@ -64,6 +69,7 @@ class _CreditsScreenState extends State<CreditsScreen> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
+    assert(_starAt.length == Credits.team.length && _starPos.length == Credits.team.length, 'una estrella por integrante');
     // Un toquecito en la mano por cada estrella que se enciende.
     _intro.addListener(() {
       while (_lit < _starAt.length && _intro.value >= _starAt[_lit]) {
@@ -127,7 +133,7 @@ class _CreditsScreenState extends State<CreditsScreen> with TickerProviderStateM
                       _rise(0.04, Text('UN PROYECTO DE', style: T.eyebrow.copyWith(color: p.text3, letterSpacing: 4))),
                       const SizedBox(height: 26),
                       for (var i = 0; i < Credits.team.length; i++) ...[
-                        if (i > 0) const SizedBox(height: 20),
+                        if (i > 0) const SizedBox(height: 16),
                         _Name(Credits.team[i], reveal: _at(_starAt[i], 0.22)),
                       ],
                       const Spacer(flex: 4),
@@ -180,7 +186,7 @@ class _Name extends StatelessWidget {
   }
 }
 
-/// Las seis estrellas: se encienden con un destello, se unen con líneas finas y la del centro
+/// Las ocho estrellas: se encienden con un destello, se unen con líneas finas y la del centro
 /// manda su señal hacia arriba, como el logo.
 class _ConstellationPainter extends CustomPainter {
   final Animation<double> intro, sky;

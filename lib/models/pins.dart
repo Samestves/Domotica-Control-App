@@ -24,11 +24,21 @@ class CarPins {
   /// Lápiz: 1 = abajo (marca), 0 = arriba.
   static const pen = 28;
 
-  /// Escribiendo: «3/5» = va en la letra 3 de 5; «0» = no está escribiendo.
+  /// Trabajo del robot: «3/5» = escribiendo, va en la letra 3 de 5; «ir» = yendo a un punto (carro-0.7);
+  /// «0» = nada.
   static const writing = 29;
 
   /// Medidas «rueda,eje,letra,lapiz»: mm, mm, mm y ms (ej.: «65,120,30,1000»). La placa las guarda.
   static const measures = 30;
+
+  /// Desde carro-0.7. Dónde está el robot: «x,y,a» en mm y grados desde el 0,0 (CERO); «-» = sin 0,0.
+  static const pose = 31;
+
+  /// La hoja: «ancho,alto» en mm; «0,0» = sin hoja. Con hoja y 0,0, el robot no sale del papel.
+  static const paper = 32;
+
+  /// La cara, para verla en la app (CARA:1): lo que muestran los ojos, y el mensaje de la franja de arriba.
+  static const face = 33, faceLabel = 34;
 
   /// Mientras el carro anda, la app repite la orden con esta frecuencia.
   /// Si la placa deja de recibirla por 1 s (Bluetooth cortado, app cerrada), frena sola.

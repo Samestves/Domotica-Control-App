@@ -15,6 +15,10 @@
   Sin pantallas el robot funciona igual: la que no responde se vuelve a buscar cada 3 s.
   Nunca frena al robot: cada vuelta de loop() envía como mucho una franja de 8 filas (unos 3 ms).
 
+  La app también puede ver la cara (desde carro-0.7): caraState() y caraLabel() dicen lo que la cara quiere
+  mostrar, y la app lo anima igual con el mismo motor de ojos (lib/ui/widgets/robot_face.dart). La cara se
+  anima aunque no haya pantallas, para que la app la vea igual.
+
   Otras pantallas:
     - 1,3" con chip SH1106 (132 columnas): poner OLED_SH1106 en 1.
     - 2,42" con chip SSD1309: funciona tal cual (mismas órdenes que el SSD1306).
@@ -153,7 +157,10 @@ const Glyph FONT[] = {
   {'M', {17, 27, 21, 21, 17, 17, 17}}, {'N', {17, 25, 21, 19, 17, 17, 17}}, {'O', {14, 17, 17, 17, 17, 17, 14}},
   {'R', {30, 17, 17, 30, 20, 18, 17}}, {'S', {15, 16, 16, 14, 1, 1, 30}},   {'T', {31, 4, 4, 4, 4, 4, 4}},
   {'U', {17, 17, 17, 17, 17, 17, 14}}, {'V', {17, 17, 17, 17, 10, 10, 4}},  {'W', {17, 17, 17, 21, 21, 27, 17}},
-  {'X', {17, 17, 10, 4, 10, 17, 17}},  {'Z', {31, 1, 2, 4, 8, 16, 31}},
+  {'X', {17, 17, 10, 4, 10, 17, 17}},  {'Z', {31, 1, 2, 4, 8, 16, 31}},     {'P', {30, 17, 17, 30, 16, 16, 16}},
+  {'Q', {14, 17, 17, 17, 21, 18, 13}}, {'G', {15, 16, 16, 23, 17, 17, 15}}, {'K', {17, 18, 20, 24, 20, 18, 17}},
+  {'J', {7, 2, 2, 2, 2, 18, 12}},      {'Y', {17, 17, 10, 4, 4, 4, 4}},     {'/', {1, 1, 2, 4, 8, 16, 16}},
+  {':', {0, 12, 12, 0, 12, 12, 0}},    {'.', {0, 0, 0, 0, 0, 12, 12}},     {',', {0, 0, 0, 0, 12, 4, 8}},
   {'0', {14, 19, 21, 21, 25, 17, 14}}, {'1', {4, 12, 4, 4, 4, 4, 14}},      {'2', {14, 17, 1, 6, 8, 16, 31}},
   {'3', {30, 1, 1, 14, 1, 1, 30}},     {'4', {2, 6, 10, 18, 31, 2, 2}},     {'5', {31, 16, 30, 1, 1, 17, 14}},
   {'6', {6, 8, 16, 30, 17, 17, 14}},   {'7', {31, 1, 2, 4, 8, 8, 8}},       {'8', {14, 17, 17, 14, 17, 17, 14}},
@@ -234,6 +241,7 @@ struct Face {
   int8_t wink = 0;                       // -1 guiña el izquierdo, 1 el derecho, 0 parpadean los dos
   uint32_t shakeUntil = 0, bounceUntil = 0;
   char label[20] = "CONTROL DOMOTICA"; uint32_t labelUntil = 1500;
+  uint16_t labelSeq = 0; uint32_t labelMs = 1500;   // para la app: cada mensaje nuevo y cuánto dura
 };
 Face f;
 
@@ -248,7 +256,12 @@ void setMood(Mood m, uint32_t ms = 0, Mood after = NORMAL) {
 }
 void look(float x, float y, uint32_t holdMs) { tgt.lx = x; tgt.ly = y; f.holdLook = f.now + holdMs; }
 void blink(int8_t side) { f.wink = side; f.blinkEnd = f.now + 140; }
-void say(const char* s, uint32_t ms) { strlcpy(f.label, s, sizeof(f.label)); f.labelUntil = f.now + ms; }
+void say(const char* s, uint32_t ms) {
+  strlcpy(f.label, s, sizeof(f.label));
+  f.labelUntil = f.now + ms;
+  f.labelMs = ms;
+  f.labelSeq++;
+}
 
 void wake() {
   f.lastInput = f.now;
@@ -389,8 +402,8 @@ void caraLoop(uint32_t ms) {
     if (start(o)) { report(o, "encontrada."); page = -1; }
     return;                              // una búsqueda por vuelta: cada una tarda unos milisegundos
   }
-  if (!screens[0].addr && !screens[1].addr) return;
-  if (page >= 0) {                       // una franja por vuelta
+  const bool any = screens[0].addr || screens[1].addr;
+  if (any && page >= 0) {                // una franja por vuelta
     Oled& o = screens[page / PAGES];
     if (o.addr && !sendPage(o, page % PAGES)) { o.addr = 0; o.retryAt = ms + RETRY_MS; report(o, "dejo de responder."); }
     if (++page == 2 * PAGES) page = -1;
@@ -401,10 +414,27 @@ void caraLoop(uint32_t ms) {
   uint32_t dt = min(now - f.frameAt, (uint32_t)200);   // tras una pausa larga, sin saltos bruscos
   f.frameAt = now;
   f.now = now;
-  update(dt);
+  update(dt);                            // sin pantallas también: la app puede estar mirando la cara
+  if (!any) return;
   draw();
   page = 0;
 }
+
+// Lo que la cara quiere mostrar, para la app (V33): ánimo, hacia dónde mira y el parpadeo (los valores a los
+// que se acercan los ojos, ×100), la velocidad y unas marcas: 1 dormida, 2 sacudiéndose, 4 saltando,
+// 8 Bluetooth, 16 Wi-Fi. La app los anima igual que aquí. Cambia solo cuando cambia algo.
+String caraState() {
+  auto q = [](float v) { return String(lroundf(v * 100)); };
+  const int marks = (f.sleeping ? 1 : 0) | (f.now < f.shakeUntil ? 2 : 0) | (f.now < f.bounceUntil ? 4 : 0) |
+                    (f.ble ? 8 : 0) | (f.wifi ? 16 : 0);
+  return q(tgt.tired) + "," + q(tgt.angry) + "," + q(tgt.sad) + "," + q(tgt.happy) + "," + q(tgt.scale) + "," +
+         q(tgt.curious) + "," + q(tgt.lx) + "," + q(tgt.ly) + "," + q(tgt.blinkL) + "," + q(tgt.blinkR) + "," +
+         String(f.speed) + "," + String(marks);
+}
+
+// El mensaje de la franja de arriba, para la app (V34): «número,ms,TEXTO». El número cambia con cada mensaje
+// nuevo (aunque repita el texto) y ms es cuánto se muestra.
+String caraLabel() { return String(f.labelSeq) + "," + String(f.labelMs) + "," + f.label; }
 
 void caraLink(bool ble, bool wifi) {
   bool before = f.ble || f.wifi, after = ble || wifi;
@@ -493,3 +523,5 @@ using cara::caraTest;       // prueba: 0 a 3 (rueda izquierda, derecha, lápiz a
 using cara::caraPen;        // el marcador baja (true) o sube
 using cara::caraWrite;      // escribiendo la letra n de total; 0 = terminó, -1 = se canceló
 using cara::caraUpdate;     // actualización por Wi-Fi: 0 a 100, o -1 si falló
+using cara::caraState;      // para la app (V33): lo que muestran los ojos
+using cara::caraLabel;      // para la app (V34): el mensaje de la franja de arriba

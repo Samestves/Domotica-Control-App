@@ -18,11 +18,11 @@
       "name": "Auto Robot",
       "short": "El carrito",
       "icon": "car-profile",
-      "version": "carro-0.6",
+      "version": "carro-0.7",
       "notes": [
-        "El robot que escribe: dos motores paso a paso, el marcador que sube y baja, y escribe lo que le mandas desde la app 0.9.9.",
-        "Un ojo en cada pantalla (izquierdo SDA 21 · SCL 22, derecho SDA 23 · SCL 4). Sin pantallas funciona igual.",
-        "Se actualiza por Wi-Fi desde la app y conserva la clave. Los pines son los nuevos del robot (ver la guía)."
+        "Sabe dónde está en la hoja (con el 0,0 de la app 0.9.11): no sale del papel y avisa si un texto no cabe.",
+        "Va a un punto de la hoja y queda derecho para escribir, y la app ve su cara en vivo.",
+        "Se actualiza por Wi-Fi desde la app y conserva la clave, los pines y las medidas."
       ]
     }
   ]

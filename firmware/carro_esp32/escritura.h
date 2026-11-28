@@ -50,6 +50,9 @@ inline const Letra* buscarLetra(const char* s, int& largo) {
   return nullptr;
 }
 
+// Un rectángulo en mm: de (x0, y0) a (x1, y1).
+struct Caja { float x0, y0, x1, y1; };
+
 inline float anguloNormal(float a) {     // a (−π, π]
   while (a > (float)M_PI) a -= 2 * (float)M_PI;
   while (a <= -(float)M_PI) a += 2 * (float)M_PI;
@@ -93,6 +96,28 @@ class Escritor {
 
   bool activo() const { return activo_ || leido_ < enCola_; }
   int letras() const { return total_; }
+
+  // Lo que ocupa el texto preparado, medido desde donde empieza (el robot mirando hacia +x). Todos los trazos y
+  // los traslados entre letras van de un punto a otro de las letras: quedan siempre dentro de esta caja.
+  Caja caja() const {
+    Caja c = {0, 0, 0, 0};
+    bool primero = true;
+    for (int i = 0; i < n_; i++) {
+      for (const char* t = texto_[i]->trazos; *t;) {
+        if (*t == ' ' || *t == '|') { t++; continue; }
+        char* fin;
+        long gx = strtol(t, &fin, 10);
+        if (*fin != ',') break;
+        long gy = strtol(fin + 1, &fin, 10);
+        t = fin;
+        const float px = (i * (LETRA_ANCHO + LETRA_ESPACIO) + gx) * escala_, py = gy * escala_;
+        if (primero) { c = {px, py, px, py}; primero = false; }
+        c.x0 = fminf(c.x0, px); c.x1 = fmaxf(c.x1, px);
+        c.y0 = fminf(c.y0, py); c.y1 = fmaxf(c.y1, py);
+      }
+    }
+    return c;
+  }
 
   // Dónde cree que está el robot (mm y radianes): sirve a las pruebas.
   float x() const { return x_; }
@@ -158,6 +183,35 @@ class Escritor {
     if (abajo_) { poner(PASO_LAPIZ, 0); abajo_ = false; }
   }
 };
+
+// ¿Queda [c] (medida desde el robot, como Escritor::caja) dentro de una hoja de [ancho] × [alto] mm, con el robot
+// en (x, y) mirando hacia [rumbo]? La hoja va de (0, 0) a (ancho, alto). Medio milímetro de tolerancia.
+inline bool cabeEnHoja(const Caja& c, float x, float y, float rumbo, float ancho, float alto) {
+  const float cs = cosf(rumbo), sn = sinf(rumbo), tol = .5f;
+  const float px[4] = {c.x0, c.x1, c.x1, c.x0}, py[4] = {c.y0, c.y0, c.y1, c.y1};
+  for (int k = 0; k < 4; k++) {
+    const float hx = x + px[k] * cs - py[k] * sn, hy = y + px[k] * sn + py[k] * cs;
+    if (hx < -tol || hy < -tol || hx > ancho + tol || hy > alto + tol) return false;
+  }
+  return true;
+}
+
+// Pasos para ir de (x, y, rumbo) hasta (hx, hy) y quedar mirando hacia +x, a lo largo de la hoja (así el texto
+// sale derecho): girar hacia el punto, avanzar (o retroceder, si queda detrás) y girar hasta alinearse.
+// Escribe hasta 3 pasos en [out] y devuelve cuántos. Para solo alinearse: el punto es donde ya está.
+inline int planIr(float x, float y, float rumbo, float hx, float hy, Paso* out) {
+  int n = 0;
+  float dx = hx - x, dy = hy - y, d = hypotf(dx, dy);
+  if (d >= .05f) {
+    float giro = anguloNormal(atan2f(dy, dx) - rumbo), avance = d;
+    if (fabsf(giro) > (float)M_PI / 2) { giro = anguloNormal(giro - (float)M_PI); avance = -d; }
+    if (fabsf(giro) > .0005f) { out[n++] = {PASO_GIRO, giro}; rumbo = anguloNormal(rumbo + giro); }
+    out[n++] = {PASO_AVANCE, avance};
+  }
+  const float alinear = anguloNormal(-rumbo);
+  if (fabsf(alinear) > .0005f) out[n++] = {PASO_GIRO, alinear};
+  return n;
+}
 
 // Diámetro de las ruedas y distancia entre ellas (de centro a centro), en mm.
 struct Medidas { float ruedaMm, ejeMm; };

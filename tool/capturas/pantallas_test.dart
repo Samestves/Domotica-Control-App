@@ -12,7 +12,9 @@ import 'package:control_domotica/state/app_state.dart';
 import 'package:control_domotica/ui/add_device_screen.dart';
 import 'package:control_domotica/ui/carro_panel.dart';
 import 'package:control_domotica/ui/casa_panel.dart';
+import 'package:control_domotica/ui/credits_screen.dart';
 import 'package:control_domotica/ui/home_screen.dart';
+import 'package:control_domotica/ui/widgets/robot_tiles.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -125,26 +127,46 @@ void main() {
       await t.pump(const Duration(seconds: 4));
       await t.pumpWidget(RepaintBoundary(key: _shot, child: ControlApp(state: app, home: CarroPanel(device: carro), forceTheme: theme)));
       await t.pump(const Duration(seconds: 1));
-      await _snap(t, '07-carro-$tag');
 
-      // Con una palabra escrita: la vista previa con las letras del robot.
-      await t.enterText(find.byType(TextField), 'Hola Feria');
+      // Manejar: el robot en la esquina de la hoja (0,0) y la cara en vivo.
+      await t.tap(find.bySemanticsLabel('0,0'));
+      await t.pump(const Duration(seconds: 1));
+      await _snap(t, '07-robot-manejar-$tag');
+
+      // Escribir: una palabra, dónde cae en la hoja (verde: cabe) y cómo la va a dibujar.
+      await t.tap(find.bySemanticsLabel('Escribir').first);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 500));
+      await t.pump();
+      await t.enterText(find.byType(TextField), 'Hola');
       await t.pump(const Duration(milliseconds: 300));
-      await _snap(t, '07b-robot-texto-$tag');
+      await _snap(t, '07b-robot-escribir-$tag');
 
-      // Escribiendo: el avance letra por letra.
-      await t.tap(find.bySemanticsLabel('Escribir'));
-      await t.pump(const Duration(milliseconds: 2900));
+      // Escribiendo: el avance y la tinta que aparece en la hoja.
+      await t.tap(find.descendant(of: find.byType(WriteTile), matching: find.bySemanticsLabel('Escribir')));
+      for (var i = 0; i < 30; i++) {
+        await t.pump(const Duration(milliseconds: 100));
+      }
       await _snap(t, '07c-robot-escribiendo-$tag');
       await t.tap(find.bySemanticsLabel('Parar: Escritura'));
       await t.pump(const Duration(seconds: 1));
 
-      // Sus ajustes: ruedas, lápiz y medidas.
+      // Sus ajustes: ruedas, lápiz, medidas y la hoja.
       await t.tap(find.byTooltip('Ajustes del robot'));
       await t.pump(const Duration(seconds: 1));
       await _snap(t, '07d-robot-ajustes-$tag');
       await _end(t, app);
     });
+
+    if (theme == ThemeMode.dark) {
+      testWidgets('créditos', (t) async {
+        await _phone(t);
+        final app = await _app(t, theme: theme, home: const CreditsScreen());
+        await t.pump(const Duration(seconds: 6)); // todas las estrellas encendidas y los nombres a la vista
+        await _snap(t, '09-creditos');
+        await _end(t, app);
+      });
+    }
 
     testWidgets('agregar $tag', (t) async {
       await _phone(t);

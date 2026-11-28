@@ -1,5 +1,5 @@
 /*
-  Auto Robot · programa para el ESP32 del robot que escribe · versión carro-0.6
+  Auto Robot · programa para el ESP32 del robot que escribe · versión carro-0.7
   -----------------------------------------------------------------------------
   Dos ruedas con motores paso a paso 28BYJ-48 (cada uno con su plaquita ULN2003), un marcador en el centro
   que sube y baja con un motor amarillo (TT) por un L298N, y una pantalla OLED para cada ojo. Se maneja desde
@@ -18,19 +18,34 @@
     V25  reversa: 1 / 0 (cambia el sentido del acelerador; el joystick no se ve afectado)
     V27  invertir: tres 0/1 en orden rueda izquierda, rueda derecha, lápiz. Ej.: V27:010 invierte la derecha
     V28  lápiz: 1 = abajo (marca) · 0 = arriba. La placa lo dice cada vez que cambia
-    V29  escribiendo: «3/5» = va en la letra 3 de 5 · «0» = no está escribiendo
+    V29  trabajo: «3/5» = escribiendo, va en la letra 3 de 5 · «ir» = yendo a un punto · «0» = nada
     V30  medidas «rueda,eje,letra,lapiz»: diámetro de las ruedas en mm, distancia entre ellas (de centro a
          centro) en mm, alto de las letras en mm y cuánto tarda el lápiz en subir o bajar en ms.
          Ej.: V30:65,120,30,1000. Se guardan en la placa.
+    V31  dónde está (de la placa a la app): «x,y,a» en mm y grados desde el 0,0 · «-» = sin 0,0
+    V32  la hoja: «ancho,alto» en mm (ej.: V32:279,216, una carta acostada) · «0,0» = sin hoja. Se guarda.
+    V33  la cara, para verla en la app (de la placa a la app, solo a quien la pidió con CARA:1; ver cara.h)
+    V34  el mensaje de la cara: «número,ms,TEXTO»
+
+  La hoja (desde carro-0.7). El robot sabe dónde está contando los pasos de cada rueda, sin sensores:
+    CERO            el 0,0 es donde está el marcador ahora, mirando hacia +x. Se pone el robot en la esquina
+                    de abajo a la izquierda de la hoja, mirando a lo largo de ella, y se toca 0,0 en la app.
+    IR:150,80       va a ese punto (mm) con el marcador arriba y queda mirando hacia +x: el texto sale derecho.
+                    Responde OK:IR 150,80, avisa V29:ir y al llegar dice OK:LLEGO.
+    ALINEAR         gira en el lugar hasta mirar hacia +x.
+  Con la hoja y el 0,0, el joystick y el acelerador no dejan que el marcador salga de la hoja (girar en el
+  lugar sí: el marcador no se mueve) y ESCRIBIR revisa que el texto quepa antes de empezar. Si las ruedas
+  patinan o alguien levanta el robot, se pierde la cuenta: hay que volver a poner el 0,0. TEST la borra.
+    CARA:1 / CARA:0 la app empieza o deja de mirar la cara (V33 y V34 mientras tanto).
 
   Escribir (letras de un solo trazo: letras.h y escritura.h):
     ESCRIBIR:HOLA   dibuja el texto: A-Z, Ñ, 0-9 y . , ! ? - + : (minúsculas y tildes valen), hasta 24 letras.
                     Responde OK:ESCRIBIENDO HOLA, avisa cada letra con V29 y al final dice OK:ESCRITO.
                     Empieza donde está el robot: ahí va la esquina de abajo a la izquierda de la primera letra,
                     y las letras salen paradas hacia su izquierda mientras avanza.
-    PARAR           detiene todo: la escritura (sube el marcador), las ruedas y la prueba.
-  Mientras escribe no obedece el joystick (avisa que hay que tocar Parar). Si se desconecta el teléfono
-  que lo pidió, se detiene. Con el lápiz abajo y el joystick también dibuja: a mano alzada.
+    PARAR           detiene todo: la escritura (sube el marcador), ir a un punto, las ruedas y la prueba.
+  Mientras escribe (o va a un punto) no obedece el joystick (avisa que hay que tocar Parar). Si se desconecta
+  el teléfono que lo pidió, se detiene. Con el lápiz abajo y el joystick también dibuja: a mano alzada.
 
   Clave del robot (de 4 a 8 números; el mismo protocolo que la casa). Por Bluetooth y Wi-Fi el
   robot no obedece hasta recibirla, y cada conexión la entrega por su cuenta:
@@ -73,7 +88,7 @@
   (ver ota.h). Mientras llega, el robot queda quieto y no acepta manejo ni escritura.
 
   Otros mensajes (por la app o el Monitor Serie a 115200; todos piden la clave menos PING):
-    SYNC                  la placa responde con su versión (VER:carro-0.6) y el estado actual
+    SYNC                  la placa responde con su versión (VER:carro-0.7) y el estado actual
     OTA:<tamaño>:<md5>    recibe una versión nueva por Wi-Fi (ver ota.h)
     TEST                  la rueda izquierda y después la derecha dan un cuarto de vuelta hacia ADELANTE, y el
                           lápiz baja y sube: OK:PRUEBA <qué se mueve> por cada parte y al final
@@ -87,6 +102,13 @@
   Los cambios se guardan en la placa. Los números se revisan (MOTOR:I:abc da ERR en vez de usar 0), los
   GPIO 1 y 3 (Monitor Serie), 6 a 11 (memoria) y 21, 22, 23 y 4 (las pantallas) no se aceptan, y una línea
   de más de 120 letras se descarta entera.
+
+  Cambios de carro-0.7 (respecto de carro-0.6):
+    - Sabe dónde está en la hoja (V31) contando los pasos, con el 0,0 que se pone desde la app (CERO).
+    - La hoja (V32) hace de cerca: el joystick no saca el marcador del papel y ESCRIBIR revisa que el texto quepa.
+    - IR y ALINEAR: va a un punto de la hoja y queda derecho para escribir.
+    - La app puede ver la cara en vivo (CARA:1, V33 y V34). La cara tiene las letras que le faltaban
+      (PARADO y RUEDA IZQ salían incompletos) y se anima aunque no haya pantallas.
 
   Cambios de carro-0.6 (respecto de carro-0.5):
     - Es el programa del robot que escribe: dos motores paso a paso en vez de cuatro motores con L298N,
@@ -106,7 +128,7 @@
 #include "escritura.h"
 
 // ============ CONFIGURACIÓN ============
-#define FW_VERSION  "carro-0.6"
+#define FW_VERSION  "carro-0.7"
 #define DEVICE_NAME "Carrito 4x4"              // la red y el Bluetooth de siempre: la app lo sigue encontrando
 #define USE_WIFI    1                          // 1 = crear también la red Wi-Fi propia del robot
 #if USE_WIFI
@@ -130,6 +152,8 @@ const int32_t  DRIVE_RAMP = 20;                // cuánto puede cambiar la veloc
 const int32_t  WRITE_MAX_RATE = 600, WRITE_MIN_RATE = 150;   // escribiendo: más lento y parejo
 const int32_t  WRITE_RAMP_STEPS = 120;         // pasos para llegar a la velocidad (y para frenar al final del trazo)
 const uint32_t COILS_OFF_MS = 300;             // quieto este tiempo: las bobinas se apagan
+const uint32_t POSE_REPORT_MS = 150;           // moviéndose, dice dónde está como mucho cada este tiempo
+const uint32_t FACE_REPORT_MS = 80;            // la cara para la app, como mucho cada este tiempo
 
 // Clave del robot (igual que la casa)
 const uint8_t  MAX_FAILS = 3;
@@ -138,10 +162,14 @@ const uint32_t RESET_HOLD_MS = 5000;           // BOOT presionado este tiempo bo
 const int      BOOT_PIN = 0;
 
 enum : uint8_t { VPIN_JOY = 20, VPIN_THROTTLE = 24, VPIN_REVERSE = 25, VPIN_INVERT = 27,
-                 VPIN_PEN = 28, VPIN_WRITE = 29, VPIN_MEASURES = 30 };
+                 VPIN_PEN = 28, VPIN_JOB = 29, VPIN_MEASURES = 30, VPIN_POSE = 31, VPIN_PAPER = 32,
+                 VPIN_FACE = 33, VPIN_FACE_LABEL = 34 };
 
 // De dónde llegó una línea. Cada conexión entrega la clave por su cuenta (igual que la casa).
 enum Src : uint8_t { SRC_SERIAL, SRC_BLE, SRC_TCP, SRC_NONE };
+
+// Un trabajo que mueve las ruedas solo (ver TRABAJOS). Aquí arriba: el IDE declara las funciones al principio.
+enum Job : uint8_t { JOB_NONE, JOB_WRITE, JOB_GOTO };
 
 // ============ AJUSTES GUARDADOS ============
 struct Config {
@@ -186,13 +214,18 @@ Src testSrc = SRC_SERIAL;    // quién la pidió: si se desconecta, se cancela
 
 bool testRunning() { return testPart >= 0; }
 
-// Escritura en curso (ver ESCRIBIR)
+// Un trabajo que mueve las ruedas solo: escribir (ESCRIBIR) o ir a un punto de la hoja (IR, ALINEAR).
+// Mientras dura, el joystick no lo mueve. Ver TRABAJOS.
+Job job = JOB_NONE;
+bool jobStepBusy = false;    // el paso actual (un trazo, un giro o el lápiz) todavía se está haciendo
+Src jobSrc = SRC_NONE;       // quién lo pidió: si se desconecta, se detiene
 Escritor writer;
 Conversor wheels;
-bool writing = false;
-bool writeStepBusy = false;  // el paso actual (un trazo o el lápiz) todavía se está haciendo
 int writeLetter = 0, writeTotal = 0;
-Src writerSrc = SRC_NONE;
+Paso gotoPlan[4];            // ir a un punto: subir el lápiz, girar, avanzar y alinearse
+uint8_t gotoLen = 0, gotoAt = 0;
+
+bool busy() { return job != JOB_NONE; }
 
 // Clave del robot
 volatile bool authed[3] = {true, false, false};   // el cable USB no necesita clave
@@ -219,7 +252,10 @@ LineIn lineIn[3];
 void clearLine(Src s) { lineIn[s].buf = ""; lineIn[s].tooLong = false; }
 
 void sendLine(const String& line);
+void sendQuiet(const String& line);
 void reply(Src src, const String& line);
+void watchFace(Src src, bool on);
+int parseList(const String& s, int* out, int maxN);
 
 // ============ PINES ============
 // Mismas reglas que la app, y además los GPIO 1 y 3 (el cable USB del Monitor Serie).
@@ -281,6 +317,7 @@ struct Stepper {
   uint32_t allLo, allHi;                 // las cuatro bobinas, para apagarlas
   volatile int32_t rate;                 // medios pasos por segundo; + = hacia adelante del robot
   volatile int32_t left;                 // pasos que faltan de un movimiento contado; -1 = sin límite (joystick)
+  volatile int32_t pos;                  // pasos dados desde que arrancó, + = hacia adelante (para saber dónde está)
   volatile bool inverted, energized;
   uint32_t acc;
   uint8_t phase;
@@ -306,6 +343,7 @@ void IRAM_ATTR onStepTick() {
     GPIO.out_w1ts = m.onLo[m.phase];
     GPIO.out1_w1ts.val = m.onHi[m.phase];
     m.energized = true;
+    m.pos += r > 0 ? 1 : -1;
     if (m.left > 0 && --m.left == 0) { m.rate = 0; m.acc = 0; }
   }
   portEXIT_CRITICAL_ISR(&stepMux);
@@ -396,7 +434,7 @@ bool moving() {
 }
 
 // Detiene las ruedas al instante (sin rampa: a la velocidad de estos motores no hace falta). También termina
-// la prueba, si estaba corriendo. La escritura la detiene stopWriting().
+// la prueba, si estaba corriendo. Los trabajos (escribir, ir a un punto) los detiene stopJob().
 void stopNow(const char* why) {
   bool was = moving();
   testPart = -1;
@@ -415,13 +453,109 @@ void abortTest(const char* why) {
   sendLine(String("ERR:prueba cancelada: ") + why);
 }
 
+// ============ POSICIÓN EN LA HOJA (X-Y) ============
+// El robot sabe dónde está contando los pasos de cada rueda: cada medio paso es una fracción de milímetro.
+// CERO pone el 0,0 donde está el marcador, mirando hacia +x (la esquina de abajo a la izquierda de la hoja,
+// mirando a lo largo de ella). Si las ruedas patinan o alguien lo levanta, hay que poner el 0,0 otra vez.
+double poseX = 0, poseY = 0, poseTh = 0;   // mm, mm y radianes (+ = hacia la izquierda)
+bool originSet = false;                    // sin 0,0 no se sabe dónde está: no hay cerca ni IR
+int32_t poseL = 0, poseR = 0;              // los pasos de cada rueda que ya se contaron
+bool poseDirty = false;
+uint32_t poseSentAt = 0;
+uint16_t paperW = 0, paperH = 0;           // la hoja, en mm (0 = sin hoja: no hay cerca)
+bool fenceWarned = false;                  // ya avisó que llegó al borde (una vez, hasta que se aleje)
+
+bool paperSet() { return paperW > 0 && paperH > 0; }
+bool fenceOn() { return originSet && paperSet(); }
+
+double angleNorm(double a) {               // a (−π, π]
+  while (a > PI) a -= 2 * PI;
+  while (a <= -PI) a += 2 * PI;
+  return a;
+}
+
+String poseString() {
+  if (!originSet) return "-";
+  return String(lround(poseX)) + "," + String(lround(poseY)) + "," + String(lround(poseTh * 180 / PI));
+}
+
+// Dónde está, para la app. Sin eco en el Monitor Serie: moviéndose sale varias veces por segundo.
+void reportPose() {
+  sendQuiet("V" + String(VPIN_POSE) + ":" + poseString());
+  poseDirty = false;
+  poseSentAt = millis();
+}
+
+void loadPaper() {
+  prefs.begin("carro", true);
+  paperW = prefs.getUShort("hojaW", 0);
+  paperH = prefs.getUShort("hojaH", 0);
+  prefs.end();
+}
+
+void reportPaper() { sendLine("V" + String(VPIN_PAPER) + ":" + String(paperW) + "," + String(paperH)); }
+
+// CERO: el 0,0 es aquí, mirando hacia +x.
+void setOrigin() {
+  portENTER_CRITICAL(&stepMux);
+  poseL = motor[0].pos;
+  poseR = motor[1].pos;
+  portEXIT_CRITICAL(&stepMux);
+  poseX = poseY = poseTh = 0;
+  originSet = true;
+  fenceWarned = false;
+  reportPose();
+}
+
+// Se perdió la cuenta (la prueba gira las ruedas en el aire): hay que poner el 0,0 otra vez.
+void forgetOrigin() {
+  if (!originSet) return;
+  originSet = false;
+  reportPose();
+}
+
+// Suma lo que avanzó cada rueda desde la última vez: un robot de dos ruedas que recorre un arco.
+void loopPose(uint32_t now) {
+  portENTER_CRITICAL(&stepMux);
+  const int32_t l = motor[0].pos, r = motor[1].pos;
+  portEXIT_CRITICAL(&stepMux);
+  const int32_t dl = l - poseL, dr = r - poseR;
+  if (dl || dr) {
+    poseL = l;
+    poseR = r;
+    const double porMm = PASOS_VUELTA / (PI * cfg.wheelMm);
+    const double sl = dl / porMm, sr = dr / porMm, ds = (sl + sr) / 2, dth = (sr - sl) / cfg.trackMm;
+    poseX += ds * cos(poseTh + dth / 2);
+    poseY += ds * sin(poseTh + dth / 2);
+    poseTh = angleNorm(poseTh + dth);
+    poseDirty = true;
+  }
+  if (poseDirty && originSet && now - poseSentAt >= POSE_REPORT_MS) reportPose();
+}
+
+// Cerca (con la hoja y el 0,0): si el marcador está en el borde y la orden lo sacaría de la hoja, se deja solo
+// el giro en el lugar (el marcador, en el centro, no se mueve). Así se puede girar y volver a entrar.
+void fence(int32_t& l, int32_t& r) {
+  if (!fenceOn()) return;
+  const int32_t twice = l + r;   // el doble de la velocidad hacia adelante
+  if (twice == 0) return;
+  const double dir = poseTh + (twice < 0 ? PI : 0), cx = cos(dir), cy = sin(dir);
+  const bool out = (poseX <= 0 && cx < -.02) || (poseX >= paperW && cx > .02) || (poseY <= 0 && cy < -.02) ||
+                   (poseY >= paperH && cy > .02);
+  if (!out) { fenceWarned = false; return; }
+  const int32_t v = twice / 2;
+  l -= v;
+  r -= v;
+  if (!fenceWarned) { fenceWarned = true; sendLine("ERR:borde de la hoja: el robot no sale del papel"); }
+}
+
 // Cada 5 ms: la rampa de los movimientos contados (arranca y frena suave en cada trazo) o la del manejo.
 // Y las ruedas que quedaron quietas apagan sus bobinas.
 void loopMotion(uint32_t now) {
   static uint32_t last = 0;
   if (now - last < 5) return;
   last = now;
-  if (writing || testRunning()) {
+  if (busy() || testRunning()) {
     int32_t remaining = max((int32_t)motor[0].left, (int32_t)motor[1].left);
     if (remaining > 0) {
       int32_t edge = min(moveTotal - remaining, remaining);
@@ -431,12 +565,11 @@ void loopMotion(uint32_t now) {
       portEXIT_CRITICAL(&stepMux);
     }
   } else {
-    for (int i = 0; i < 2; i++) {
-      int32_t d = driveTarget[i] - driveRate[i];
-      if (d == 0) continue;
-      driveRate[i] += constrain(d, -DRIVE_RAMP, DRIVE_RAMP);
-      setMotor(i, driveRate[i], -1);
-    }
+    for (int i = 0; i < 2; i++) driveRate[i] += constrain(driveTarget[i] - driveRate[i], -DRIVE_RAMP, DRIVE_RAMP);
+    int32_t l = driveRate[0], r = driveRate[1];
+    fence(l, r);
+    if (motor[0].rate != l) setMotor(0, l, -1);
+    if (motor[1].rate != r) setMotor(1, r, -1);
   }
   for (int i = 0; i < 2; i++) {
     if (motor[i].rate != 0) { idleSince[i] = now; continue; }
@@ -497,7 +630,7 @@ void loopPen(uint32_t now) {
   if (!penDir || now - penStart < penFor) return;
   penDir = 0;
   writePen(0);
-  if (!writing) savePen();   // escribiendo se guarda al final: cada trazo sería una escritura en la memoria
+  if (!busy()) savePen();    // escribiendo se guarda al final: cada trazo sería una escritura en la memoria
 }
 
 void setupAll() {
@@ -513,75 +646,130 @@ void releaseAll() {
   for (int k = 0; k < 2; k++) releasePin(cfg.pen[k]);
 }
 
-// ============ ESCRIBIR ============
+// ============ TRABAJOS: ESCRIBIR O IR A UN PUNTO ============
 void releaseDriver() { driver = SRC_NONE; warnedSrc = 0; }
 
-String writeProgress() { return writing ? String(writeLetter) + "/" + String(writeTotal) : String("0"); }
-void reportWriting() { sendLine("V" + String(VPIN_WRITE) + ":" + writeProgress()); }
+// V29: la letra que escribe («3/5»), «ir» o «0».
+String jobProgress() {
+  if (job == JOB_WRITE) return String(writeLetter) + "/" + String(writeTotal);
+  return job == JOB_GOTO ? String("ir") : String("0");
+}
+void reportJob() { sendLine("V" + String(VPIN_JOB) + ":" + jobProgress()); }
 
-// ESCRIBIR:<texto>. Quien lo pide queda como conductor hasta que termina.
-void startWriting(Src src, const String& text) {
-  if (writing) { reply(src, "ERR:ya esta escribiendo: toca Parar primero"); return; }
-  if (driver != SRC_NONE && driver != src) { reply(src, "ERR:otro telefono esta manejando el carrito"); return; }
-  int n = writer.empezar(text.c_str(), cfg.letterMm, penDown);
-  if (n == 0) { reply(src, "ERR:no hay letras para escribir: usa A-Z, N, 0-9 y . , ! ? - + :"); return; }
-  abortTest("llego un texto para escribir");
+// Qué está haciendo, para los avisos: «el robot esta escribiendo».
+const char* jobText() { return job == JOB_WRITE ? "el robot esta escribiendo" : "el robot va hacia un punto"; }
+
+// Un trabajo nuevo: lo pide [src], que queda como conductor hasta que termina. false si no se puede empezar.
+bool canStartJob(Src src) {
+  if (busy()) { reply(src, String("ERR:") + jobText() + ": toca Parar primero"); return false; }
+  if (driver != SRC_NONE && driver != src) { reply(src, "ERR:otro telefono esta manejando el carrito"); return false; }
+  return true;
+}
+
+void beginJob(Src src, Job kind) {
   stopNow(nullptr);
   wheels.reiniciar();
-  writing = true;
-  writeStepBusy = false;
+  job = kind;
+  jobStepBusy = false;
+  jobSrc = driver = src;
+  reportJob();
+}
+
+// ESCRIBIR:<texto>. Con la hoja y el 0,0, primero revisa que el texto quepa desde donde está el robot.
+void startWriting(Src src, const String& text) {
+  if (!canStartJob(src)) return;
+  int n = writer.empezar(text.c_str(), cfg.letterMm, penDown);
+  if (n == 0) { reply(src, "ERR:no hay letras para escribir: usa A-Z, N, 0-9 y . , ! ? - + :"); return; }
+  if (fenceOn() && !cabeEnHoja(writer.caja(), poseX, poseY, poseTh, paperW, paperH)) {
+    reply(src, "ERR:no cabe en la hoja: mueve el robot o achica las letras");
+    return;
+  }
+  abortTest("llego un texto para escribir");
   writeLetter = 0;
   writeTotal = n;
-  writerSrc = driver = src;
+  beginJob(src, JOB_WRITE);
   sendLine("OK:ESCRIBIENDO " + text);
 }
 
-// Detiene la escritura y sube el marcador. [why] = el motivo para el ERR, o nullptr si se pidió parar.
-void stopWriting(const char* why) {
-  if (!writing) return;
-  writing = false;
-  writeStepBusy = false;
+// IR:x,y (y ALINEAR, que es ir a donde ya está): con el marcador arriba, hasta ese punto, mirando hacia +x.
+void startGoto(Src src, double hx, double hy) {
+  if (!canStartJob(src)) return;
+  if (!originSet) { reply(src, "ERR:primero pon el robot en la esquina de la hoja y toca 0,0 (CERO)"); return; }
+  if (paperSet() && (hx < -.5 || hy < -.5 || hx > paperW + .5 || hy > paperH + .5)) {
+    reply(src, "ERR:ese punto queda fuera de la hoja");
+    return;
+  }
+  abortTest("el robot va hacia un punto");
+  gotoLen = gotoAt = 0;
+  if (penDown) gotoPlan[gotoLen++] = {PASO_LAPIZ, 0};
+  gotoLen += planIr(poseX, poseY, poseTh, hx, hy, gotoPlan + gotoLen);
+  beginJob(src, JOB_GOTO);
+  sendLine("OK:IR " + String(lround(hx)) + "," + String(lround(hy)));
+}
+
+void handleGoto(Src src, const String& arg) {   // 150,80
+  int xy[2];
+  if (parseList(arg, xy, 2) != 2) { reply(src, "ERR:usa IR:x,y en mm desde el 0,0, por ejemplo IR:150,80"); return; }
+  startGoto(src, xy[0], xy[1]);
+}
+
+// Detiene el trabajo y sube el marcador. [why] = el motivo para el ERR, o nullptr si se pidió parar.
+void stopJob(const char* why) {
+  if (!busy()) return;
+  const bool wasWriting = job == JOB_WRITE;
+  job = JOB_NONE;
+  jobStepBusy = false;
   haltWheels();
   movePen(false);
-  reportWriting();
-  caraWrite(-1, 0);
-  sendLine(why ? String("ERR:escritura cancelada: ") + why : String("OK:escritura cancelada"));
+  reportJob();
+  if (wasWriting) caraWrite(-1, 0);
+  const char* what = wasWriting ? "escritura cancelada" : "camino cancelado";
+  sendLine(why ? String("ERR:") + what + ": " + why : String("OK:") + what);
   releaseDriver();
 }
 
-// Paso a paso: espera a que termine el trazo (o el lápiz) y pide el siguiente al planificador.
-void loopWriting() {
-  if (!writing) return;
-  if (writeStepBusy) {
+bool nextJobStep(Paso& p) {
+  if (job == JOB_WRITE) return writer.siguiente(p);
+  if (gotoAt >= gotoLen) return false;
+  p = gotoPlan[gotoAt++];
+  return true;
+}
+
+void finishJob() {
+  const bool wasWriting = job == JOB_WRITE;
+  job = JOB_NONE;
+  reportJob();
+  savePen();
+  if (wasWriting) caraWrite(0, writeTotal);
+  sendLine(wasWriting ? "OK:ESCRITO" : "OK:LLEGO");
+  releaseDriver();
+}
+
+// Paso a paso: espera a que termine el trazo, el giro o el lápiz, y pide el siguiente.
+void loopJob() {
+  if (!busy()) return;
+  if (jobStepBusy) {
     if (!moveDone() || penBusy()) return;
-    writeStepBusy = false;
+    jobStepBusy = false;
   }
   Paso p;
-  if (!writer.siguiente(p)) {
-    writing = false;
-    reportWriting();
-    savePen();
-    caraWrite(0, writeTotal);
-    sendLine("OK:ESCRITO");
-    releaseDriver();
-    return;
-  }
+  if (!nextJobStep(p)) { finishJob(); return; }
   switch (p.tipo) {
     case PASO_LETRA:
       writeLetter = (int)p.valor;
-      reportWriting();
+      reportJob();
       caraWrite(writeLetter, writeTotal);
       return;
     case PASO_LAPIZ:
       movePen(p.valor > .5f);
-      writeStepBusy = true;
+      jobStepBusy = true;
       return;
     case PASO_GIRO:
     case PASO_AVANCE: {
       int32_t l, r;
       wheels.pasos(p, Medidas{(float)cfg.wheelMm, (float)cfg.trackMm}, l, r);
       startMove(l, r);
-      writeStepBusy = true;
+      jobStepBusy = true;
       return;
     }
   }
@@ -597,11 +785,11 @@ void warnOnce(Src src, const char* text) {
 
 // Llegó joystick o acelerador. Parar vale desde cualquier origen; moverse, solo desde el conductor
 // (el primero que se mueve cuando no hay otro). Solo el conductor renueva el watchdog de señal.
-// Escribiendo, el joystick no cuenta (ni para parar: la app manda «quieto» al abrir el panel).
-// Devuelve false si la orden se ignora.
+// Con un trabajo (escribir, ir a un punto), el joystick no cuenta (ni para parar: la app manda «quieto» al abrir
+// el panel). Devuelve false si la orden se ignora.
 bool acceptDrive(Src src, bool stop) {
-  if (writing) {
-    if (!stop) warnOnce(src, "ERR:el robot esta escribiendo: toca Parar para manejar");
+  if (busy()) {
+    if (!stop) warnOnce(src, (String("ERR:") + jobText() + ": toca Parar para manejar").c_str());
     return false;
   }
   abortTest(stop ? "llego una orden de parar" : "llego una orden de manejo");
@@ -632,8 +820,9 @@ void sourceChanged(Src s) {
   clearLine(s);
   waitNeutral &= ~(1 << s);
   warnedSrc &= ~(1 << s);
-  if (writing && s == writerSrc) stopWriting("se desconecto el telefono que lo pidio");
-  if (writing) return;   // escribe para otro teléfono: sigue
+  watchFace(s, false);
+  if (busy() && s == jobSrc) stopJob("se desconecto el telefono que lo pidio");
+  if (busy()) return;    // trabaja para otro teléfono: sigue
   if (testRunning()) {
     if (s == testSrc) abortTest("se desconecto el telefono que la pidio");
     return;
@@ -648,7 +837,7 @@ void sourceChanged(Src s) {
 // Watchdog de señal: solo lo renuevan el joystick y el acelerador del conductor (no PING ni otras
 // órdenes, así un teléfono en segundo plano que solo manda PING no deja el robot andando).
 void loopSafety(uint32_t now) {
-  if (writing || testRunning() || now - lastRx <= SIGNAL_TIMEOUT_MS) return;   // escribir y probar no necesitan señal
+  if (busy() || testRunning() || now - lastRx <= SIGNAL_TIMEOUT_MS) return;   // los trabajos y la prueba no necesitan señal
   if (moving() || joyX || joyY || throttle) { stopNow("sin señal: el carrito se detuvo"); lockDriving(); }
   if (driver != SRC_NONE) releaseDriver();
 }
@@ -766,7 +955,9 @@ void sync() {
   sendLine("V" + String(VPIN_INVERT) + ":" + invertString());
   sendLine("V" + String(VPIN_MEASURES) + ":" + measuresString());
   reportPen();       // la app muestra el lápiz y la escritura porque la placa los dice
-  reportWriting();
+  reportJob();
+  reportPaper();
+  reportPose();
 }
 
 String pinList(const int8_t* pins, int n) {
@@ -798,10 +989,11 @@ void startTestPart(int k) {
 }
 
 void startTest(Src src) {
-  if (writing) { reply(src, "ERR:espera a que termine de escribir (o toca Parar)"); return; }
+  if (busy()) { reply(src, String("ERR:") + jobText() + ": espera a que termine (o toca Parar)"); return; }
   if (testRunning()) { abortTest("se pidio TEST otra vez mientras corria"); return; }
   stopNow(nullptr);
   releaseDriver();
+  forgetOrigin();   // las ruedas giran en el aire: la cuenta de dónde está deja de valer
   testSrc = src;
   sendLine("OK:PRUEBA cada rueda debe girar hacia ADELANTE y el lapiz bajar y subir");
   startTestPart(0);
@@ -864,7 +1056,7 @@ String checkPins(const int* pins, int n, const String& self) {
 
 // Antes de cambiar pines: nada se mueve con los viejos.
 void stopEverything(const char* why) {
-  stopWriting(why);
+  stopJob(why);
   abortTest(why ? why : "se pidio parar");
   stopNow(nullptr);
 }
@@ -926,13 +1118,32 @@ void handleMeasures(const String& v) {      // 65,120,30,1000
     sendLine("ERR:V30 es rueda,eje,letra,lapiz en mm, mm, mm y ms: por ejemplo 65,120,30,1000");
     return;
   }
-  if (writing) {
-    sendLine("ERR:espera a que termine de escribir para cambiar las medidas");
+  if (busy()) {
+    sendLine("ERR:espera a que el robot termine para cambiar las medidas");
   } else if (m[0] != cfg.wheelMm || m[1] != cfg.trackMm || m[2] != cfg.letterMm || m[3] != cfg.penMs) {
     cfg.wheelMm = m[0]; cfg.trackMm = m[1]; cfg.letterMm = m[2]; cfg.penMs = m[3];
     saveConfig();
   }
   sendLine("V" + String(VPIN_MEASURES) + ":" + measuresString());
+}
+
+void handlePaper(const String& v) {         // 279,216  o  0,0
+  int wh[2];
+  const bool none = parseList(v, wh, 2) == 2 && wh[0] == 0 && wh[1] == 0;
+  if (!none && (parseList(v, wh, 2) != 2 || wh[0] < 50 || wh[0] > 2000 || wh[1] < 50 || wh[1] > 2000)) {
+    sendLine("ERR:V32 es ancho,alto de la hoja en mm (de 50 a 2000), por ejemplo 279,216; o 0,0 para quitarla");
+    return;
+  }
+  if (wh[0] != paperW || wh[1] != paperH) {
+    paperW = wh[0];
+    paperH = wh[1];
+    fenceWarned = false;
+    prefs.begin("carro", false);
+    prefs.putUShort("hojaW", paperW);
+    prefs.putUShort("hojaH", paperH);
+    prefs.end();
+  }
+  reportPaper();
 }
 
 // Con el seguro puesto: anota si este control llegó en cero y quita el seguro cuando los dos lo hicieron.
@@ -983,7 +1194,7 @@ void handleOta(Src src, const String& arg) {
 // Órdenes que mueven algo: mientras llega una versión nueva no se aceptan.
 bool movesSomething(const String& up) {
   return up == "TEST" || up == "FABRICA" || up.startsWith("MOTOR:") || up.startsWith("LAPIZ:") ||
-         up.startsWith("ESCRIBIR:") || up.startsWith("V" + String(VPIN_JOY) + ":") ||
+         up.startsWith("ESCRIBIR:") || up.startsWith("IR:") || up == "ALINEAR" || up.startsWith("V" + String(VPIN_JOY) + ":") ||
          up.startsWith("V" + String(VPIN_THROTTLE) + ":") || up.startsWith("V" + String(VPIN_PEN) + ":");
 }
 
@@ -1004,6 +1215,14 @@ void handleLine(Src src, String line) {
   if (otaActive() && movesSomething(up)) { warnOnce(src, OTA_BUSY); return; }   // quieto mientras llega la versión nueva
   if (up == "PARAR") { stopEverything(nullptr); reply(src, "OK:PARADO"); return; }
   if (up.startsWith("ESCRIBIR:")) { startWriting(src, line.substring(9)); return; }
+  if (up.startsWith("IR:")) { handleGoto(src, line.substring(3)); return; }
+  if (up == "ALINEAR") { startGoto(src, poseX, poseY); return; }
+  if (up == "CERO") {
+    if (busy()) { reply(src, String("ERR:") + jobText() + ": espera a que termine (o toca Parar)"); return; }
+    setOrigin();
+    return;
+  }
+  if (up == "CARA:1" || up == "CARA:0") { watchFace(src, up == "CARA:1"); return; }
   if (up == "TEST") { startTest(src); return; }
   if (up == "PINES") { showPins(); return; }
   if (up == "FABRICA") {
@@ -1054,7 +1273,7 @@ void handleLine(Src src, String line) {
       }
       reverseGear = n != 0; computeTargets(); sendLine("V" + String(VPIN_REVERSE) + ":" + String(reverseGear ? 1 : 0)); return;
     case VPIN_PEN:
-      if (writing) { reply(src, "ERR:el robot esta escribiendo: el lapiz lo maneja el"); reportPen(); return; }
+      if (busy()) { reply(src, String("ERR:") + jobText() + ": el lapiz lo maneja el"); reportPen(); return; }
       if (driver != SRC_NONE && driver != src) { warnOnce(src, "ERR:otro telefono esta manejando el carrito"); reportPen(); return; }
       abortTest("se movio el lapiz");
       if ((n != 0) == penDown) reportPen();   // ya estaba así: igual se confirma
@@ -1062,6 +1281,7 @@ void handleLine(Src src, String line) {
       return;
     case VPIN_INVERT: handleInvert(v); return;
     case VPIN_MEASURES: handleMeasures(v); return;
+    case VPIN_PAPER: handlePaper(v); return;
     default: sendLine("ERR:V" + String(vpin) + " no existe en el robot"); return;
   }
 }
@@ -1264,13 +1484,51 @@ void reply(Src src, const String& line) {
 #endif
 }
 
-// Aviso para todos: el Monitor Serie y cada teléfono que ya entregó la clave.
-void sendLine(const String& line) {
-  Serial.println("-> " + line);
+// Aviso para cada teléfono que ya entregó la clave, sin eco en el Monitor Serie (lo que sale muy seguido).
+void sendQuiet(const String& line) {
   if (authed[SRC_BLE]) bleSend(line + "\n");
 #if USE_WIFI
   if (authed[SRC_TCP] && tcpClient.connected()) rawSend(tcpClient, line + "\n");
 #endif
+}
+
+// Aviso para todos: el Monitor Serie y cada teléfono que ya entregó la clave.
+void sendLine(const String& line) {
+  Serial.println("-> " + line);
+  sendQuiet(line);
+}
+
+// ============ LA CARA EN LA APP ============
+// La app pide verla con CARA:1 y deja de verla con CARA:0 (o al desconectarse). Mientras tanto le llegan los
+// cambios de la cara (V33) y de su mensaje (V34), sin eco en el Monitor Serie (salen varias veces por segundo).
+uint8_t faceWatch = 0;       // quién la mira: bit 1 << Src
+String faceSent, labelSent;
+uint32_t faceSentAt = 0;
+
+void faceSend(const String& line) {
+  const String out = line + "\n";
+  if ((faceWatch & (1 << SRC_BLE)) && authed[SRC_BLE]) bleSend(out);
+#if USE_WIFI
+  if ((faceWatch & (1 << SRC_TCP)) && authed[SRC_TCP] && tcpClient.connected()) rawSend(tcpClient, out);
+#endif
+  if (faceWatch & (1 << SRC_SERIAL)) Serial.println(line);
+}
+
+void watchFace(Src src, bool on) {
+  const uint8_t bit = 1 << src;
+  if (on == ((faceWatch & bit) != 0)) return;
+  faceWatch = on ? faceWatch | bit : faceWatch & ~bit;
+  faceSent = labelSent = "";   // quien empieza a mirar recibe todo de nuevo
+  faceSentAt = 0;
+}
+
+void loopFace(uint32_t now) {
+  if (!faceWatch || now - faceSentAt < FACE_REPORT_MS) return;
+  faceSentAt = now;
+  const String label = caraLabel();
+  if (label != labelSent) { labelSent = label; faceSend("V" + String(VPIN_FACE_LABEL) + ":" + label); }
+  const String state = caraState();
+  if (state != faceSent) { faceSent = state; faceSend("V" + String(VPIN_FACE) + ":" + state); }
 }
 
 // ============ PROGRAMA PRINCIPAL ============
@@ -1278,6 +1536,7 @@ void setup() {
   loadConfig();
   setupAll();            // ruedas quietas y lápiz detenido lo antes posible
   loadPen();
+  loadPaper();
   if (!pinInUse(BOOT_PIN)) pinMode(BOOT_PIN, INPUT_PULLUP);   // botón BOOT: 5 s presionado borra la clave
   loadKey();
 
@@ -1306,11 +1565,13 @@ void loop() {
   uint32_t now = millis();   // después de leer: lastRx nunca queda «en el futuro»
   loopSafety(now);
   loopTest(now);
-  loopWriting();
+  loopJob();
   loopMotion(now);
+  loopPose(now);
   loopPen(now);
   loopResetButton(now);
   String otaNews = otaLoop(now);
   if (otaNews.length()) otaReply(otaNews);
   caraLoop(now);
+  loopFace(now);
 }
